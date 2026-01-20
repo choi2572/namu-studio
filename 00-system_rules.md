@@ -33,7 +33,7 @@
 
 ## 1. Core Concepts & Terminology (Strict)
 
-These terms must be used consistently.
+### These terms must be used consistently.
 	•	Workflow: A DAG definition of execution logic
 	•	Workflow Version: Immutable published snapshot of a workflow
 	•	Run: A single execution instance of a workflow version
@@ -57,7 +57,7 @@ These terms must be used consistently.
 	    •	Triggers actual robot execution
 	    •	Must be explicit and intentional
 
-> **Replay ≠ Run**
+> **Replay ≠ Run**.  
 > Confusing these is a critical design error.
 
 ---
@@ -94,7 +94,7 @@ These terms must be used consistently.
 
 ## 3.1 Screen Roles
 
-**Dashboard / Workflow List**
+### Dashboard / Workflow List
 	•	Primary entry point
 	•	Shows:
 	    •	workflow list
@@ -104,14 +104,14 @@ These terms must be used consistently.
 	    •	DRAFT workflow → Editor
 	    •  	PUBLISHED workflow → latest run Monitor
 
-**Workflow Editor**
+### Workflow Editor
 	•	Canvas-based DAG editor
 	•	Purpose: definition & configuration
 	•	Save ≠ Publish
 	•	Publish creates a new immutable version
 	•	Validation errors block Publish
 
-**Run Monitor**
+### Run Monitor
 	•	Purpose: observation & debugging
 	•	Supports:
 	    •	live execution view
@@ -121,7 +121,7 @@ These terms must be used consistently.
 	    •	Debug panel (right)
 	    •	Timeline (bottom)
 
-**Run History**
+### Run History
 	•	Global, time-ordered list of runs
 	•	Read-only
 	•	Row click → Run Monitor (replay mode)
@@ -146,9 +146,9 @@ These terms must be used consistently.
 
 ## 5. Validation Rules (Editor Contract)
 
-Validation errors must be surfaced before Publish.
+Validation errors must be surfaced before Publish.  
 
-**Required Rules**
+### Required Rules
 	•	Exactly one Start node
 	•	Start node has no incoming edges
 	•	No dangling nodes
@@ -160,7 +160,7 @@ Validation errors must be surfaced before Publish.
 	    •	both branches connected
 	•	Workflow must be a DAG (no cycles)
 
-**UI Requirement**
+### UI Requirement
 	•	Validation errors shown via:
 	    •  	bottom-right floating indicator
 	    •	expandable list
@@ -170,7 +170,7 @@ Validation errors must be surfaced before Publish.
 
 ## 6. Backend API Surface (Conceptual Only)
 
-This section defines roles, not schemas.
+### This section defines roles, not schemas.
 	•	Workflow CRUD
 	•	Workflow versioning
 	•	Run execution trigger
@@ -208,7 +208,7 @@ This section defines roles, not schemas.
 	•	Parallel allowed (M1: 2 branches only)
 	•	Condition logic expressed via edge labels
 
-> **Edges represent control flow only.**
+> **Edges represent control flow only.**.  
 > **Data binding is expressed inside node parameters.**
 
 ---
@@ -227,7 +227,7 @@ This section defines roles, not schemas.
 
 ## 10. M1 Scope Constraints (Hard Limits)
 
-**Explicitly NOT in M1**
+### Explicitly NOT in M1
 	•	Undo / Redo
 	•	Nested workflows
 	•	Dynamic skill loading
@@ -235,7 +235,7 @@ This section defines roles, not schemas.
 	•	Advanced condition builders
 	•	Graph auto-layout engines
 
-**Explicitly IN M1**
+### Explicitly IN M1
 	•	Manual drag & drop
 	•	Fixed layouts
 	•	Simple node naming
@@ -254,5 +254,5 @@ This section defines roles, not schemas.
 
 ## 12. Final Statement
 
-> This document defines the **system’s invariants.**
+> This document defines the **system’s invariants.**.  
 > Any implementation that violates these rules is considered incorrect.
