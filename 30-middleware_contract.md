@@ -1,292 +1,322 @@
-# ⚙️ Middleware Contract  
-## Backend ↔ Execution Engine (v0)
+# ⚙️ Middleware Contract (v1)  
+## Backend ↔ Execution Engine (WebSocket-based)
 
-> This document defines the **contractual interaction** between  
-> the Backend (Source of Truth) and the Middleware (Execution Engine).  
+> This document defines the **WebSocket-based contract** between  
+> Backend (Source of Truth) and Middleware (Execution Engine).  
 >  
-> This document must comply with:
+> This contract must comply with:
 > - `00_system_rules.md`
 > - `10_backend_api.md`
 > - `20_data_model.md`
 
 ---
 
-## 0. Purpose of This Document
+## 0. Purpose
 
-This document defines:
+This document specifies:
 
-- What **Backend may ask Middleware to do**
-- What **Middleware must guarantee in response**
+- How Backend **subscribes** to execution events
+- How Middleware **streams execution state changes**
+- How **event loss, reconnection, and resume** are handled
 - What **must never happen** across this boundary
 
-This is a **behavioral contract**, not an implementation guide.
+This is a **behavioral and semantic contract**, not an implementation guide.
 
 ---
 
 ## 1. Responsibility Boundary (Non-Negotiable)
 
-### Backend Responsibilities
+### Backend
 - Owns **all persisted state**
 - Owns:
   - run lifecycle
   - node lifecycle
   - execution history
-- Polls middleware for execution state
-- Never infers or fabricates execution state
+- Initiates **all connections**
+- Stores and deduplicates events
+- Never infers missing execution state
 
-### Middleware Responsibilities
-- Executes workflow definitions
+### Middleware
+- Executes workflow DSL
 - Evaluates:
   - condition nodes
-  - parallel execution
+  - parallel semantics
 - Maintains **in-memory execution state**
-- Responds truthfully to backend polling
+- Streams execution events on request
+- Never persists authoritative history
 
 ### Absolute Rule
-> **Middleware never pushes state.  
-> Backend always pulls state.**
+> **Middleware never initiates communication.  
+> Backend always connects and subscribes.**
 
 ---
 
-## 2. Execution Lifecycle Overview
+## 2. Transport Overview
 
+- Transport: **WebSocket**
+- Direction:
+  - Backend → Middleware: command & subscription
+  - Middleware → Backend: execution events
+- Encoding: **JSON**
+- Connection scope:
+  - One active WebSocket per middleware instance
+  - One active run at a time (M1 assumption)
+
+---
+
+## 3. Event Model (Core)
+
+### 3.1 Event Sequence (`seq`)
+
+- Every execution event has:
+  - `seq` (monotonically increasing integer)
+- `seq` is scoped per run
+- `seq` ordering defines **canonical event order**
+
+**Guarantees**
+- No two events share the same `seq`
+- Events are immutable once emitted
+
+---
+
+### 3.2 Delivery Semantics
+
+- **At-least-once delivery**
+- Backend must:
+  - Deduplicate events by `seq`
+  - Persist events in order
+- Middleware must:
+  - Be able to resend events after reconnection
+
+---
+
+## 4. WebSocket Connection Lifecycle
+
+### 4.1 Connect
+Backend opens WebSocket connection to middleware.
+
+No execution starts implicitly on connect.
+
+---
+
+### 4.2 Subscribe (Resume-aware)
+
+Backend sends a subscription message.
+
+**Message**
+```json
+{
+  "type": "SUBSCRIBE",
+  "run_id": "run-123",
+  "after_seq": 42
+}
 ```
-Backend                     Middleware
-   |                             |
-   | StartExecution               |
-   |---------------------------->|
-   |                             |
-   |   (execution starts)        |
-   |                             |
-   | GetExecutionStatus (poll)   |
-   |---------------------------->|
-   |                             |
-   | <----- current state -------|
-   |                             |
-   |   (repeat until finished)   |
+
+**Semantics**
+- `after_seq` = last event `seq` already persisted by backend
+- Middleware must stream events with `seq > after_seq`
+
+---
+
+### 4.3 Subscribed Acknowledgement
+
+Middleware responds once:
+
+```json
+{
+  "type": "SUBSCRIBED",
+  "run_id": "run-123",
+  "starting_seq": 43
+}
 ```
 
 ---
 
-## 3. Required Middleware Capabilities
+### 4.4 Event Streaming
 
-### 3.1 StartExecution
+Middleware streams execution events:
+
+```json
+{
+  "type": "RUN_EVENT",
+  "run_id": "run-123",
+  "seq": 43,
+  "timestamp": "...",
+  "event_type": "NODE_STARTED",
+  "state_name": "PickObject",
+  "payload": { ... }
+}
+```
+
+**Rules**
+- Events must be sent in ascending `seq` order
+- Middleware may batch or flush immediately
+- Backend must persist before UI exposure
+
+---
+
+### 4.5 Connection Loss & Resume
+
+If WebSocket disconnects:
+
+1. Backend retains `last_seq` from DB
+2. Backend reconnects
+3. Backend re-sends `SUBSCRIBE` with `after_seq=last_seq`
+4. Middleware resumes streaming
+
+**Guarantee**
+> No execution event may be permanently lost if backend reconnects with a valid `after_seq`.
+
+---
+
+## 5. Required Message Types
+
+### Backend → Middleware
+
+| Type | Purpose |
+|---|---|
+| `SUBSCRIBE` | Subscribe or resume event stream |
+| `START_EXECUTION` | Start real execution |
+| `CANCEL_EXECUTION` | Cancel active run |
+| `RESUME_WAIT` | Resume WAIT node with event payload |
+| `PING` | (Optional) keepalive |
+
+---
+
+### Middleware → Backend
+
+| Type | Purpose |
+|---|---|
+| `SUBSCRIBED` | Subscription acknowledgement |
+| `RUN_EVENT` | Execution state change |
+| `ERROR` | Execution or protocol error |
+| `PONG` | (Optional) keepalive |
+
+---
+
+## 6. Execution Control Messages
+
+### 6.1 START_EXECUTION
+
+Sent only once per run.
+
+```json
+{
+  "type": "START_EXECUTION",
+  "run_id": "run-123",
+  "workflow_dsl": { ... },
+  "run_input": { ... }
+}
+```
+
+**Rules**
+- Must be idempotent
+- Middleware must reject duplicate starts
+
+---
+
+### 6.2 CANCEL_EXECUTION
+
+```json
+{
+  "type": "CANCEL_EXECUTION",
+  "run_id": "run-123",
+  "reason": "user_cancel"
+}
+```
+
+---
+
+### 6.3 RESUME_WAIT
+
+```json
+{
+  "type": "RESUME_WAIT",
+  "run_id": "run-123",
+  "state_name": "WaitForSignal",
+  "event_payload": { ... }
+}
+```
+
+---
+
+## 7. Event Types (Canonical)
+
+### Run-level
+- `RUN_CREATED`
+- `RUN_STARTED`
+- `RUN_WAITING`
+- `RUN_SUCCEEDED`
+- `RUN_FAILED`
+- `RUN_CANCELED`
+
+### Node-level
+- `NODE_STARTED`
+- `NODE_WAITING`
+- `NODE_SUCCEEDED`
+- `NODE_FAILED`
+- `NODE_SKIPPED`
+- `NODE_CANCELED`
+
+### External / Safety
+- `EXTERNAL_EVENT_RECEIVED`
+- `SAFETY_INTERRUPT`
+
+---
+
+## 8. Snapshot Reconciliation (Safety Net)
+
+Even with streaming, backend may periodically call:
+
+- `GetExecutionSnapshot(run_id)` (HTTP or WS request/response)
 
 **Purpose**
-- Start real execution of a workflow
+- Detect bugs or missed events
+- Reconcile long-lived WAIT states
 
-**Called By**
-- Backend only
-
-**Input (conceptual)**
-- `run_id`
-- `workflow_dsl_json`
-- `run_input_json`
-- (optional) execution options
-
-**Middleware Guarantees**
-- Execution is uniquely identified by `run_id`
-- Execution does not start twice for the same `run_id`
-- Any future state query for this run must be resolvable
-
-**Forbidden**
-- Middleware generating its own run identifiers
-- Middleware mutating workflow DSL
+**Rule**
+- Snapshot **never replaces event log**
+- Snapshot is only corrective
 
 ---
 
-### 3.2 GetExecutionStatus (Polling)
-
-**Purpose**
-- Retrieve the **current execution snapshot**
-
-**Called By**
-- Backend periodically
-
-**Returns (conceptual)**
-- run status
-- per-node status summary
-- current active node(s)
-- indication of WAITING states
-
-**Middleware Guarantees**
-- Returned state reflects actual execution state
-- State transitions are monotonic
-- No fabricated or inferred state
-
-**Notes**
-- Backend may call this repeatedly
-- Middleware must be idempotent and cheap
-
----
-
-### 3.3 GetNodeDebugBundle
-
-**Purpose**
-- Retrieve detailed debug context for a node
-
-**Called By**
-- Backend (on-demand)
-
-**Returns**
-- input data
-- output data
-- internal state snapshot
-- feedback / error / decision info
-
-**Middleware Guarantees**
-- Debug data corresponds to the **current or final state** of the node
-- Data is immutable once node is finished
-
----
-
-### 3.4 CancelExecution
-
-**Purpose**
-- Stop an active execution
-
-**Called By**
-- Backend only
-
-**Input**
-- `run_id`
-- cancel reason
-
-**Middleware Guarantees**
-- Execution halts as soon as safely possible
-- Subsequent status polls reflect cancellation
-- No further node execution after cancel
-
----
-
-### 3.5 ResumeWait
-
-**Purpose**
-- Resume a workflow paused at a WAIT node
-
-**Called By**
-- Backend only (after receiving an external event)
-
-**Input**
-- `run_id`
-- `state_name`
-- `event_payload`
-
-**Middleware Guarantees**
-- Resumes only if the node is in WAITING state
-- Rejects resume if state is invalid
-- Event payload is provided to the node logic
-
----
-
-## 4. Condition & Parallel Semantics
-
-### 4.1 Condition Nodes
-
-- Evaluated entirely by middleware
-- Exactly one outgoing branch is selected
-- Selection is final and deterministic
-
-**Returned to Backend via**
-- Node status
-- decision info in debug payload
-
----
-
-### 4.2 Parallel Execution (M1)
-
-- Exactly two branches
-- Both branches start concurrently
-- Join semantics:
-  - `ALL_SUCCESS`
-  - Fail-fast if any branch fails
-
-**Middleware Guarantees**
-- Branch executions are independent
-- Join completes only when both branches finish
-- Non-selected or canceled nodes are explicitly reported
-
----
-
-## 5. WAIT / Event Semantics
-
-### WAIT Node
-- Middleware pauses execution
-- Execution state becomes `WAITING`
-- Middleware must clearly indicate:
-  - which node is waiting
-  - what kind of event is expected (via debug payload)
-
-### Resume
-- Backend decides **when** to resume
-- Middleware decides **how** to continue execution
-
----
-
-## 6. Error & Failure Semantics
-
-### Execution Failure
-- Node-level failure propagates to run failure (unless otherwise specified)
-- Middleware must report:
-  - failure code
-  - failure message
-
-### Safety Interrupts
-- Treated as execution failure
-- Clearly distinguishable via failure code
-
----
-
-## 7. Replay Boundary (Critical)
+## 9. Replay Boundary (Critical)
 
 > **Middleware is never involved in Replay.**
 
-- Replay does not:
-  - call StartExecution
-  - call GetExecutionStatus
-  - call GetNodeDebugBundle
-- Replay is rendered exclusively from backend-stored data
+- No WebSocket calls during replay
+- Replay uses:
+  - persisted `run_events`
+  - `node_runs`
+  - workflow DSL
 
-Any middleware call during replay is a **contract violation**.
-
----
-
-## 8. Idempotency & Robustness
-
-Middleware must support:
-
-- Repeated polling with same `run_id`
-- Backend restarts mid-execution
-- Temporary polling gaps
-
-Middleware must **not** assume:
-- continuous connectivity
-- exactly-once polling
+Violation of this rule is a contract breach.
 
 ---
 
-## 9. Forbidden Behaviors (Explicit)
+## 10. Forbidden Behaviors
 
-- ❌ Middleware pushing state to backend
-- ❌ Middleware creating run IDs
-- ❌ Middleware mutating published workflow definitions
-- ❌ Middleware triggering execution on replay
-- ❌ Middleware inferring backend state
-
----
-
-## 10. Mental Model (One Sentence)
-
-> **Backend observes and records.  
-> Middleware executes and reports.  
-> Neither crosses the boundary.**
+- ❌ Middleware initiating WebSocket connections
+- ❌ Emitting events without `seq`
+- ❌ Reordering events
+- ❌ Triggering execution during replay
+- ❌ Backend mutating middleware state without explicit message
 
 ---
 
-## 11. Relationship to Other Documents
+## 11. Failure & Robustness Rules
 
-- Execution semantics: `00_system_rules.md`
-- API surface: `10_backend_api.md`
-- Persistence: `20_data_model.md`
-- Monitor & Replay behavior:
-  - `Run Monitor & Replay – Data Flow & Behavior`
+- Middleware restart:
+  - Must allow backend to resubscribe
+  - Must retain recent events (buffer) long enough to resume
+- Backend restart:
+  - Must recover `last_seq` from DB
+  - Must resubscribe before UI resumes live view
+
+---
+
+## 12. Mental Model (One Sentence)
+
+> **Backend subscribes and records.  
+> Middleware executes and streams.  
+> Events are the single source of truth for execution history.**
