@@ -1,8 +1,11 @@
-# ⚙️ Middleware Contract (v1)  
-## Backend ↔ Execution Engine (WebSocket-based)
+# ⚙️ Middleware Contract (v2)  
+## Backend ↔ Execution Engine (Hybrid: REST + WebSocket)
 
-> This document defines the **WebSocket-based contract** between  
+> This document defines the **hybrid contract** between  
 > Backend (Source of Truth) and Middleware (Execution Engine).  
+>  
+> - **Control Plane**: REST (commands & snapshots)  
+> - **Data Plane**: WebSocket (execution events)  
 >  
 > This contract must comply with:
 > - `00_system_rules.md`
@@ -15,25 +18,24 @@
 
 This document specifies:
 
-- How Backend **subscribes** to execution events
-- How Middleware **streams execution state changes**
+- How Backend **controls execution** via REST
+- How Backend **observes execution** via WebSocket
 - How **event loss, reconnection, and resume** are handled
 - What **must never happen** across this boundary
 
-This is a **behavioral and semantic contract**, not an implementation guide.
+This is a **semantic contract**, not an implementation guide.
 
 ---
 
 ## 1. Responsibility Boundary (Non-Negotiable)
 
 ### Backend
-- Owns **all persisted state**
-- Owns:
+- Source of Truth for:
   - run lifecycle
   - node lifecycle
   - execution history
-- Initiates **all connections**
-- Stores and deduplicates events
+- Initiates **all interactions**
+- Persists and deduplicates events
 - Never infers missing execution state
 
 ### Middleware
@@ -41,69 +43,162 @@ This is a **behavioral and semantic contract**, not an implementation guide.
 - Evaluates:
   - condition nodes
   - parallel semantics
-- Maintains **in-memory execution state**
-- Streams execution events on request
-- Never persists authoritative history
+- Maintains in-memory execution state
+- Exposes:
+  - REST APIs for control
+  - WebSocket for event streaming
+- Never owns authoritative history
 
 ### Absolute Rule
 > **Middleware never initiates communication.  
-> Backend always connects and subscribes.**
+> Backend always pulls or subscribes.**
 
 ---
 
 ## 2. Transport Overview
 
-- Transport: **WebSocket**
-- Direction:
-  - Backend → Middleware: command & subscription
-  - Middleware → Backend: execution events
-- Encoding: **JSON**
-- Connection scope:
-  - One active WebSocket per middleware instance
-  - One active run at a time (M1 assumption)
+### Control Plane (REST)
+Used for **commands and queries**.
+
+- Start execution
+- Cancel execution
+- Resume WAIT node
+- Get execution snapshot (optional safety net)
+
+### Data Plane (WebSocket)
+Used for **execution event streaming only**.
+
+- Node/run state changes
+- Timeline events
+- Resume-aware, seq-based
 
 ---
 
-## 3. Event Model (Core)
+## 3. Control Plane – REST APIs (Conceptual)
 
-### 3.1 Event Sequence (`seq`)
+> Endpoint names and payloads are conceptual.  
+> Exact schemas are defined elsewhere.
 
-- Every execution event has:
-  - `seq` (monotonically increasing integer)
-- `seq` is scoped per run
-- `seq` ordering defines **canonical event order**
+---
+
+### 3.1 StartExecution
+
+**Purpose**
+- Start real robot execution
+
+**Semantics**
+- Idempotent per `run_id`
+- Must not start if another run is already active (M1 constraint)
+
+**Input**
+- `run_id`
+- `workflow_dsl_json`
+- `run_input_json`
 
 **Guarantees**
-- No two events share the same `seq`
+- Execution is uniquely identified by `run_id`
+- Duplicate starts are rejected or ignored
+
+---
+
+### 3.2 CancelExecution
+
+**Purpose**
+- Stop an active execution
+
+**Input**
+- `run_id`
+- cancel reason
+
+**Guarantees**
+- Execution halts as soon as safely possible
+- Cancellation is reflected in subsequent events/snapshots
+
+---
+
+### 3.3 ResumeWait
+
+**Purpose**
+- Resume a workflow paused at a WAIT node
+
+**Input**
+- `run_id`
+- `state_name`
+- `event_payload`
+
+**Guarantees**
+- Resumes only if node is currently WAITING
+- Rejects invalid resumes
+
+---
+
+### 3.4 GetExecutionSnapshot (Optional but Recommended)
+
+**Purpose**
+- Safety net for reconciliation
+- Used sparingly (low frequency)
+
+**Returns**
+- run status
+- node status summary
+- current active node(s)
+
+**Rule**
+> Snapshot never replaces event log.  
+> It is corrective only.
+
+---
+
+## 4. Data Plane – WebSocket Event Stream
+
+### 4.1 Scope
+
+- One WebSocket connection per middleware instance
+- One active run at a time (M1 assumption)
+- WebSocket is **read-only from middleware’s perspective**
+  - No execution commands over WS
+
+---
+
+## 5. Event Model (Core)
+
+### 5.1 Event Sequence (`seq`)
+
+- Every execution event includes:
+  - `seq` (monotonically increasing integer)
+- `seq` is scoped per run
+- Defines canonical ordering
+
+**Guarantees**
+- No gaps are assumed
 - Events are immutable once emitted
 
 ---
 
-### 3.2 Delivery Semantics
+### 5.2 Delivery Semantics
 
 - **At-least-once delivery**
 - Backend must:
-  - Deduplicate events by `seq`
-  - Persist events in order
+  - Deduplicate by `seq`
+  - Persist events before exposing to UI
 - Middleware must:
-  - Be able to resend events after reconnection
+  - Support resending events after reconnect
 
 ---
 
-## 4. WebSocket Connection Lifecycle
+## 6. WebSocket Lifecycle
 
-### 4.1 Connect
-Backend opens WebSocket connection to middleware.
+### 6.1 Connect
+Backend opens WebSocket connection.
 
-No execution starts implicitly on connect.
+No implicit execution occurs.
 
 ---
 
-### 4.2 Subscribe (Resume-aware)
+### 6.2 Subscribe (Resume-aware)
 
-Backend sends a subscription message.
+Backend sends:
 
-**Message**
 ```json
 {
   "type": "SUBSCRIBE",
@@ -112,13 +207,13 @@ Backend sends a subscription message.
 }
 ```
 
-**Semantics**
-- `after_seq` = last event `seq` already persisted by backend
-- Middleware must stream events with `seq > after_seq`
+**Meaning**
+- Backend already has events up to `seq=42`
+- Middleware must stream events with `seq > 42`
 
 ---
 
-### 4.3 Subscribed Acknowledgement
+### 6.3 Subscription Acknowledgement
 
 Middleware responds once:
 
@@ -132,9 +227,7 @@ Middleware responds once:
 
 ---
 
-### 4.4 Event Streaming
-
-Middleware streams execution events:
+### 6.4 Event Message
 
 ```json
 {
@@ -149,19 +242,19 @@ Middleware streams execution events:
 ```
 
 **Rules**
-- Events must be sent in ascending `seq` order
-- Middleware may batch or flush immediately
-- Backend must persist before UI exposure
+- Events sent in ascending `seq`
+- Batching allowed
+- Backend persists immediately
 
 ---
 
-### 4.5 Connection Loss & Resume
+### 6.5 Reconnection & Resume
 
 If WebSocket disconnects:
 
-1. Backend retains `last_seq` from DB
+1. Backend reads `last_seq` from DB
 2. Backend reconnects
-3. Backend re-sends `SUBSCRIBE` with `after_seq=last_seq`
+3. Backend re-sends `SUBSCRIBE(after_seq=last_seq)`
 4. Middleware resumes streaming
 
 **Guarantee**
@@ -169,78 +262,7 @@ If WebSocket disconnects:
 
 ---
 
-## 5. Required Message Types
-
-### Backend → Middleware
-
-| Type | Purpose |
-|---|---|
-| `SUBSCRIBE` | Subscribe or resume event stream |
-| `START_EXECUTION` | Start real execution |
-| `CANCEL_EXECUTION` | Cancel active run |
-| `RESUME_WAIT` | Resume WAIT node with event payload |
-| `PING` | (Optional) keepalive |
-
----
-
-### Middleware → Backend
-
-| Type | Purpose |
-|---|---|
-| `SUBSCRIBED` | Subscription acknowledgement |
-| `RUN_EVENT` | Execution state change |
-| `ERROR` | Execution or protocol error |
-| `PONG` | (Optional) keepalive |
-
----
-
-## 6. Execution Control Messages
-
-### 6.1 START_EXECUTION
-
-Sent only once per run.
-
-```json
-{
-  "type": "START_EXECUTION",
-  "run_id": "run-123",
-  "workflow_dsl": { ... },
-  "run_input": { ... }
-}
-```
-
-**Rules**
-- Must be idempotent
-- Middleware must reject duplicate starts
-
----
-
-### 6.2 CANCEL_EXECUTION
-
-```json
-{
-  "type": "CANCEL_EXECUTION",
-  "run_id": "run-123",
-  "reason": "user_cancel"
-}
-```
-
----
-
-### 6.3 RESUME_WAIT
-
-```json
-{
-  "type": "RESUME_WAIT",
-  "run_id": "run-123",
-  "state_name": "WaitForSignal",
-  "event_payload": { ... }
-}
-```
-
----
-
-## 7. Event Types (Canonical)
+## 7. Canonical Event Types
 
 ### Run-level
 - `RUN_CREATED`
@@ -264,59 +286,47 @@ Sent only once per run.
 
 ---
 
-## 8. Snapshot Reconciliation (Safety Net)
+## 8. Replay Boundary (Critical)
 
-Even with streaming, backend may periodically call:
+> **Replay never interacts with middleware.**
 
-- `GetExecutionSnapshot(run_id)` (HTTP or WS request/response)
-
-**Purpose**
-- Detect bugs or missed events
-- Reconcile long-lived WAIT states
-
-**Rule**
-- Snapshot **never replaces event log**
-- Snapshot is only corrective
-
----
-
-## 9. Replay Boundary (Critical)
-
-> **Middleware is never involved in Replay.**
-
-- No WebSocket calls during replay
+- No REST calls
+- No WebSocket connections
 - Replay uses:
   - persisted `run_events`
   - `node_runs`
   - workflow DSL
 
-Violation of this rule is a contract breach.
+Any middleware interaction during replay is a contract violation.
+
+---
+
+## 9. Failure & Robustness Rules
+
+### Middleware Restart
+- Must allow:
+  - REST commands after restart
+  - WebSocket resubscription
+- Must retain recent events long enough for resume
+
+### Backend Restart
+- Must recover `last_seq` from DB
+- Must resubscribe before resuming live monitor
 
 ---
 
 ## 10. Forbidden Behaviors
 
-- ❌ Middleware initiating WebSocket connections
-- ❌ Emitting events without `seq`
+- ❌ Execution commands over WebSocket
+- ❌ Middleware pushing events without subscription
+- ❌ Events without `seq`
 - ❌ Reordering events
 - ❌ Triggering execution during replay
-- ❌ Backend mutating middleware state without explicit message
 
 ---
 
-## 11. Failure & Robustness Rules
+## 11. Mental Model (One Sentence)
 
-- Middleware restart:
-  - Must allow backend to resubscribe
-  - Must retain recent events (buffer) long enough to resume
-- Backend restart:
-  - Must recover `last_seq` from DB
-  - Must resubscribe before UI resumes live view
-
----
-
-## 12. Mental Model (One Sentence)
-
-> **Backend subscribes and records.  
-> Middleware executes and streams.  
-> Events are the single source of truth for execution history.**
+> **REST controls execution.  
+> WebSocket streams execution facts.  
+> Backend records everything.**
