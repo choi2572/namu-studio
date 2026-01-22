@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type {
   DragEvent,
   MouseEvent,
   PointerEvent as ReactPointerEvent
 } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
@@ -74,6 +75,13 @@ type EditorEdge = {
   from: string;
   fromPort: string;
   to: string;
+};
+
+type EditorViewJson = {
+  version: "v1";
+  nodes: EditorNode[];
+  edges: EditorEdge[];
+  canvas?: { width: number; height: number; zoom: number };
 };
 
 type DragState = {
@@ -257,6 +265,214 @@ function getCanvasBounds(
   );
   const maxY = Math.max(minY, canvasBase.height - nodeHeight - CANVAS_PADDING.y);
   return { minX, minY, maxX, maxY };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isValidEditorEdge(value: unknown): value is EditorEdge {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.from === "string" &&
+    typeof value.fromPort === "string" &&
+    typeof value.to === "string"
+  );
+}
+
+function isValidConditionExpression(value: unknown): value is ConditionExpression {
+  if (!isRecord(value)) return false;
+  const operator = value.operator;
+  return (
+    typeof value.id === "string" &&
+    (operator === null || operator === "AND" || operator === "OR") &&
+    typeof value.expression === "string"
+  );
+}
+
+function isValidEditorNode(value: unknown): value is EditorNode {
+  if (!isRecord(value)) return false;
+  if (typeof value.id !== "string" || typeof value.name !== "string") return false;
+  if (typeof value.kind !== "string" || !NODE_TYPES.includes(value.kind as NodeKind)) {
+    return false;
+  }
+  if (
+    !isRecord(value.position) ||
+    typeof value.position.x !== "number" ||
+    typeof value.position.y !== "number"
+  ) {
+    return false;
+  }
+  if (typeof value.isExpanded !== "boolean") return false;
+  if (!isRecord(value.params)) return false;
+  if (
+    value.conditionExpressions !== undefined &&
+    (!Array.isArray(value.conditionExpressions) ||
+      !value.conditionExpressions.every(isValidConditionExpression))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function parseEditorView(viewJson: Record<string, unknown>): EditorViewJson | null {
+  const rawNodes = viewJson.nodes;
+  const rawEdges = viewJson.edges;
+  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
+  if (!rawNodes.every(isValidEditorNode) || !rawEdges.every(isValidEditorEdge)) {
+    return null;
+  }
+  const rawCanvas = isRecord(viewJson.canvas) ? viewJson.canvas : null;
+  const canvas = rawCanvas
+    ? {
+        width:
+          typeof rawCanvas.width === "number" ? rawCanvas.width : CANVAS_DEFAULT.width,
+        height:
+          typeof rawCanvas.height === "number"
+            ? rawCanvas.height
+            : CANVAS_DEFAULT.height,
+        zoom: typeof rawCanvas.zoom === "number" ? rawCanvas.zoom : 1
+      }
+    : undefined;
+  return {
+    version: "v1",
+    nodes: rawNodes as EditorNode[],
+    edges: rawEdges as EditorEdge[],
+    canvas
+  };
+}
+
+function getNextIndexFromIds(ids: string[], prefix: string) {
+  const prefixToken = `${prefix}-`;
+  const numbers = ids
+    .filter((id) => id.startsWith(prefixToken))
+    .map((id) => Number(id.slice(prefixToken.length)))
+    .filter((value) => Number.isFinite(value));
+  return numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+}
+
+function buildStateNameMap(nodes: EditorNode[]) {
+  const usedNames = new Set<string>();
+  const nameMap = new Map<string, string>();
+  nodes.forEach((node) => {
+    const trimmed = node.name.trim();
+    const base = trimmed ? trimmed.replace(/[^A-Za-z0-9_]+/g, "_") : node.id;
+    const baseName = base || node.id;
+    let name = baseName;
+    let index = 1;
+    while (usedNames.has(name)) {
+      name = `${baseName}_${index}`;
+      index += 1;
+    }
+    usedNames.add(name);
+    nameMap.set(node.id, name);
+  });
+  return nameMap;
+}
+
+function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
+  if (nodes.length === 0) {
+    return {};
+  }
+  const stateNameMap = buildStateNameMap(nodes);
+  const edgesByFrom = new Map<string, EditorEdge[]>();
+  edges.forEach((edge) => {
+    if (!stateNameMap.has(edge.from) || !stateNameMap.has(edge.to)) return;
+    const list = edgesByFrom.get(edge.from) ?? [];
+    list.push(edge);
+    edgesByFrom.set(edge.from, list);
+  });
+  const startNode =
+    nodes.find((node) => node.kind === "flow_control.input") ?? nodes[0];
+  const states: Record<string, Record<string, unknown>> = {};
+  nodes.forEach((node) => {
+    const stateName = stateNameMap.get(node.id);
+    if (!stateName) return;
+    const outgoing = edgesByFrom.get(node.id) ?? [];
+    const getNext = (portKey: string) => {
+      const edge = outgoing.find((item) => item.fromPort === portKey);
+      if (!edge) return null;
+      return stateNameMap.get(edge.to) ?? null;
+    };
+    let state: Record<string, unknown>;
+    if (node.kind === "flow_control.output") {
+      state = { Type: "Succeed" };
+    } else if (node.kind === "flow_control.condition") {
+      const choices: Record<string, unknown>[] = [];
+      const trueTarget = getNext("true");
+      if (trueTarget) {
+        choices.push({
+          Variable: "$.condition",
+          BooleanEquals: true,
+          Next: trueTarget
+        });
+      }
+      const falseTarget = getNext("false");
+      if (falseTarget) {
+        choices.push({
+          Variable: "$.condition",
+          BooleanEquals: false,
+          Next: falseTarget
+        });
+      }
+      state = { Type: "Choice", Choices: choices };
+      if (node.conditionExpressions && node.conditionExpressions.length > 0) {
+        state.Expressions = node.conditionExpressions.map((expression) => ({
+          operator: expression.operator,
+          expression: expression.expression
+        }));
+      }
+    } else {
+      const next = getNext("next");
+      state = {
+        Type: node.kind === "flow_control.input" ? "Pass" : "Task",
+        Resource: node.kind,
+        Parameters: node.params
+      };
+      if (next) {
+        state.Next = next;
+      } else {
+        state.End = true;
+      }
+    }
+    state.Label = node.name;
+    states[stateName] = state;
+  });
+  return {
+    Comment: "Generated from editor",
+    StartAt: stateNameMap.get(startNode.id),
+    States: states
+  };
+}
+
+function buildViewJson(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  canvasBase: { width: number; height: number },
+  zoom: number
+): EditorViewJson {
+  return {
+    version: "v1",
+    nodes,
+    edges,
+    canvas: {
+      width: canvasBase.width,
+      height: canvasBase.height,
+      zoom
+    }
+  };
+}
+
+function downloadJsonFile(fileName: string, data: Record<string, unknown>) {
+  const payload = JSON.stringify(data, null, 2);
+  const blob = new Blob([payload], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function NodeCard({
@@ -557,6 +773,8 @@ function NodeCard({
 }
 
 export function EditorPage({ workflowId }: EditorPageProps) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const [showPalette, setShowPalette] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -576,6 +794,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const nextNodeIndex = useRef(1);
   const nextEdgeIndex = useRef(1);
   const nextConditionIndex = useRef(1);
+  const loadedWorkflowId = useRef<string | null>(null);
 
   const { data: draft } = useQuery({
     queryKey: ["workflow-draft", workflowId],
@@ -583,6 +802,64 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   });
 
   const activeDraft = draftOverride ?? draft;
+
+  const applyDraftToEditor = useCallback((draftToApply: WorkflowDraft | null) => {
+    if (!draftToApply) {
+      setNodes([]);
+      setEdges([]);
+      setCanvasBase(CANVAS_DEFAULT);
+      setZoom(1);
+      return;
+    }
+    const parsed = parseEditorView(draftToApply.view_json);
+    if (!parsed) {
+      setNodes([]);
+      setEdges([]);
+      setCanvasBase(CANVAS_DEFAULT);
+      setZoom(1);
+      return;
+    }
+    setNodes(parsed.nodes);
+    setEdges(parsed.edges);
+    if (parsed.canvas) {
+      setCanvasBase({
+        width: parsed.canvas.width,
+        height: parsed.canvas.height
+      });
+      setZoom(
+        clamp(parsed.canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
+      );
+    } else {
+      setCanvasBase(CANVAS_DEFAULT);
+      setZoom(1);
+    }
+    nextNodeIndex.current = getNextIndexFromIds(
+      parsed.nodes.map((node) => node.id),
+      "node"
+    );
+    nextEdgeIndex.current = getNextIndexFromIds(
+      parsed.edges.map((edge) => edge.id),
+      "edge"
+    );
+    const conditionIds = parsed.nodes.flatMap(
+      (node) => node.conditionExpressions ?? []
+    );
+    nextConditionIndex.current = getNextIndexFromIds(
+      conditionIds.map((expression) => expression.id),
+      "condition"
+    );
+    setSelectedNode(null);
+    setSelectedEdgeId(null);
+    setConnectingFrom(null);
+    setEditingNodeId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!activeDraft) return;
+    if (loadedWorkflowId.current === activeDraft.workflowId) return;
+    loadedWorkflowId.current = activeDraft.workflowId;
+    applyDraftToEditor(activeDraft);
+  }, [activeDraft, applyDraftToEditor]);
 
   const { data: validationErrors = [] } = useQuery({
     queryKey: ["workflow-validation", workflowId],
@@ -593,7 +870,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const saveMutation = useMutation({
     mutationFn: (payload: WorkflowDraft) =>
       workflowsApi.saveDraft(workflowId, payload),
-    onSuccess: (saved) => setDraftOverride(saved)
+    onSuccess: (saved) => {
+      setDraftOverride(saved);
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      downloadJsonFile(`${saved.workflowId}.asl.json`, saved.dsl_json);
+      if (saved.workflowId !== workflowId) {
+        router.replace(`/editor/${saved.workflowId}`);
+      }
+    }
   });
 
   const publishMutation = useMutation({
@@ -790,15 +1074,19 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   );
 
   const handleSave = () => {
-    if (!activeDraft) return;
+    const view_json = buildViewJson(nodes, edges, canvasBase, zoom);
+    const dsl_json = buildDslJson(nodes, edges);
     saveMutation.mutate({
-      ...activeDraft,
-      updatedAt: activeDraft.updatedAt
+      workflowId,
+      dsl_json,
+      view_json,
+      updatedAt: new Date().toISOString()
     });
   };
 
   const handleCancel = () => {
     setDraftOverride(draft ?? null);
+    applyDraftToEditor(draft ?? null);
     setSelectedNode(null);
   };
 

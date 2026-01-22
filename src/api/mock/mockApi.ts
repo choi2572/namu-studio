@@ -21,6 +21,7 @@ import {
 
 const MOCK_DELAY_MS = 120;
 const MOCK_NOW = "2026-01-22T09:00:00Z";
+const WORKFLOW_FILES_STORAGE_KEY = "mock.workflow.files.v1";
 
 function delay<T>(value: T, delayMs = MOCK_DELAY_MS) {
   return new Promise<T>((resolve) => {
@@ -30,6 +31,107 @@ function delay<T>(value: T, delayMs = MOCK_DELAY_MS) {
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
+}
+
+type WorkflowFileEntry = {
+  workflowId: string;
+  fileName: string;
+  dsl_json: Record<string, unknown>;
+  view_json: Record<string, unknown>;
+  updatedAt: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function canUseStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function getWorkflowFileName(workflowId: string) {
+  return `${workflowId}.asl.json`;
+}
+
+function readWorkflowFiles(): WorkflowFileEntry[] {
+  if (!canUseStorage()) {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(WORKFLOW_FILES_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((entry) => {
+        if (!isRecord(entry)) return false;
+        return (
+          typeof entry.workflowId === "string" &&
+          typeof entry.fileName === "string" &&
+          typeof entry.updatedAt === "string"
+        );
+      })
+      .map((entry) => {
+        const record = entry as Record<string, unknown>;
+        return {
+          workflowId: record.workflowId as string,
+          fileName: record.fileName as string,
+          updatedAt: record.updatedAt as string,
+          dsl_json: isRecord(record.dsl_json) ? record.dsl_json : {},
+          view_json: isRecord(record.view_json) ? record.view_json : {}
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function writeWorkflowFiles(files: WorkflowFileEntry[]) {
+  if (!canUseStorage()) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      WORKFLOW_FILES_STORAGE_KEY,
+      JSON.stringify(files)
+    );
+  } catch {
+    return;
+  }
+}
+
+function upsertWorkflowFile(entry: WorkflowFileEntry) {
+  const files = readWorkflowFiles();
+  const index = files.findIndex(
+    (item) => item.workflowId === entry.workflowId || item.fileName === entry.fileName
+  );
+  if (index >= 0) {
+    files[index] = entry;
+  } else {
+    files.unshift(entry);
+  }
+  writeWorkflowFiles(files);
+}
+
+function findWorkflowFile(workflowId: string) {
+  const normalizedId = workflowId.replace(/\.asl\.json$/i, "");
+  const files = readWorkflowFiles();
+  return (
+    files.find((file) => file.workflowId === workflowId) ??
+    files.find((file) => file.workflowId === normalizedId) ??
+    files.find((file) => file.fileName === workflowId) ??
+    null
+  );
+}
+
+function createWorkflowId() {
+  return `workflow-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
 }
 
 const validationErrorsByWorkflow: Record<string, ValidationError[]> = {
@@ -50,9 +152,33 @@ const validationErrorsByWorkflow: Record<string, ValidationError[]> = {
 
 export const mockWorkflowsApi: WorkflowsApi = {
   async list(): Promise<WorkflowListItem[]> {
-    return delay(deepClone(workflowList));
+    const storedFiles = readWorkflowFiles();
+    const storedItems = storedFiles.map((file) => ({
+      workflowId: file.workflowId,
+      name: file.fileName,
+      state: "DRAFT",
+      latestVersion: null,
+      latestRun: null
+    }));
+    const storedIds = new Set(storedItems.map((item) => item.workflowId));
+    const merged = [
+      ...storedItems,
+      ...workflowList.filter((item) => !storedIds.has(item.workflowId))
+    ];
+    return delay(deepClone(merged));
   },
   async getDraft(workflowId: string): Promise<WorkflowDraft> {
+    const stored = findWorkflowFile(workflowId);
+    if (stored) {
+      return delay(
+        deepClone({
+          workflowId: stored.workflowId,
+          dsl_json: stored.dsl_json,
+          view_json: stored.view_json,
+          updatedAt: stored.updatedAt
+        })
+      );
+    }
     const draft = workflowDrafts[workflowId];
     if (draft) {
       return delay(deepClone(draft));
@@ -68,12 +194,33 @@ export const mockWorkflowsApi: WorkflowsApi = {
     workflowId: string,
     payload: WorkflowDraft
   ): Promise<WorkflowDraft> {
-    workflowDrafts[workflowId] = {
-      ...payload,
-      workflowId,
-      updatedAt: payload.updatedAt || MOCK_NOW
+    const isNewWorkflow = workflowId === "new";
+    const resolvedWorkflowId = isNewWorkflow ? createWorkflowId() : workflowId;
+    const updatedAt = payload.updatedAt || new Date().toISOString();
+    const entry: WorkflowFileEntry = {
+      workflowId: resolvedWorkflowId,
+      fileName: getWorkflowFileName(resolvedWorkflowId),
+      dsl_json: payload.dsl_json ?? {},
+      view_json: payload.view_json ?? {},
+      updatedAt
     };
-    return delay(deepClone(workflowDrafts[workflowId]));
+    upsertWorkflowFile(entry);
+    workflowDrafts[resolvedWorkflowId] = {
+      workflowId: resolvedWorkflowId,
+      dsl_json: entry.dsl_json,
+      view_json: entry.view_json,
+      updatedAt: entry.updatedAt
+    };
+    if (!workflowList.some((item) => item.workflowId === resolvedWorkflowId)) {
+      workflowList.unshift({
+        workflowId: resolvedWorkflowId,
+        name: entry.fileName,
+        state: "DRAFT",
+        latestVersion: null,
+        latestRun: null
+      });
+    }
+    return delay(deepClone(workflowDrafts[resolvedWorkflowId]));
   },
   async validateDraft(workflowId: string): Promise<ValidationError[]> {
     return delay(deepClone(validationErrorsByWorkflow[workflowId] ?? []));
