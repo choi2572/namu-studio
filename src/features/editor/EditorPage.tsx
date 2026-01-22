@@ -1201,7 +1201,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
                   {connectingFrom && (
                     <div className="absolute bottom-4 left-4 rounded-full bg-slate-900 px-3 py-1 text-[10px] text-white shadow">
-                      Connecting: {connectingLabel ?? "Output"} -> select target input.
+                      Connecting: {connectingLabel ?? "Output"} -&gt; select target input.
                     </div>
                   )}
                 </div>
