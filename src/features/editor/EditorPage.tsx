@@ -23,7 +23,9 @@ type EditorPageProps = {
 type NodeKind =
   | "skill.pick"
   | "skill.place"
+  | "flow_control.input"
   | "flow_control.condition"
+  | "flow_control.output"
   | "event.webhook";
 
 type NodeCategory = "skill" | "flow_control" | "event";
@@ -39,6 +41,14 @@ type NodeOutputPort = {
   label: string;
 };
 
+type ConditionOperator = "AND" | "OR";
+
+type ConditionExpression = {
+  id: string;
+  operator: ConditionOperator | null;
+  expression: string;
+};
+
 type NodeTypeConfig = {
   label: string;
   category: NodeCategory;
@@ -46,6 +56,7 @@ type NodeTypeConfig = {
   colorClass: string;
   paramFields: NodeParamField[];
   outputs: NodeOutputPort[];
+  inputEnabled?: boolean;
 };
 
 type EditorNode = {
@@ -55,6 +66,7 @@ type EditorNode = {
   position: { x: number; y: number };
   isExpanded: boolean;
   params: Record<string, string>;
+  conditionExpressions?: ConditionExpression[];
 };
 
 type EditorEdge = {
@@ -84,7 +96,9 @@ type EdgeDragPayload = {
 const NODE_TYPES: NodeKind[] = [
   "skill.pick",
   "skill.place",
+  "flow_control.input",
   "flow_control.condition",
+  "flow_control.output",
   "event.webhook"
 ];
 
@@ -123,20 +137,33 @@ const NODE_TYPE_CONFIG: Record<NodeKind, NodeTypeConfig> = {
     ],
     outputs: [{ key: "next", label: "Next" }]
   },
+  "flow_control.input": {
+    label: "Input",
+    category: "flow_control",
+    iconText: "IN",
+    colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
+    paramFields: [],
+    outputs: [{ key: "next", label: "Next" }],
+    inputEnabled: false
+  },
   "flow_control.condition": {
     label: "Condition",
     category: "flow_control",
     iconText: "IF",
     colorClass: "border-amber-200 bg-amber-100 text-amber-700",
-    paramFields: [
-      { key: "expression", label: "Expression", placeholder: "payload.ok === true" },
-      { key: "trueNext", label: "True ->", placeholder: "next-node-id" },
-      { key: "falseNext", label: "False ->", placeholder: "fallback-node-id" }
-    ],
+    paramFields: [],
     outputs: [
       { key: "true", label: "True" },
       { key: "false", label: "False" }
     ]
+  },
+  "flow_control.output": {
+    label: "Output",
+    category: "flow_control",
+    iconText: "OUT",
+    colorClass: "border-rose-200 bg-rose-100 text-rose-700",
+    paramFields: [],
+    outputs: []
   },
   "event.webhook": {
     label: "Webhook",
@@ -154,7 +181,15 @@ const NODE_TYPE_CONFIG: Record<NodeKind, NodeTypeConfig> = {
 const NODE_METRICS = {
   width: 220,
   collapsedHeight: 86,
-  expandedHeight: 200
+  expandedTopPadding: 12,
+  fieldHeight: 44,
+  fieldGap: 8,
+  conditionButtonHeight: 28
+};
+
+const CANVAS_PADDING = {
+  x: 12,
+  y: 12
 };
 
 const CANVAS_DEFAULT = {
@@ -172,8 +207,28 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function getExpandedContentHeight(node: EditorNode) {
+  if (node.kind === "flow_control.condition") {
+    const expressionCount = Math.max(1, node.conditionExpressions?.length ?? 1);
+    const expressionsHeight =
+      expressionCount * NODE_METRICS.fieldHeight +
+      Math.max(0, expressionCount - 1) * NODE_METRICS.fieldGap;
+    const buttonsHeight = NODE_METRICS.conditionButtonHeight + NODE_METRICS.fieldGap;
+    return NODE_METRICS.expandedTopPadding + expressionsHeight + buttonsHeight;
+  }
+
+  const fieldCount = NODE_TYPE_CONFIG[node.kind].paramFields.length;
+  if (fieldCount === 0) return 0;
+  return (
+    NODE_METRICS.expandedTopPadding +
+    fieldCount * NODE_METRICS.fieldHeight +
+    Math.max(0, fieldCount - 1) * NODE_METRICS.fieldGap
+  );
+}
+
 function getNodeHeight(node: EditorNode) {
-  return node.isExpanded ? NODE_METRICS.expandedHeight : NODE_METRICS.collapsedHeight;
+  if (!node.isExpanded) return NODE_METRICS.collapsedHeight;
+  return NODE_METRICS.collapsedHeight + getExpandedContentHeight(node);
 }
 
 function getNodeTypeLabel(kind: NodeKind) {
@@ -182,11 +237,26 @@ function getNodeTypeLabel(kind: NodeKind) {
 }
 
 function getPortOffsets(nodeHeight: number, count: number) {
-  if (count <= 1) {
+  if (count <= 0) return [];
+  if (count === 1) {
     return [nodeHeight / 2];
   }
   const gap = nodeHeight / (count + 1);
   return Array.from({ length: count }, (_, index) => gap * (index + 1));
+}
+
+function getCanvasBounds(
+  canvasBase: { width: number; height: number },
+  nodeHeight: number
+) {
+  const minX = CANVAS_PADDING.x;
+  const minY = CANVAS_PADDING.y;
+  const maxX = Math.max(
+    minX,
+    canvasBase.width - NODE_METRICS.width - CANVAS_PADDING.x
+  );
+  const maxY = Math.max(minY, canvasBase.height - nodeHeight - CANVAS_PADDING.y);
+  return { minX, minY, maxX, maxY };
 }
 
 function NodeCard({
@@ -201,6 +271,9 @@ function NodeCard({
   onStartConnect,
   onCompleteConnect,
   onParamChange,
+  onConditionExpressionChange,
+  onAddConditionExpression,
+  onRemoveConditionExpression,
   onNameChange,
   isEditingName,
   onStartEditName,
@@ -226,6 +299,9 @@ function NodeCard({
   onStartConnect: (portKey: string) => void;
   onCompleteConnect: () => void;
   onParamChange: (key: string, value: string) => void;
+  onConditionExpressionChange: (expressionId: string, value: string) => void;
+  onAddConditionExpression: (operator: ConditionOperator) => void;
+  onRemoveConditionExpression: (expressionId: string) => void;
   onNameChange: (value: string) => void;
   isEditingName: boolean;
   onStartEditName: () => void;
@@ -237,6 +313,8 @@ function NodeCard({
 }) {
   const nodeHeight = getNodeHeight(node);
   const outputOffsets = getPortOffsets(nodeHeight, outputs.length);
+  const conditionExpressions =
+    node.kind === "flow_control.condition" ? node.conditionExpressions ?? [] : [];
 
   return (
     <div
@@ -251,34 +329,36 @@ function NodeCard({
       }}
       onClick={onSelect}
     >
-      <button
-        type="button"
-        className={cn(
-          "absolute left-0 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm",
-          inputConnected ? "border-slate-400" : "border-slate-200"
-        )}
-        style={{ top: nodeHeight / 2 }}
-        title={inputConnected ? "Input connected" : "Input"}
-        onDragOver={(event) => {
-          event.stopPropagation();
-          onInputDragOver(event);
-        }}
-        onDrop={(event) => {
-          event.stopPropagation();
-          onInputDrop(event);
-        }}
-        onClick={(event) => {
-          event.stopPropagation();
-          onCompleteConnect();
-        }}
-      >
-        <span
+      {config.inputEnabled !== false && (
+        <button
+          type="button"
           className={cn(
-            "h-1.5 w-1.5 rounded-full",
-            inputConnected ? "bg-slate-600" : "bg-slate-400"
+            "absolute left-0 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm",
+            inputConnected ? "border-slate-400" : "border-slate-200"
           )}
-        />
-      </button>
+          style={{ top: nodeHeight / 2 }}
+          title={inputConnected ? "Input connected" : "Input"}
+          onDragOver={(event) => {
+            event.stopPropagation();
+            onInputDragOver(event);
+          }}
+          onDrop={(event) => {
+            event.stopPropagation();
+            onInputDrop(event);
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCompleteConnect();
+          }}
+        >
+          <span
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              inputConnected ? "bg-slate-600" : "bg-slate-400"
+            )}
+          />
+        </button>
+      )}
 
       {outputs.map((output, index) => (
         <div
@@ -406,21 +486,72 @@ function NodeCard({
         <p className="mt-2 text-[10px] text-slate-400">{node.kind}</p>
       )}
 
-      {node.isExpanded && (
+      {node.isExpanded && node.kind === "flow_control.condition" && (
         <div className="mt-3 space-y-2 text-xs text-slate-600">
-          {config.paramFields.map((field) => (
-            <label key={field.key} className="block">
-              <span className="text-[10px] text-slate-500">{field.label}</span>
-              <input
-                value={node.params[field.key] ?? ""}
-                onChange={(event) => onParamChange(field.key, event.target.value)}
-                placeholder={field.placeholder}
-                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-              />
-            </label>
+          {conditionExpressions.map((expression, index) => (
+            <div key={expression.id} className="space-y-1">
+              <span className="text-[10px] text-slate-500">Expression</span>
+              <div className="flex items-center gap-2">
+                {index > 0 && (
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
+                    {expression.operator}
+                  </span>
+                )}
+                <input
+                  value={expression.expression}
+                  onChange={(event) =>
+                    onConditionExpressionChange(expression.id, event.target.value)
+                  }
+                  placeholder="payload.ok === true"
+                  className="flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                />
+                {index > 0 && (
+                  <button
+                    type="button"
+                    className="text-[10px] text-slate-400 hover:text-slate-600"
+                    onClick={() => onRemoveConditionExpression(expression.id)}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
           ))}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
+              onClick={() => onAddConditionExpression("AND")}
+            >
+              AND
+            </button>
+            <button
+              type="button"
+              className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
+              onClick={() => onAddConditionExpression("OR")}
+            >
+              OR
+            </button>
+          </div>
         </div>
       )}
+      {node.isExpanded &&
+        node.kind !== "flow_control.condition" &&
+        config.paramFields.length > 0 && (
+          <div className="mt-3 space-y-2 text-xs text-slate-600">
+            {config.paramFields.map((field) => (
+              <label key={field.key} className="block">
+                <span className="text-[10px] text-slate-500">{field.label}</span>
+                <input
+                  value={node.params[field.key] ?? ""}
+                  onChange={(event) => onParamChange(field.key, event.target.value)}
+                  placeholder={field.placeholder}
+                  className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                />
+              </label>
+            ))}
+          </div>
+        )}
     </div>
   );
 }
@@ -444,6 +575,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const nextNodeIndex = useRef(1);
   const nextEdgeIndex = useRef(1);
+  const nextConditionIndex = useRef(1);
 
   const { data: draft } = useQuery({
     queryKey: ["workflow-draft", workflowId],
@@ -543,8 +675,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
       const nextX = point.x - dragState.offsetX;
       const nextY = point.y - dragState.offsetY;
-      const maxX = Math.max(0, canvasBase.width - NODE_METRICS.width);
-      const maxY = Math.max(0, canvasBase.height - dragState.height);
+      const { minX, minY, maxX, maxY } = getCanvasBounds(
+        canvasBase,
+        dragState.height
+      );
 
       setNodes((prev) =>
         prev.map((item) =>
@@ -552,8 +686,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             ? {
                 ...item,
                 position: {
-                  x: clamp(nextX, 0, maxX),
-                  y: clamp(nextY, 0, maxY)
+                  x: clamp(nextX, minX, maxX),
+                  y: clamp(nextY, minY, maxY)
                 }
               }
             : item
@@ -582,15 +716,47 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     );
   }, []);
 
+  const createConditionExpression = useCallback(
+    (operator: ConditionOperator | null): ConditionExpression => ({
+      id: `condition-${nextConditionIndex.current++}`,
+      operator,
+      expression: ""
+    }),
+    []
+  );
+
+  const normalizeConditionExpressions = useCallback(
+    (expressions: ConditionExpression[]) => {
+      if (expressions.length === 0) {
+        return [createConditionExpression(null)];
+      }
+      return expressions.map((expression, index) =>
+        index === 0 ? { ...expression, operator: null } : expression
+      );
+    },
+    [createConditionExpression]
+  );
+
   const createNode = useCallback(
     (kind: NodeKind, position?: { x: number; y: number }) => {
+      if (kind === "flow_control.input") {
+        const existingInput = nodes.find(
+          (node) => node.kind === "flow_control.input"
+        );
+        if (existingInput) {
+          setSelectedNode(existingInput.id);
+          setSelectedEdgeId(null);
+          setEditingNodeId(null);
+          return;
+        }
+      }
+
       const basePosition = position ?? getViewportCenter();
       const nodeHeight = NODE_METRICS.collapsedHeight;
-      const maxX = Math.max(0, canvasBase.width - NODE_METRICS.width);
-      const maxY = Math.max(0, canvasBase.height - nodeHeight);
+      const { minX, minY, maxX, maxY } = getCanvasBounds(canvasBase, nodeHeight);
       const clampedPosition = {
-        x: clamp(basePosition.x, 0, maxX),
-        y: clamp(basePosition.y, 0, maxY)
+        x: clamp(basePosition.x, minX, maxX),
+        y: clamp(basePosition.y, minY, maxY)
       };
 
       const index = nextNodeIndex.current++;
@@ -604,13 +770,23 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           kind,
           position: clampedPosition,
           isExpanded: false,
-          params: buildDefaultParams(kind)
+          params: buildDefaultParams(kind),
+          conditionExpressions:
+            kind === "flow_control.condition"
+              ? [createConditionExpression(null)]
+              : undefined
         }
       ]);
       setSelectedNode(id);
       setSelectedEdgeId(null);
     },
-    [buildDefaultParams, canvasBase.height, canvasBase.width, getViewportCenter]
+    [
+      buildDefaultParams,
+      canvasBase,
+      createConditionExpression,
+      getViewportCenter,
+      nodes
+    ]
   );
 
   const handleSave = () => {
@@ -636,14 +812,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       prev.map((node) => {
         if (node.id !== nodeId) return node;
         const nextExpanded = !node.isExpanded;
-        const nodeHeight = nextExpanded
-          ? NODE_METRICS.expandedHeight
-          : NODE_METRICS.collapsedHeight;
-        const maxY = Math.max(0, canvasBase.height - nodeHeight);
+        const nextNode = { ...node, isExpanded: nextExpanded };
+        const nodeHeight = getNodeHeight(nextNode);
+        const { minX, minY, maxX, maxY } = getCanvasBounds(canvasBase, nodeHeight);
         return {
-          ...node,
-          isExpanded: nextExpanded,
-          position: { ...node.position, y: clamp(node.position.y, 0, maxY) }
+          ...nextNode,
+          position: {
+            x: clamp(node.position.x, minX, maxX),
+            y: clamp(node.position.y, minY, maxY)
+          }
         };
       })
     );
@@ -656,6 +833,81 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           ? { ...node, params: { ...node.params, [key]: value } }
           : node
       )
+    );
+  };
+
+  const handleConditionExpressionChange = (
+    nodeId: string,
+    expressionId: string,
+    value: string
+  ) => {
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
+        const expressions = node.conditionExpressions ?? [
+          createConditionExpression(null)
+        ];
+        const nextExpressions = expressions.map((expression) =>
+          expression.id === expressionId
+            ? { ...expression, expression: value }
+            : expression
+        );
+        return { ...node, conditionExpressions: nextExpressions };
+      })
+    );
+  };
+
+  const handleAddConditionExpression = (
+    nodeId: string,
+    operator: ConditionOperator
+  ) => {
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
+        const baseExpressions = normalizeConditionExpressions(
+          node.conditionExpressions ?? []
+        );
+        const nextExpressions = normalizeConditionExpressions([
+          ...baseExpressions,
+          createConditionExpression(operator)
+        ]);
+        const nextNode = { ...node, conditionExpressions: nextExpressions };
+        const { minX, minY, maxX, maxY } = getCanvasBounds(
+          canvasBase,
+          getNodeHeight(nextNode)
+        );
+        return {
+          ...nextNode,
+          position: {
+            x: clamp(node.position.x, minX, maxX),
+            y: clamp(node.position.y, minY, maxY)
+          }
+        };
+      })
+    );
+  };
+
+  const handleRemoveConditionExpression = (nodeId: string, expressionId: string) => {
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
+        const remaining = (node.conditionExpressions ?? []).filter(
+          (expression) => expression.id !== expressionId
+        );
+        const nextExpressions = normalizeConditionExpressions(remaining);
+        const nextNode = { ...node, conditionExpressions: nextExpressions };
+        const { minX, minY, maxX, maxY } = getCanvasBounds(
+          canvasBase,
+          getNodeHeight(nextNode)
+        );
+        return {
+          ...nextNode,
+          position: {
+            x: clamp(node.position.x, minX, maxX),
+            y: clamp(node.position.y, minY, maxY)
+          }
+        };
+      })
     );
   };
 
@@ -728,7 +980,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     if (nodes.length === 0) return;
 
     const spacingX = 320;
-    const spacingY = NODE_METRICS.expandedHeight + 60;
+    const rowGap = 60;
     const padding = 80;
     const inDegree = new Map<string, number>();
     const outgoing = new Map<string, string[]>();
@@ -785,10 +1037,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const sortedGroup = [...group].sort((a, b) =>
           a.name.localeCompare(b.name)
         );
-        sortedGroup.forEach((node, index) => {
+        let yCursor = padding;
+        sortedGroup.forEach((node) => {
           const nodeHeight = getNodeHeight(node);
           const x = padding + layer * spacingX;
-          const y = padding + index * spacingY;
+          const y = yCursor;
+          yCursor += nodeHeight + rowGap;
           nextPositions.set(node.id, { x, y });
           requiredWidth = Math.max(
             requiredWidth,
@@ -815,6 +1069,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const connectNodes = useCallback(
     (fromNodeId: string, fromPort: string, toNodeId: string) => {
       if (fromNodeId === toNodeId) return;
+      const toNode = nodeMap.get(toNodeId);
+      if (!toNode) return;
+      if (NODE_TYPE_CONFIG[toNode.kind].inputEnabled === false) return;
       if (incomingEdges.has(toNodeId)) return;
       if (outgoingEdges.has(`${fromNodeId}:${fromPort}`)) return;
 
@@ -829,7 +1086,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       ]);
       setSelectedEdgeId(null);
     },
-    [incomingEdges, outgoingEdges]
+    [incomingEdges, nodeMap, outgoingEdges]
   );
 
   const handleStartConnect = (nodeId: string, portKey: string) => {
@@ -1052,7 +1309,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           </div>
         )}
 
-        <Card className="border-dashed min-w-0 overflow-hidden">
+        <Card className="border-dashed min-w-0">
           <div className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50">
             <div className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
               <button
@@ -1089,7 +1346,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               </button>
             </div>
 
-            <div ref={scrollRef} className="h-full w-full min-w-0 min-h-0 overflow-auto">
+            <div
+              ref={scrollRef}
+              className="h-full w-full min-w-0 min-h-0 overflow-x-auto overflow-y-auto"
+            >
               <div
                 className="relative min-w-full min-h-full"
                 style={{
@@ -1233,6 +1493,19 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onCompleteConnect={() => handleCompleteConnect(node.id)}
                           onParamChange={(key, value) =>
                             handleParamChange(node.id, key, value)
+                          }
+                          onConditionExpressionChange={(expressionId, value) =>
+                            handleConditionExpressionChange(
+                              node.id,
+                              expressionId,
+                              value
+                            )
+                          }
+                          onAddConditionExpression={(operator) =>
+                            handleAddConditionExpression(node.id, operator)
+                          }
+                          onRemoveConditionExpression={(expressionId) =>
+                            handleRemoveConditionExpression(node.id, expressionId)
                           }
                           onNameChange={(value) => handleNameChange(node.id, value)}
                           isEditingName={editingNodeId === node.id}
