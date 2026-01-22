@@ -202,7 +202,9 @@ function NodeCard({
   onCompleteConnect,
   onParamChange,
   onNameChange,
-  onDeleteNode,
+  isEditingName,
+  onStartEditName,
+  onFinishEditName,
   onOutputDragStart,
   onOutputDragEnd,
   onInputDragOver,
@@ -225,7 +227,9 @@ function NodeCard({
   onCompleteConnect: () => void;
   onParamChange: (key: string, value: string) => void;
   onNameChange: (value: string) => void;
-  onDeleteNode: () => void;
+  isEditingName: boolean;
+  onStartEditName: () => void;
+  onFinishEditName: () => void;
   onOutputDragStart: (event: DragEvent<HTMLButtonElement>, portKey: string) => void;
   onOutputDragEnd: () => void;
   onInputDragOver: (event: DragEvent<HTMLButtonElement>) => void;
@@ -333,8 +337,15 @@ function NodeCard({
         className="flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing"
         onPointerDown={(event) => {
           const target = event.target as HTMLElement;
-          if (target.closest("input") || target.closest("button")) return;
+          if (
+            target.closest("input") ||
+            target.closest("button") ||
+            target.closest("[data-no-drag]")
+          ) {
+            return;
+          }
           event.stopPropagation();
+          event.preventDefault();
           onDragStart(event);
         }}
       >
@@ -348,36 +359,47 @@ function NodeCard({
             {config.iconText}
           </div>
           <div>
-            <input
-              value={node.name}
-              onChange={(event) => onNameChange(event.target.value)}
-              className="w-28 rounded border border-transparent bg-transparent text-xs font-semibold text-slate-900 focus:border-slate-300 focus:bg-white focus:outline-none"
-            />
+            {isEditingName ? (
+              <input
+                value={node.name}
+                onChange={(event) => onNameChange(event.target.value)}
+                onBlur={onFinishEditName}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === "Escape") {
+                    event.currentTarget.blur();
+                    onFinishEditName();
+                  }
+                }}
+                autoFocus
+                className="w-28 rounded border border-slate-200 bg-white text-xs font-semibold text-slate-900 focus:border-slate-300 focus:outline-none"
+              />
+            ) : (
+              <button
+                type="button"
+                data-no-drag
+                className="w-28 truncate text-left text-xs font-semibold text-slate-900 hover:text-slate-700"
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  onStartEditName();
+                }}
+                title="Double click to rename"
+              >
+                {node.name}
+              </button>
+            )}
             <p className="text-[10px] text-slate-500">{getNodeTypeLabel(node.kind)}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-slate-500">
-          <button
-            type="button"
-            className="text-[10px] text-red-500 hover:text-red-600"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDeleteNode();
-            }}
-          >
-            Delete
-          </button>
-          <button
-            type="button"
-            className="text-[10px] text-slate-500 hover:text-slate-900"
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleExpand();
-            }}
-          >
-            {node.isExpanded ? "Fold" : "Unfold"}
-          </button>
-        </div>
+        <button
+          type="button"
+          className="text-[10px] text-slate-500 hover:text-slate-900"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleExpand();
+          }}
+        >
+          {node.isExpanded ? "Fold" : "Unfold"}
+        </button>
       </div>
 
       {!node.isExpanded && (
@@ -412,6 +434,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [selectedCategory, setSelectedCategory] = useState<NodeCategory>("skill");
   const [zoom, setZoom] = useState(1);
   const [canvasBase, setCanvasBase] = useState(CANVAS_DEFAULT);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [draftOverride, setDraftOverride] = useState<WorkflowDraft | null>(null);
   const [nodes, setNodes] = useState<EditorNode[]>([]);
   const [edges, setEdges] = useState<EditorEdge[]>([]);
@@ -511,6 +534,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   useEffect(() => {
     if (!dragState) return;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
 
     const handlePointerMove = (event: PointerEvent) => {
       const point = getCanvasPoint(event.clientX, event.clientY);
@@ -543,6 +568,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.userSelect = previousUserSelect;
     };
   }, [canvasBase.height, canvasBase.width, dragState, getCanvasPoint]);
 
@@ -639,6 +665,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     );
   };
 
+  const handleStartEditName = (nodeId: string) => {
+    setEditingNodeId(nodeId);
+    setSelectedNode(nodeId);
+    setSelectedEdgeId(null);
+  };
+
+  const handleFinishEditName = () => {
+    setEditingNodeId(null);
+  };
+
   const handleDeleteNode = (nodeId: string) => {
     const connectedEdgeIds = edges
       .filter((edge) => edge.from === nodeId || edge.to === nodeId)
@@ -654,12 +690,39 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setConnectingFrom((prev) =>
       prev && prev.nodeId === nodeId ? null : prev
     );
+    setEditingNodeId((prev) => (prev === nodeId ? null : prev));
   };
 
   const handleDeleteEdge = (edgeId: string) => {
     setEdges((prev) => prev.filter((edge) => edge.id !== edgeId));
     setSelectedEdgeId((prev) => (prev === edgeId ? null : prev));
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (selectedNode) {
+        event.preventDefault();
+        handleDeleteNode(selectedNode);
+        return;
+      }
+      if (selectedEdgeId) {
+        event.preventDefault();
+        handleDeleteEdge(selectedEdgeId);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleDeleteEdge, handleDeleteNode, selectedEdgeId, selectedNode]);
 
   const handleAutoLayout = () => {
     if (nodes.length === 0) return;
@@ -774,6 +837,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setConnectingFrom(null);
       return;
     }
+    setEditingNodeId(null);
     setConnectingFrom((prev) => {
       if (prev && prev.nodeId === nodeId && prev.portKey === portKey) {
         return null;
@@ -808,6 +872,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     event.dataTransfer.effectAllowed = "link";
     setConnectingFrom({ nodeId, portKey });
     setSelectedEdgeId(null);
+    setEditingNodeId(null);
   };
 
   const handleOutputDragEnd = () => {
@@ -857,6 +922,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setSelectedNode(null);
     setSelectedEdgeId(null);
     setConnectingFrom(null);
+    setEditingNodeId(null);
   };
 
   const edgesToRender = useMemo(() => {
@@ -986,8 +1052,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           </div>
         )}
 
-        <Card className="border-dashed">
-          <div className="relative h-[560px] w-full overflow-hidden rounded-md bg-slate-50">
+        <Card className="border-dashed min-w-0 overflow-hidden">
+          <div className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50">
             <div className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
               <button
                 type="button"
@@ -1023,21 +1089,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               </button>
             </div>
 
-            {selectedEdgeId && (
-              <div className="absolute bottom-4 right-4 z-10 rounded-full border border-slate-200 bg-white px-3 py-1 text-[10px] text-slate-700 shadow">
-                <button
-                  type="button"
-                  className="text-red-500 hover:text-red-600"
-                  onClick={() => handleDeleteEdge(selectedEdgeId)}
-                >
-                  Delete edge
-                </button>
-              </div>
-            )}
-
-            <div ref={scrollRef} className="h-full w-full overflow-auto">
+            <div ref={scrollRef} className="h-full w-full min-w-0 min-h-0 overflow-auto">
               <div
-                className="relative"
+                className="relative min-w-full min-h-full"
                 style={{
                   width: canvasBase.width * zoom,
                   height: canvasBase.height * zoom
@@ -1119,6 +1173,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                             event.stopPropagation();
                             setSelectedEdgeId(edge.id);
                             setSelectedNode(null);
+                            setEditingNodeId(null);
                           }}
                         />
                       );
@@ -1150,6 +1205,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onSelect={() => {
                             setSelectedNode(node.id);
                             setSelectedEdgeId(null);
+                            setEditingNodeId((prev) => (prev === node.id ? prev : null));
                           }}
                           onToggleExpand={() => handleToggleExpand(node.id)}
                           onDragStart={(event) => {
@@ -1162,6 +1218,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                             const offsetY = point.y - node.position.y;
                             setSelectedNode(node.id);
                             setSelectedEdgeId(null);
+                            setEditingNodeId(null);
                             setConnectingFrom(null);
                             setDragState({
                               nodeId: node.id,
@@ -1178,7 +1235,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                             handleParamChange(node.id, key, value)
                           }
                           onNameChange={(value) => handleNameChange(node.id, value)}
-                          onDeleteNode={() => handleDeleteNode(node.id)}
+                          isEditingName={editingNodeId === node.id}
+                          onStartEditName={() => handleStartEditName(node.id)}
+                          onFinishEditName={handleFinishEditName}
                           onOutputDragStart={(event, portKey) =>
                             handleOutputDragStart(event, node.id, portKey)
                           }
