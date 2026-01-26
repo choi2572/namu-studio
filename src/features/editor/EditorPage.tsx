@@ -201,8 +201,8 @@ const CANVAS_PADDING = {
 };
 
 const CANVAS_DEFAULT = {
-  width: 2000,
-  height: 1200
+  width: 1200,
+  height: 800
 };
 
 const ZOOM_LIMITS = {
@@ -1599,41 +1599,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
         <Card className="border-dashed min-w-0">
           <div className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50">
-            <div className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
-              <button
-                type="button"
-                className="rounded px-1 text-slate-600 hover:text-slate-900"
-                onClick={() =>
-                  setZoom((prev) =>
-                    clamp(prev - ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
-                  )
-                }
-              >
-                -
-              </button>
-              <span className="min-w-[36px] text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                type="button"
-                className="rounded px-1 text-slate-600 hover:text-slate-900"
-                onClick={() =>
-                  setZoom((prev) =>
-                    clamp(prev + ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
-                  )
-                }
-              >
-                +
-              </button>
-              <button
-                type="button"
-                className="rounded px-1 text-slate-500 hover:text-slate-900"
-                onClick={() => setZoom(1)}
-              >
-                Reset
-              </button>
-            </div>
-
             <div
               ref={scrollRef}
               className="h-full w-full min-w-0 min-h-0 overflow-x-auto overflow-y-auto"
@@ -1826,6 +1791,40 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   )}
                 </div>
               </div>
+            </div>
+            <div className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
+              <button
+                type="button"
+                className="rounded px-1 text-slate-600 hover:text-slate-900"
+                onClick={() =>
+                  setZoom((prev) =>
+                    clamp(prev - ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
+                  )
+                }
+              >
+                -
+              </button>
+              <span className="min-w-[36px] text-center">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                type="button"
+                className="rounded px-1 text-slate-600 hover:text-slate-900"
+                onClick={() =>
+                  setZoom((prev) =>
+                    clamp(prev + ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
+                  )
+                }
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="rounded px-1 text-slate-500 hover:text-slate-900"
+                onClick={() => setZoom(1)}
+              >
+                Reset
+              </button>
             </div>
           </div>
         </Card>
