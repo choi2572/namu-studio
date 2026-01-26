@@ -791,6 +791,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [nodes, setNodes] = useState<EditorNode[]>([]);
   const [edges, setEdges] = useState<EditorEdge[]>([]);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [isEditingWorkflowName, setIsEditingWorkflowName] = useState(false);
+  const [workflowName, setWorkflowName] = useState<string>("");
+  const [originalWorkflowName, setOriginalWorkflowName] = useState<string>("");
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -805,7 +808,23 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     queryFn: () => workflowsApi.getDraft(workflowId)
   });
 
+  const { data: workflows } = useQuery({
+    queryKey: ["workflows"],
+    queryFn: () => workflowsApi.list()
+  });
+
   const activeDraft = draftOverride ?? draft;
+  
+  // 현재 workflow의 이름 가져오기
+  useEffect(() => {
+    if (workflows) {
+      const currentWorkflow = workflows.find((w) => w.workflowId === workflowId);
+      if (currentWorkflow) {
+        setWorkflowName(currentWorkflow.name);
+        setOriginalWorkflowName(currentWorkflow.name);
+      }
+    }
+  }, [workflows, workflowId]);
 
   const getViewportCanvasSize = useCallback(() => {
     if (!containerRef.current) return CANVAS_DEFAULT;
@@ -1551,9 +1570,85 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         <div>
           <p className="text-xs text-slate-500">Workflow Editor</p>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">
-              {activeDraft?.workflowId ?? "Loading..."}
-            </h1>
+            {isEditingWorkflowName ? (
+              <input
+                value={workflowName}
+                onChange={(event) => setWorkflowName(event.target.value)}
+                onBlur={() => {
+                  setIsEditingWorkflowName(false);
+                  // TODO: API 호출로 workflow 이름 업데이트
+                  if (workflows) {
+                    const currentWorkflow = workflows.find(
+                      (w) => w.workflowId === workflowId
+                    );
+                    if (currentWorkflow && workflowName.trim() && workflowName !== currentWorkflow.name) {
+                      // 이름이 변경되었고 유효하면 업데이트
+                      queryClient.setQueryData<typeof workflows>(
+                        ["workflows"],
+                        (old) =>
+                          old?.map((w) =>
+                            w.workflowId === workflowId
+                              ? { ...w, name: workflowName.trim() }
+                              : w
+                          )
+                      );
+                      setOriginalWorkflowName(workflowName.trim());
+                    } else if (!workflowName.trim()) {
+                      // 빈 이름이면 원래 값으로 복원
+                      setWorkflowName(originalWorkflowName);
+                    }
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  } else if (event.key === "Escape") {
+                    setWorkflowName(originalWorkflowName);
+                    setIsEditingWorkflowName(false);
+                  }
+                }}
+                autoFocus
+                className="text-xl font-semibold rounded border border-slate-300 bg-white px-2 py-1 focus:border-slate-500 focus:outline-none min-w-[200px]"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <div className="flex items-center gap-2 group">
+                <h1
+                  className="text-xl font-semibold cursor-pointer hover:text-slate-700 select-none"
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditingWorkflowName(true);
+                  }}
+                  title="더블클릭하여 이름 변경"
+                >
+                  {workflowName || activeDraft?.workflowId || "Loading..."}
+                </h1>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditingWorkflowName(true);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100"
+                  title="이름 변경"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                    className="w-4 h-4"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                    />
+                  </svg>
+                </button>
+              </div>
+            )}
             <StatusBadge status="DRAFT" />
           </div>
           {activeDraft && (
