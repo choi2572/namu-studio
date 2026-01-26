@@ -1,4 +1,4 @@
-import { mockRunsApi, mockWorkflowsApi } from "@/api/mock/mockApi";
+import { createRunsApi, createWorkflowsApi } from "@/api/factory";
 
-export const workflowsApi = mockWorkflowsApi;
-export const runsApi = mockRunsApi;
+export const workflowsApi = createWorkflowsApi();
+export const runsApi = createRunsApi();
