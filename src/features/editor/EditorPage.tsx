@@ -532,11 +532,51 @@ function NodeCard({
   const conditionExpressions =
     node.kind === "flow_control.condition" ? node.conditionExpressions ?? [] : [];
 
+  // 노드 타입별 색상 (Monitor와 동일)
+  const getNodeTypeColors = (category: NodeCategory, kind: NodeKind) => {
+    if (kind === "flow_control.condition") {
+      return {
+        border: "border-amber-200",
+        bg: "bg-amber-50",
+        text: "text-amber-700",
+        indicator: "bg-amber-500"
+      };
+    }
+    if (category === "skill") {
+      return {
+        border: "border-blue-200",
+        bg: "bg-blue-50",
+        text: "text-blue-700",
+        indicator: "bg-blue-500"
+      };
+    }
+    if (category === "event") {
+      return {
+        border: "border-purple-200",
+        bg: "bg-purple-50",
+        text: "text-purple-700",
+        indicator: "bg-purple-500"
+      };
+    }
+    // flow_control
+    return {
+      border: "border-cyan-200",
+      bg: "bg-cyan-50",
+      text: "text-cyan-700",
+      indicator: "bg-cyan-500"
+    };
+  };
+
+  const nodeTypeColors = getNodeTypeColors(config.category, node.kind);
+  const nodeTypeLabel = kind === "flow_control.condition" 
+    ? "Condition" 
+    : NODE_CATEGORY_LABELS[config.category];
+
   return (
     <div
       className={cn(
-        "relative rounded-lg border bg-white p-3 shadow-sm",
-        isSelected ? "border-slate-900 ring-2 ring-slate-300" : "border-slate-200"
+        "relative rounded-lg border-2 bg-white p-3 shadow-sm overflow-hidden",
+        isSelected ? "border-slate-900 ring-4 ring-slate-400 ring-offset-2" : "border-slate-200"
       )}
       data-node-card
       style={{
@@ -545,6 +585,13 @@ function NodeCard({
       }}
       onClick={onSelect}
     >
+      {/* 왼쪽 타입 인디케이터 바 */}
+      <div
+        className={cn(
+          "absolute left-0 top-0 bottom-0 w-1",
+          nodeTypeColors.indicator
+        )}
+      />
       {config.inputEnabled !== false && (
         <button
           type="button"
@@ -630,7 +677,7 @@ function NodeCard({
       ))}
 
       <div
-        className="flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing"
+        className="flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing pl-1"
         onPointerDown={(event) => {
           const target = event.target as HTMLElement;
           if (
@@ -645,16 +692,8 @@ function NodeCard({
           onDragStart(event);
         }}
       >
-        <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold",
-              config.colorClass
-            )}
-          >
-            {config.iconText}
-          </div>
-          <div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
             {isEditingName ? (
               <input
                 value={node.name}
@@ -667,13 +706,13 @@ function NodeCard({
                   }
                 }}
                 autoFocus
-                className="w-28 rounded border border-slate-200 bg-white text-xs font-semibold text-slate-900 focus:border-slate-300 focus:outline-none"
+                className="w-full rounded border border-slate-200 bg-white text-sm font-semibold text-slate-800 focus:border-slate-300 focus:outline-none"
               />
             ) : (
               <button
                 type="button"
                 data-no-drag
-                className="w-28 truncate text-left text-xs font-semibold text-slate-900 hover:text-slate-700"
+                className="truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700"
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   onStartEditName();
@@ -683,12 +722,29 @@ function NodeCard({
                 {node.name}
               </button>
             )}
-            <p className="text-[10px] text-slate-500">{getNodeTypeLabel(node.kind)}</p>
           </div>
+          
+          {/* 노드 타입 배지 */}
+          <div className="flex items-center gap-2 mb-1">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                nodeTypeColors.bg,
+                nodeTypeColors.text,
+                "border border-current"
+              )}
+            >
+              {nodeTypeLabel}
+            </span>
+          </div>
+
+          {!node.isExpanded && (
+            <p className="text-xs text-slate-600 truncate">{node.kind}</p>
+          )}
         </div>
         <button
           type="button"
-          className="text-[10px] text-slate-500 hover:text-slate-900"
+          className="text-[10px] text-slate-500 hover:text-slate-900 flex-shrink-0"
           onClick={(event) => {
             event.stopPropagation();
             onToggleExpand();
@@ -698,9 +754,6 @@ function NodeCard({
         </button>
       </div>
 
-      {!node.isExpanded && (
-        <p className="mt-2 text-[10px] text-slate-400">{node.kind}</p>
-      )}
 
       {node.isExpanded && node.kind === "flow_control.condition" && (
         <div className="mt-3 space-y-2 text-xs text-slate-600">
