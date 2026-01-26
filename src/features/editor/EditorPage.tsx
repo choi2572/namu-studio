@@ -50,6 +50,12 @@ type ConditionExpression = {
   expression: string;
 };
 
+type VariableRow = {
+  id: string;
+  name: string;
+  value: string;
+};
+
 type NodeTypeConfig = {
   label: string;
   category: NodeCategory;
@@ -68,6 +74,7 @@ type EditorNode = {
   isExpanded: boolean;
   params: Record<string, string>;
   conditionExpressions?: ConditionExpression[];
+  variableRows?: VariableRow[];
 };
 
 type EditorEdge = {
@@ -225,6 +232,15 @@ function getExpandedContentHeight(node: EditorNode) {
     return NODE_METRICS.expandedTopPadding + expressionsHeight + buttonsHeight;
   }
 
+  if (node.kind === "flow_control.input" || node.kind === "flow_control.output") {
+    const rowCount = Math.max(1, node.variableRows?.length ?? 1);
+    const rowsHeight =
+      rowCount * NODE_METRICS.fieldHeight +
+      Math.max(0, rowCount - 1) * NODE_METRICS.fieldGap;
+    const addButtonHeight = NODE_METRICS.fieldHeight + NODE_METRICS.fieldGap;
+    return NODE_METRICS.expandedTopPadding + rowsHeight + addButtonHeight;
+  }
+
   const fieldCount = NODE_TYPE_CONFIG[node.kind].paramFields.length;
   if (fieldCount === 0) return 0;
   return (
@@ -291,6 +307,15 @@ function isValidConditionExpression(value: unknown): value is ConditionExpressio
   );
 }
 
+function isValidVariableRow(value: unknown): value is VariableRow {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.value === "string"
+  );
+}
+
 function isValidEditorNode(value: unknown): value is EditorNode {
   if (!isRecord(value)) return false;
   if (typeof value.id !== "string" || typeof value.name !== "string") return false;
@@ -310,6 +335,13 @@ function isValidEditorNode(value: unknown): value is EditorNode {
     value.conditionExpressions !== undefined &&
     (!Array.isArray(value.conditionExpressions) ||
       !value.conditionExpressions.every(isValidConditionExpression))
+  ) {
+    return false;
+  }
+  if (
+    value.variableRows !== undefined &&
+    (!Array.isArray(value.variableRows) ||
+      !value.variableRows.every(isValidVariableRow))
   ) {
     return false;
   }
@@ -518,6 +550,9 @@ function NodeCard({
   onConditionExpressionChange: (expressionId: string, value: string) => void;
   onAddConditionExpression: (operator: ConditionOperator) => void;
   onRemoveConditionExpression: (expressionId: string) => void;
+  onVariableRowChange?: (rowId: string, field: "name" | "value", value: string) => void;
+  onAddVariableRow?: () => void;
+  onRemoveVariableRow?: (rowId: string) => void;
   onNameChange: (value: string) => void;
   isEditingName: boolean;
   onStartEditName: () => void;
@@ -791,9 +826,9 @@ function NodeCard({
           {conditionExpressions.map((expression, index) => (
             <div key={expression.id} className="space-y-1">
               <span className="text-[10px] text-slate-500">Expression</span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 {index > 0 && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
+                  <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
                     {expression.operator}
                   </span>
                 )}
@@ -803,15 +838,33 @@ function NodeCard({
                     onConditionExpressionChange(expression.id, event.target.value)
                   }
                   placeholder="payload.ok === true"
-                  className="flex-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                  className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                 />
                 {index > 0 && (
                   <button
                     type="button"
-                    className="text-[10px] text-slate-400 hover:text-slate-600"
-                    onClick={() => onRemoveConditionExpression(expression.id)}
+                    data-no-drag
+                    className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveConditionExpression(expression.id);
+                    }}
+                    title="Remove expression"
                   >
-                    Remove
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2.5}
+                      stroke="currentColor"
+                      className="h-3.5 w-3.5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M19.5 12h-15"
+                      />
+                    </svg>
                   </button>
                 )}
               </div>
@@ -820,15 +873,23 @@ function NodeCard({
           <div className="flex items-center gap-2">
             <button
               type="button"
+              data-no-drag
               className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
-              onClick={() => onAddConditionExpression("AND")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddConditionExpression("AND");
+              }}
             >
               AND
             </button>
             <button
               type="button"
+              data-no-drag
               className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
-              onClick={() => onAddConditionExpression("OR")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddConditionExpression("OR");
+              }}
             >
               OR
             </button>
@@ -837,6 +898,85 @@ function NodeCard({
       )}
       {node.isExpanded &&
         node.kind !== "flow_control.condition" &&
+        (node.kind === "flow_control.input" || node.kind === "flow_control.output") &&
+        node.variableRows && (
+          <div className="mt-3 space-y-2 text-xs text-slate-600">
+            {node.variableRows.map((row) => (
+              <div key={row.id} className="flex items-center gap-2 min-w-0">
+                <input
+                  value={row.name}
+                  onChange={(event) =>
+                    onVariableRowChange?.(row.id, "name", event.target.value)
+                  }
+                  placeholder="변수명"
+                  className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                />
+                <input
+                  value={row.value}
+                  onChange={(event) =>
+                    onVariableRowChange?.(row.id, "value", event.target.value)
+                  }
+                  placeholder="값"
+                  className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  data-no-drag
+                  className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveVariableRow?.(row.id);
+                  }}
+                  title="Remove row"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={2.5}
+                    stroke="currentColor"
+                    className="h-3.5 w-3.5"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M19.5 12h-15"
+                    />
+                  </svg>
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              data-no-drag
+              className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAddVariableRow?.();
+              }}
+              title="Add row"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2.5}
+                stroke="currentColor"
+                className="h-3.5 w-3.5"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4.5v15m7.5-7.5h-15"
+                />
+              </svg>
+            </button>
+          </div>
+        )}
+      {node.isExpanded &&
+        node.kind !== "flow_control.condition" &&
+        node.kind !== "flow_control.input" &&
+        node.kind !== "flow_control.output" &&
         config.paramFields.length > 0 && (
           <div className="mt-3 space-y-2 text-xs text-slate-600">
             {config.paramFields.map((field) => (
@@ -885,6 +1025,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const nextNodeIndex = useRef(1);
   const nextEdgeIndex = useRef(1);
   const nextConditionIndex = useRef(1);
+  const nextVariableRowIndex = useRef(1);
   const loadedWorkflowId = useRef<string | null>(null);
 
   const { data: draft } = useQuery({
@@ -970,6 +1111,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     nextConditionIndex.current = getNextIndexFromIds(
       conditionIds.map((expression) => expression.id),
       "condition"
+    );
+    const variableRowIds = parsed.nodes.flatMap(
+      (node) => node.variableRows ?? []
+    );
+    nextVariableRowIndex.current = getNextIndexFromIds(
+      variableRowIds.map((row) => row.id),
+      "var"
     );
     setSelectedNode(null);
     setSelectedEdgeId(null);
@@ -1216,6 +1364,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           conditionExpressions:
             kind === "flow_control.condition"
               ? [createConditionExpression(null)]
+              : undefined,
+          variableRows:
+            kind === "flow_control.input" || kind === "flow_control.output"
+              ? [{ id: `var-${nextVariableRowIndex.current++}`, name: "", value: "" }]
               : undefined
         }
       ]);
@@ -1342,6 +1494,86 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         );
         const nextExpressions = normalizeConditionExpressions(remaining);
         const nextNode = { ...node, conditionExpressions: nextExpressions };
+        const { minX, minY, maxX, maxY } = getCanvasBounds(
+          canvasBase,
+          getNodeHeight(nextNode)
+        );
+        return {
+          ...nextNode,
+          position: {
+            x: clamp(node.position.x, minX, maxX),
+            y: clamp(node.position.y, minY, maxY)
+          }
+        };
+      })
+    );
+  };
+
+  const handleVariableRowChange = (
+    nodeId: string,
+    rowId: string,
+    field: "name" | "value",
+    value: string
+  ) => {
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (
+          node.id !== nodeId ||
+          (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
+        )
+          return node;
+        const rows = node.variableRows ?? [];
+        const nextRows = rows.map((row) =>
+          row.id === rowId ? { ...row, [field]: value } : row
+        );
+        return { ...node, variableRows: nextRows };
+      })
+    );
+  };
+
+  const handleAddVariableRow = (nodeId: string) => {
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (
+          node.id !== nodeId ||
+          (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
+        )
+          return node;
+        const rows = node.variableRows ?? [];
+        const nextRows = [
+          ...rows,
+          { id: `var-${nextVariableRowIndex.current++}`, name: "", value: "" }
+        ];
+        const nextNode = { ...node, variableRows: nextRows };
+        const { minX, minY, maxX, maxY } = getCanvasBounds(
+          canvasBase,
+          getNodeHeight(nextNode)
+        );
+        return {
+          ...nextNode,
+          position: {
+            x: clamp(node.position.x, minX, maxX),
+            y: clamp(node.position.y, minY, maxY)
+          }
+        };
+      })
+    );
+  };
+
+  const handleRemoveVariableRow = (nodeId: string, rowId: string) => {
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (
+          node.id !== nodeId ||
+          (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
+        )
+          return node;
+        const rows = node.variableRows ?? [];
+        const nextRows = rows.filter((row) => row.id !== rowId);
+        if (nextRows.length === 0) {
+          nextRows.push({ id: `var-${nextVariableRowIndex.current++}`, name: "", value: "" });
+        }
+        const nextNode = { ...node, variableRows: nextRows };
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
           getNodeHeight(nextNode)
@@ -1879,6 +2111,28 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       >
                         <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
                       </marker>
+                      <marker
+                        id="arrow-true"
+                        markerWidth="10"
+                        markerHeight="10"
+                        refX="8"
+                        refY="5"
+                        orient="auto"
+                        markerUnits="strokeWidth"
+                      >
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
+                      </marker>
+                      <marker
+                        id="arrow-false"
+                        markerWidth="10"
+                        markerHeight="10"
+                        refX="8"
+                        refY="5"
+                        orient="auto"
+                        markerUnits="strokeWidth"
+                      >
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" />
+                      </marker>
                     </defs>
                     {edgesToRender.map((edge) => {
                       const fromNode = nodeMap.get(edge.from);
@@ -1907,16 +2161,28 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       const controlX2 =
                         end.x + (end.x >= start.x ? -curve : curve);
                       const path = `M ${start.x} ${start.y} C ${controlX1} ${start.y}, ${controlX2} ${end.y}, ${end.x} ${end.y}`;
+                      const isConditionNode = fromNode.kind === "flow_control.condition";
+                      const isTrueEdge = edge.fromPort === "true";
+                      const isFalseEdge = edge.fromPort === "false";
+                      let strokeColor = selectedEdgeId === edge.id ? "#0f172a" : "#94a3b8";
+                      let markerId = "arrow";
+                      
+                      if (isConditionNode && isTrueEdge) {
+                        strokeColor = selectedEdgeId === edge.id ? "#059669" : "#10b981";
+                        markerId = "arrow-true";
+                      } else if (isConditionNode && isFalseEdge) {
+                        strokeColor = selectedEdgeId === edge.id ? "#dc2626" : "#ef4444";
+                        markerId = "arrow-false";
+                      }
+                      
                       return (
                         <path
                           key={edge.id}
                           d={path}
-                          stroke={
-                            selectedEdgeId === edge.id ? "#0f172a" : "#94a3b8"
-                          }
+                          stroke={strokeColor}
                           strokeWidth={selectedEdgeId === edge.id ? "2.5" : "2"}
                           fill="none"
-                          markerEnd="url(#arrow)"
+                          markerEnd={`url(#${markerId})`}
                           className="cursor-pointer"
                           style={{ pointerEvents: "stroke" }}
                           onClick={(event) => {
@@ -1996,6 +2262,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           }
                           onRemoveConditionExpression={(expressionId) =>
                             handleRemoveConditionExpression(node.id, expressionId)
+                          }
+                          onVariableRowChange={(rowId, field, value) =>
+                            handleVariableRowChange(node.id, rowId, field, value)
+                          }
+                          onAddVariableRow={() => handleAddVariableRow(node.id)}
+                          onRemoveVariableRow={(rowId) =>
+                            handleRemoveVariableRow(node.id, rowId)
                           }
                           onNameChange={(value) => handleNameChange(node.id, value)}
                           isEditingName={editingNodeId === node.id}
