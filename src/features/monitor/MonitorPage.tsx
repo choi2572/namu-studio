@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { isRunTerminal } from "@/domain/types";
 import { SIMULATED_EVENTS_BY_RUN } from "@/features/monitor/simulatedEvents";
+import { DagView } from "@/features/monitor/DagView";
 
 type MonitorPageProps = {
   runId: string;
@@ -37,14 +38,6 @@ function getNextTimestamp(events: RunEvent[], fallback: string) {
   return date.toISOString();
 }
 
-const STATUS_STYLE_MAP: Record<NodeStatus, string> = {
-  [NodeStatus.RUNNING]: "border-status-running bg-blue-50",
-  [NodeStatus.WAITING]: "border-status-waiting bg-amber-50",
-  [NodeStatus.SUCCEEDED]: "border-status-success bg-emerald-50",
-  [NodeStatus.FAILED]: "border-status-failed bg-red-50",
-  [NodeStatus.SKIPPED]: "border-status-skipped bg-slate-100",
-  [NodeStatus.CANCELED]: "border-status-canceled bg-slate-100"
-};
 
 export function MonitorPage({ runId }: MonitorPageProps) {
   const searchParams = useSearchParams();
@@ -157,180 +150,254 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const workflowName = snapshot?.workflowName ?? "Loading...";
   const runMeta = snapshot?.run;
 
+  // UI notes: Cancel button only when RUNNING, Replay controls only when finished
+  const showCancel = runStatus === RunStatus.RUNNING && !isReplayMode;
+  const showReplay = isTerminal || isReplayMode;
+
   const selectedNodeState = useMemo(
     () => nodeStates.find((node) => node.stateName === selectedNode),
     [nodeStates, selectedNode]
   );
 
+  // 이벤트에서 엣지 정보 추출 (NODE_STARTED, NODE_SUCCEEDED 이벤트의 순서를 보고 연결 추정)
+  const edges = useMemo(() => {
+    const edgeMap = new Map<string, { from: string; to: string }>();
+    const nodeOrder: string[] = [];
+    
+    // 이벤트 순서대로 노드 추적
+    events.forEach((event) => {
+      if (event.stateName && event.eventType === "NODE_STARTED") {
+        if (!nodeOrder.includes(event.stateName)) {
+          nodeOrder.push(event.stateName);
+        }
+      }
+    });
+
+    // 순차 연결 생성 (간단한 추정)
+    for (let i = 0; i < nodeOrder.length - 1; i++) {
+      const from = nodeOrder[i];
+      const to = nodeOrder[i + 1];
+      if (from && to) {
+        edgeMap.set(`${from}-${to}`, { from, to });
+      }
+    }
+
+    return Array.from(edgeMap.values()).map((edge, index) => ({
+      id: `edge-${index}`,
+      from: edge.from,
+      to: edge.to
+    }));
+  }, [events]);
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs text-slate-500">Run Monitor</p>
-          <h1 className="text-xl font-semibold">{workflowName}</h1>
-          {runMeta && (
-            <p className="text-xs text-slate-500">
-              {runMeta.runId} · Started {formatDateTime(runMeta.startedAt)} ·{" "}
-              {formatDuration(runMeta.durationMs)}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          {runStatus && <StatusBadge status={runStatus} />}
-          {runStatus === RunStatus.RUNNING && !isReplayMode && (
-            <Button onClick={handleCancel}>Cancel</Button>
-          )}
-          {runStatus && showReplayControls && (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => setReplayPlaying((prev) => !prev)}
-              >
-                {replayPlaying ? "Pause" : "Play"}
-              </Button>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={replayPosition}
-                onChange={(event) =>
-                  setReplayPosition(Number(event.target.value))
-                }
-              />
-            </div>
-          )}
+    <div className="flex h-screen flex-col">
+      {/* Top Bar: Left - Workflow name, Right - Run state + Cancel/Replay controls */}
+      <div className="flex-shrink-0 border-b border-slate-200 bg-white p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold">{workflowName}</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            {runStatus && <StatusBadge status={runStatus} />}
+            {showCancel && (
+              <Button onClick={handleCancel}>Cancel</Button>
+            )}
+            {showReplay && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => setReplayPlaying((prev) => !prev)}
+                >
+                  {replayPlaying ? "Pause" : "Play"}
+                </Button>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={replayPosition}
+                  onChange={(event) =>
+                    setReplayPosition(Number(event.target.value))
+                  }
+                  className="w-32"
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+      {/* Center: DAG view, Right Panel: Debug Panel */}
+      <div className="flex-1 overflow-auto p-6">
+        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+        {/* DAG View - Center */}
         <Card
-          title="DAG Snapshot"
-          description="Node statuses update during live monitoring"
+          title="DAG View"
+          description={
+            isReplayMode
+              ? "Replay mode: viewing historical execution state"
+              : "Live monitoring: node statuses update in real-time"
+          }
         >
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {nodeStates.map((node) => (
-              <button
-                key={node.stateName}
-                type="button"
-                onClick={() => setSelectedNode(node.stateName)}
-                className={cn(
-                  "rounded-lg border-2 p-3 text-left text-sm font-medium transition",
-                  STATUS_STYLE_MAP[node.status],
-                  selectedNode === node.stateName
-                    ? "ring-2 ring-slate-400"
-                    : "hover:border-slate-300"
-                )}
-              >
-                <p>{node.nodeName}</p>
-                <p className="text-xs text-slate-500">{node.stateName}</p>
-                <div className="mt-2">
-                  <StatusBadge status={node.status} />
-                </div>
-              </button>
-            ))}
+          <div className="h-[600px] p-6">
+            <DagView
+              nodeStates={nodeStates}
+              selectedNode={selectedNode}
+              onSelectNode={setSelectedNode}
+              edges={edges}
+            />
           </div>
         </Card>
 
-        <Card
-          title="Debug Panel"
-          description="Select a node to inspect its debug bundle"
-        >
-          {selectedNodeState ? (
-            <div className="space-y-3 text-xs">
+        {/* Debug Panel - Right (appears when node is selected) */}
+        {selectedNodeState ? (
+          <Card
+            title="Debug Panel"
+            description="Node execution details"
+          >
+            <div className="space-y-4 text-xs">
               <div>
                 <p className="font-semibold text-slate-900">
                   {selectedNodeState.nodeName}
                 </p>
                 <p className="text-slate-500">{selectedNodeState.stateName}</p>
               </div>
-              <StatusBadge status={selectedNodeState.status} />
-              <p>Duration: {formatDuration(selectedNodeState.durationMs)}</p>
-              <div className="space-y-2">
-                <div className="rounded-md bg-slate-50 p-2">
-                  <p className="font-semibold">Input</p>
-                  <pre className="whitespace-pre-wrap text-[11px] text-slate-600">
+              <div className="flex items-center gap-2">
+                <StatusBadge status={selectedNodeState.status} />
+                {selectedNodeState.durationMs !== null && (
+                  <span className="text-slate-500">
+                    {formatDuration(selectedNodeState.durationMs)}
+                  </span>
+                )}
+              </div>
+              <div className="space-y-3">
+                <div className="rounded-md bg-slate-50 p-3">
+                  <p className="mb-1 font-semibold text-slate-900">Input</p>
+                  <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
                     {JSON.stringify(nodeDebug?.input ?? {}, null, 2)}
                   </pre>
                 </div>
-                <div className="rounded-md bg-slate-50 p-2">
-                  <p className="font-semibold">Output</p>
-                  <pre className="whitespace-pre-wrap text-[11px] text-slate-600">
+                <div className="rounded-md bg-slate-50 p-3">
+                  <p className="mb-1 font-semibold text-slate-900">Output</p>
+                  <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
                     {JSON.stringify(nodeDebug?.output ?? {}, null, 2)}
                   </pre>
                 </div>
-                <div className="rounded-md bg-slate-50 p-2">
-                  <p className="font-semibold">Feedback</p>
-                  <pre className="whitespace-pre-wrap text-[11px] text-slate-600">
+                <div className="rounded-md bg-slate-50 p-3">
+                  <p className="mb-1 font-semibold text-slate-900">Feedback</p>
+                  <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
                     {JSON.stringify(nodeDebug?.feedback ?? {}, null, 2)}
                   </pre>
                 </div>
+                {nodeDebug?.decision && (
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="mb-1 font-semibold text-slate-900">
+                      Decision
+                    </p>
+                    <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
+                      {JSON.stringify(nodeDebug.decision, null, 2)}
+                    </pre>
+                  </div>
+                )}
               </div>
             </div>
-          ) : (
-            <p className="text-xs text-slate-500">
-              Click a node to inspect debug details.
-            </p>
-          )}
-        </Card>
+          </Card>
+        ) : (
+          <Card
+            title="Debug Panel"
+            description="Select a node to inspect its debug bundle"
+          >
+            <div className="flex h-[400px] items-center justify-center">
+              <p className="text-sm text-slate-500">
+                Click a node in the DAG view to inspect debug details.
+              </p>
+            </div>
+          </Card>
+        )}
+        </div>
       </div>
 
-      <Card
-        title="Timeline"
-        description={
-          showReplayControls
-            ? "Replay-only timeline of events."
-            : "Live timeline (auto-scroll enabled)."
-        }
-        actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setAutoScroll((prev) => !prev)}
-          >
-            {autoScroll ? "Pause auto-scroll" : "Resume auto-scroll"}
-          </Button>
-        }
-      >
-        <div
-          ref={timelineRef}
-          onScroll={() => setAutoScroll(false)}
-          className="max-h-72 overflow-y-auto rounded-lg border border-slate-200"
+      {/* Bottom: Timeline - Fixed at bottom */}
+      <div className="flex-shrink-0 border-t border-slate-200 bg-white p-6">
+        <Card
+          title="Timeline"
+          description={
+            isReplayMode
+              ? "Replay-only timeline of events."
+              : "Live timeline (auto-scroll enabled)."
+          }
+          actions={
+            !isReplayMode && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAutoScroll((prev) => !prev)}
+              >
+                {autoScroll ? "Pause auto-scroll" : "Resume auto-scroll"}
+              </Button>
+            )
+          }
         >
-          <Table className="text-xs">
-            <TableHead>
-              <tr>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-                  Seq
-                </th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-                  Time
-                </th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-                  Event
-                </th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-                  Node
-                </th>
-              </tr>
-            </TableHead>
-            <tbody>
-              {events.map((event) => (
-                <TableRow
-                  key={event.eventId}
-                  onClick={() =>
-                    event.stateName ? setSelectedNode(event.stateName) : null
-                  }
-                >
-                  <TableCell>{event.seq}</TableCell>
-                  <TableCell>{formatDateTime(event.timestamp)}</TableCell>
-                  <TableCell>{event.eventType}</TableCell>
-                  <TableCell>{event.stateName ?? "-"}</TableCell>
-                </TableRow>
-              ))}
-            </tbody>
-          </Table>
-        </div>
-      </Card>
+          <div
+            ref={timelineRef}
+            onScroll={() => {
+              if (!isReplayMode) {
+                setAutoScroll(false);
+              }
+            }}
+            className="h-72 overflow-y-auto rounded-lg border border-slate-200"
+          >
+            <Table className="text-xs">
+              <TableHead>
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
+                    Seq
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
+                    Time
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
+                    Event
+                  </th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
+                    Node
+                  </th>
+                </tr>
+              </TableHead>
+              <tbody>
+                {events.length === 0 ? (
+                  <tr>
+                    <TableCell colSpan={4} className="text-center text-slate-500">
+                      No events yet
+                    </TableCell>
+                  </tr>
+                ) : (
+                  events.map((event) => (
+                    <TableRow
+                      key={event.eventId}
+                      onClick={() => {
+                        if (event.stateName) {
+                          setSelectedNode(event.stateName);
+                        }
+                      }}
+                      className={cn(
+                        "cursor-pointer transition-colors",
+                        event.stateName &&
+                          selectedNode === event.stateName &&
+                          "bg-blue-50"
+                      )}
+                    >
+                      <TableCell>{event.seq}</TableCell>
+                      <TableCell>{formatDateTime(event.timestamp)}</TableCell>
+                      <TableCell>{event.eventType}</TableCell>
+                      <TableCell>{event.stateName ?? "-"}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </tbody>
+            </Table>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
