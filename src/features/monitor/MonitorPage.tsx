@@ -443,6 +443,10 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               events={events}
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
+              nodeStates={allNodes.map((n) => ({
+                stateName: n.stateName,
+                nodeName: n.nodeName
+              }))}
             />
           </div>
         </Card>

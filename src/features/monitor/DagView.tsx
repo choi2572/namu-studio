@@ -456,7 +456,7 @@ export function DagView({
                   <div className="flex items-center gap-2 mb-1">
                     <p className={cn(
                       "font-semibold truncate",
-                      isRunning ? "text-blue-900" : isCompleted ? "text-green-900" : "text-slate-900"
+                      isRunning ? "text-blue-900" : isCompleted ? "text-green-900" : "text-slate-800"
                     )}>
                       {node.name}
                     </p>
@@ -485,10 +485,10 @@ export function DagView({
                     )}
                   </div>
 
-                  <p className="text-xs text-slate-500 truncate">{node.stateName}</p>
+                  <p className="text-xs text-slate-600 truncate">{node.stateName}</p>
                   
                   {node.durationMs !== null && (
-                    <p className="mt-1 text-xs font-medium text-slate-600">
+                    <p className="mt-1 text-xs font-medium text-slate-700">
                       ⏱ {formatDuration(node.durationMs)}
                     </p>
                   )}
