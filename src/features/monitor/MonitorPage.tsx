@@ -189,7 +189,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   }, [events]);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full flex-col overflow-hidden">
       {/* Top Bar: Left - Workflow name, Right - Run state + Cancel/Replay controls */}
       <div className="flex-shrink-0 border-b border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -236,8 +236,9 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               ? "Replay mode: viewing historical execution state"
               : "Live monitoring: node statuses update in real-time"
           }
+          className="flex flex-col overflow-hidden h-full"
         >
-          <div className="h-full p-6">
+          <div className="flex-1 min-h-0 p-6">
             <DagView
               nodeStates={nodeStates}
               selectedNode={selectedNode}

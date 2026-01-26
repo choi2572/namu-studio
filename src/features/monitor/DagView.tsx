@@ -274,11 +274,17 @@ export function DagView({
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50"
+      className="relative w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50"
+      style={{ height: "100%", minHeight: canvasSize.height }}
     >
       <svg
-        className="absolute inset-0 pointer-events-none"
-        style={{ width: canvasSize.width, height: canvasSize.height }}
+        className="absolute pointer-events-none"
+        style={{
+          width: canvasSize.width,
+          height: canvasSize.height,
+          top: 0,
+          left: 0
+        }}
       >
         <defs>
           <marker

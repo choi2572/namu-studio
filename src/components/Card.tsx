@@ -17,15 +17,20 @@ export function Card({
   children,
   className
 }: CardProps) {
+  const isFlex = className?.includes("flex");
+  
   return (
     <section
       className={cn(
         "rounded-lg border border-slate-200 bg-white p-5 shadow-sm",
-        className
+        isFlex ? className : ""
       )}
     >
       {(title || actions) && (
-        <div className="flex items-start justify-between gap-4">
+        <div className={cn(
+          "flex items-start justify-between gap-4",
+          isFlex && "flex-shrink-0"
+        )}>
           <div>
             {title && <h3 className="text-sm font-semibold">{title}</h3>}
             {description && (
@@ -35,7 +40,12 @@ export function Card({
           {actions}
         </div>
       )}
-      <div className={title || actions ? "mt-4" : ""}>{children}</div>
+      <div className={cn(
+        title || actions ? "mt-4" : "",
+        isFlex && "flex-1 min-h-0"
+      )}>
+        {children}
+      </div>
     </section>
   );
 }
