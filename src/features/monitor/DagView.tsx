@@ -50,6 +50,7 @@ type DagViewProps = {
   onSelectNode: (stateName: string) => void;
   edges?: DagEdge[];
   runStatus?: RunStatus | null;
+  viewJson?: Record<string, unknown> | null;
 };
 
 // Node status color mapping per UI notes
@@ -170,9 +171,11 @@ export function DagView({
   selectedNode,
   onSelectNode,
   edges = [],
-  runStatus
+  runStatus,
+  viewJson
 }: DagViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  
   // 노드 데이터 변환
   const dagNodes = useMemo<DagNode[]>(() => {
     return nodeStates.map((node) => ({
@@ -181,14 +184,39 @@ export function DagView({
       stateName: node.stateName,
       status: node.status,
       durationMs: node.durationMs,
-      position: { x: 0, y: 0 } // 초기값, auto layout에서 계산됨
+      position: { x: 0, y: 0 } // 초기값, layout에서 계산됨
     }));
   }, [nodeStates]);
 
-  // Auto layout 적용
+  // view_json에서 노드 위치 가져오기
+  const nodePositionsFromView = useMemo(() => {
+    if (!viewJson?.nodes || !Array.isArray(viewJson.nodes)) {
+      return null;
+    }
+
+    const positions = new Map<string, { x: number; y: number }>();
+    viewJson.nodes.forEach((node: unknown) => {
+      if (
+        typeof node === "object" &&
+        node !== null &&
+        "id" in node &&
+        "x" in node &&
+        "y" in node
+      ) {
+        const nodeData = node as { id: string; x: number; y: number };
+        positions.set(nodeData.id, { x: nodeData.x, y: nodeData.y });
+      }
+    });
+    return positions;
+  }, [viewJson]);
+
+  // Auto layout 또는 view_json에서 위치 가져오기
   const nodePositions = useMemo(() => {
+    if (nodePositionsFromView) {
+      return nodePositionsFromView;
+    }
     return computeAutoLayout(dagNodes, edges);
-  }, [dagNodes, edges]);
+  }, [dagNodes, edges, nodePositionsFromView]);
 
   // 위치가 적용된 노드들
   const positionedNodes = useMemo(() => {

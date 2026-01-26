@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
-import { runsApi } from "@/api";
+import { runsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -69,6 +69,13 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     queryKey: ["node-debug", runId, selectedNode],
     queryFn: () => runsApi.getNodeDebug(runId, selectedNode ?? ""),
     enabled: Boolean(selectedNode)
+  });
+
+  // Workflow draft 가져오기 (DSL에서 엣지 정보 추출용)
+  const { data: workflowDraft } = useQuery({
+    queryKey: ["workflow-draft", snapshot?.run.workflowId],
+    queryFn: () => workflowsApi.getDraft(snapshot!.run.workflowId),
+    enabled: Boolean(snapshot?.run.workflowId)
   });
 
   useEffect(() => {
@@ -158,35 +165,107 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     [nodeStates, selectedNode]
   );
 
-  // 이벤트에서 엣지 정보 추출 (NODE_STARTED, NODE_SUCCEEDED 이벤트의 순서를 보고 연결 추정)
+  // DSL에서 엣지 정보 추출
   const edges = useMemo(() => {
+    if (!workflowDraft?.dsl_json) {
+      return [];
+    }
+
+    const dsl = workflowDraft.dsl_json as {
+      StartAt?: string;
+      States?: Record<string, { Next?: string; Choices?: Array<{ Next?: string }>; End?: boolean }>;
+    };
+
+    if (!dsl.States) {
+      return [];
+    }
+
     const edgeMap = new Map<string, { from: string; to: string }>();
-    const nodeOrder: string[] = [];
-    
-    // 이벤트 순서대로 노드 추적
-    events.forEach((event) => {
-      if (event.stateName && event.eventType === "NODE_STARTED") {
-        if (!nodeOrder.includes(event.stateName)) {
-          nodeOrder.push(event.stateName);
+    let edgeIndex = 0;
+
+    // 모든 state를 순회하며 Next와 Choices에서 엣지 추출
+    Object.entries(dsl.States).forEach(([stateName, state]) => {
+      // 일반 Next 연결
+      if (state.Next && typeof state.Next === "string") {
+        const edgeKey = `${stateName}-${state.Next}`;
+        if (!edgeMap.has(edgeKey)) {
+          edgeMap.set(edgeKey, {
+            from: stateName,
+            to: state.Next
+          });
         }
+      }
+
+      // Choice (Condition)의 경우 Choices에서 엣지 추출
+      if (state.Choices && Array.isArray(state.Choices)) {
+        state.Choices.forEach((choice) => {
+          // Choices가 객체인 경우 (Next 속성 포함)
+          if (typeof choice === "object" && choice !== null && "Next" in choice) {
+            if (choice.Next && typeof choice.Next === "string") {
+              const edgeKey = `${stateName}-${choice.Next}`;
+              if (!edgeMap.has(edgeKey)) {
+                edgeMap.set(edgeKey, {
+                  from: stateName,
+                  to: choice.Next
+                });
+              }
+            }
+          }
+        });
       }
     });
 
-    // 순차 연결 생성 (간단한 추정)
-    for (let i = 0; i < nodeOrder.length - 1; i++) {
-      const from = nodeOrder[i];
-      const to = nodeOrder[i + 1];
-      if (from && to) {
-        edgeMap.set(`${from}-${to}`, { from, to });
-      }
-    }
-
-    return Array.from(edgeMap.values()).map((edge, index) => ({
-      id: `edge-${index}`,
+    return Array.from(edgeMap.values()).map((edge) => ({
+      id: `edge-${edgeIndex++}`,
       from: edge.from,
       to: edge.to
     }));
-  }, [events]);
+  }, [workflowDraft]);
+
+  // 모든 노드가 nodeStates에 있는지 확인하고, 없으면 DSL에서 추가
+  const allNodes = useMemo(() => {
+    if (!workflowDraft?.dsl_json) {
+      return nodeStates;
+    }
+
+    const dsl = workflowDraft.dsl_json as {
+      StartAt?: string;
+      States?: Record<string, { Label?: string; Type?: string }>;
+    };
+
+    if (!dsl.States) {
+      return nodeStates;
+    }
+
+    // DSL의 모든 state를 노드로 변환
+    const dslNodes = Object.entries(dsl.States).map(([stateName, state]) => {
+      // nodeStates에서 이미 존재하는 노드 찾기
+      const existingNode = nodeStates.find((n) => n.stateName === stateName);
+      
+      if (existingNode) {
+        return existingNode;
+      }
+
+      // 존재하지 않으면 기본 노드 생성 (아직 실행되지 않은 노드)
+      return {
+        stateName,
+        nodeName: (state.Label as string) || stateName,
+        status: NodeStatus.WAITING,
+        durationMs: null
+      } as NodeStateSnapshot;
+    });
+
+    // nodeStates에 있는 노드와 DSL 노드를 병합 (nodeStates 우선)
+    const nodeMap = new Map<string, NodeStateSnapshot>();
+    dslNodes.forEach((node) => {
+      nodeMap.set(node.stateName, node);
+    });
+    nodeStates.forEach((node) => {
+      nodeMap.set(node.stateName, node);
+    });
+
+    return Array.from(nodeMap.values());
+  }, [nodeStates, workflowDraft]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -240,11 +319,12 @@ export function MonitorPage({ runId }: MonitorPageProps) {
         >
           <div className="flex-1 min-h-0 p-6">
             <DagView
-              nodeStates={nodeStates}
+              nodeStates={allNodes}
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
               edges={edges}
               runStatus={runStatus}
+              viewJson={workflowDraft?.view_json}
             />
           </div>
         </Card>
