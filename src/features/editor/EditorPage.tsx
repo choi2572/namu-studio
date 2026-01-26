@@ -568,7 +568,7 @@ function NodeCard({
   };
 
   const nodeTypeColors = getNodeTypeColors(config.category, node.kind);
-  const nodeTypeLabel = kind === "flow_control.condition" 
+  const nodeTypeLabel = node.kind === "flow_control.condition" 
     ? "Condition" 
     : NODE_CATEGORY_LABELS[config.category];
 
