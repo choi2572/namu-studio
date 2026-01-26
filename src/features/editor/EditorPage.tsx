@@ -201,8 +201,8 @@ const CANVAS_PADDING = {
 };
 
 const CANVAS_DEFAULT = {
-  width: 1200,
-  height: 800
+  width: 1000,
+  height: 600
 };
 
 const ZOOM_LIMITS = {
@@ -782,7 +782,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [connectingFrom, setConnectingFrom] = useState<ConnectingState>(null);
   const [selectedCategory, setSelectedCategory] = useState<NodeCategory>("skill");
   const [zoom, setZoom] = useState(1);
-  const [canvasBase, setCanvasBase] = useState(CANVAS_DEFAULT);
+  const [canvasBase, setCanvasBase] = useState(() => {
+    // 초기값은 CANVAS_DEFAULT로 설정, 마운트 후 뷰포트 크기로 업데이트
+    return CANVAS_DEFAULT;
+  });
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [draftOverride, setDraftOverride] = useState<WorkflowDraft | null>(null);
   const [nodes, setNodes] = useState<EditorNode[]>([]);
@@ -807,18 +810,23 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const getViewportCanvasSize = useCallback(() => {
     if (!containerRef.current) return CANVAS_DEFAULT;
     const rect = containerRef.current.getBoundingClientRect();
+    // 뷰포트 크기와 기본 크기 중 더 큰 값 사용
     return {
-      width: Math.max(CANVAS_DEFAULT.width, rect.width * 1.5),
-      height: Math.max(CANVAS_DEFAULT.height, rect.height * 1.5)
+      width: Math.max(CANVAS_DEFAULT.width, Math.ceil(rect.width)),
+      height: Math.max(CANVAS_DEFAULT.height, Math.ceil(rect.height))
     };
   }, []);
 
   const applyDraftToEditor = useCallback((draftToApply: WorkflowDraft | null) => {
-    const viewportSize = getViewportCanvasSize();
+    const getSize = () => {
+      const viewportSize = getViewportCanvasSize();
+      return viewportSize;
+    };
+
     if (!draftToApply) {
       setNodes([]);
       setEdges([]);
-      setCanvasBase(viewportSize);
+      setCanvasBase(getSize());
       setZoom(1);
       return;
     }
@@ -826,13 +834,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     if (!parsed) {
       setNodes([]);
       setEdges([]);
-      setCanvasBase(viewportSize);
+      setCanvasBase(getSize());
       setZoom(1);
       return;
     }
     setNodes(parsed.nodes);
     setEdges(parsed.edges);
     if (parsed.canvas) {
+      const viewportSize = getViewportCanvasSize();
       setCanvasBase({
         width: Math.max(viewportSize.width, parsed.canvas.width),
         height: Math.max(viewportSize.height, parsed.canvas.height)
@@ -841,7 +850,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         clamp(parsed.canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
       );
     } else {
-      setCanvasBase(viewportSize);
+      setCanvasBase(getSize());
       setZoom(1);
     }
     nextNodeIndex.current = getNextIndexFromIds(
@@ -873,20 +882,36 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [activeDraft, applyDraftToEditor]);
 
   useEffect(() => {
+    if (!containerRef.current) return;
+
     const updateCanvasSize = () => {
       const viewportSize = getViewportCanvasSize();
-      setCanvasBase((prev) => ({
-        width: Math.max(viewportSize.width, prev.width),
-        height: Math.max(viewportSize.height, prev.height)
-      }));
+      setCanvasBase((prev) => {
+        // 저장된 크기나 현재 크기가 뷰포트보다 작으면 뷰포트 크기로 확장
+        // 하지만 저장된 크기가 더 크면 유지 (노드들이 밖으로 나가지 않도록)
+        const newWidth = Math.max(viewportSize.width, prev.width);
+        const newHeight = Math.max(viewportSize.height, prev.height);
+        // 크기가 실제로 변경된 경우에만 업데이트
+        if (newWidth !== prev.width || newHeight !== prev.height) {
+          return { width: newWidth, height: newHeight };
+        }
+        return prev;
+      });
     };
 
-    const resizeObserver = new ResizeObserver(updateCanvasSize);
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
+    // 초기 크기 설정 (컨테이너가 마운트된 후 약간의 지연)
+    const timeoutId = setTimeout(() => {
+      updateCanvasSize();
+    }, 0);
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateCanvasSize();
+    });
+    
+    resizeObserver.observe(containerRef.current);
 
     return () => {
+      clearTimeout(timeoutId);
       resizeObserver.disconnect();
     };
   }, [getViewportCanvasSize]);
