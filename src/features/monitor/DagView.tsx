@@ -479,17 +479,17 @@ export function DagView({
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
                         </span>
-                        실행 중
+                        Running
                       </span>
                     )}
                     {isWaiting && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">
-                        대기 중
+                        Waiting
                       </span>
                     )}
                     {isCompleted && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">
-                        ✓ 완료
+                        ✓ Completed
                       </span>
                     )}
                   </div>
