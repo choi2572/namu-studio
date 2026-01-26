@@ -3,8 +3,8 @@ import { cn } from "@/lib/cn";
 const STATUS_STYLES: Record<string, string> = {
   RUNNING: "bg-status-running text-white",
   WAITING: "bg-status-waiting text-white",
-  SUCCESS: "bg-status-success text-white",
-  SUCCEEDED: "bg-status-success text-white",
+  SUCCESS: "bg-status-success text-green-900",
+  SUCCEEDED: "bg-status-success text-green-900",
   FAILED: "bg-status-failed text-white",
   CANCELED: "bg-status-canceled text-white",
   SKIPPED: "bg-status-skipped text-slate-900",
