@@ -661,13 +661,13 @@ function NodeCard({
       {outputs.map((output, index) => (
         <div
           key={output.key}
-          className="absolute right-0 flex items-center gap-1 z-10"
-          style={{ top: outputOffsets[index], transform: "translate(50%, -50%)" }}
+          className="absolute right-0 flex items-center gap-2 z-10 pr-1"
+          style={{ top: outputOffsets[index], transform: "translateY(-50%)" }}
         >
           <span
             className={cn(
-              "text-[9px] whitespace-nowrap",
-              output.isActive ? "text-slate-900" : "text-slate-500"
+              "text-[9px] whitespace-nowrap text-right",
+              output.isActive ? "text-slate-900 font-medium" : "text-slate-500"
             )}
           >
             {output.label}
@@ -676,7 +676,7 @@ function NodeCard({
             type="button"
             draggable
             className={cn(
-              "flex h-3.5 w-3.5 items-center justify-center rounded-full border bg-white shadow-sm",
+              "flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
               output.isActive
                 ? "border-slate-900"
                 : output.isConnected
@@ -901,14 +901,14 @@ function NodeCard({
         (node.kind === "flow_control.input" || node.kind === "flow_control.output") &&
         node.variableRows && (
           <div className="mt-3 space-y-2 text-xs text-slate-600">
-            {node.variableRows.map((row) => (
+            {node.variableRows.map((row, rowIndex) => (
               <div key={row.id} className="flex items-center gap-2 min-w-0">
                 <input
                   value={row.name}
                   onChange={(event) =>
                     onVariableRowChange?.(row.id, "name", event.target.value)
                   }
-                  placeholder="변수명"
+                  placeholder="Variable name"
                   className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                 />
                 <input
@@ -916,34 +916,36 @@ function NodeCard({
                   onChange={(event) =>
                     onVariableRowChange?.(row.id, "value", event.target.value)
                   }
-                  placeholder="값"
+                  placeholder="Value"
                   className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                 />
-                <button
-                  type="button"
-                  data-no-drag
-                  className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRemoveVariableRow?.(row.id);
-                  }}
-                  title="Remove row"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={2.5}
-                    stroke="currentColor"
-                    className="h-3.5 w-3.5"
+                {node.variableRows && node.variableRows.length > 1 && (
+                  <button
+                    type="button"
+                    data-no-drag
+                    className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveVariableRow?.(row.id);
+                    }}
+                    title="Remove row"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M19.5 12h-15"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2.5}
+                      stroke="currentColor"
+                      className="h-3.5 w-3.5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M19.5 12h-15"
+                      />
+                    </svg>
+                  </button>
+                )}
               </div>
             ))}
             <button
