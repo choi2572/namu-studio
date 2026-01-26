@@ -57,7 +57,7 @@ type DagViewProps = {
 const NODE_STATUS_STYLE_MAP: Record<NodeStatus, string> = {
   [NodeStatus.RUNNING]: "border-blue-600 bg-blue-50 shadow-lg ring-4 ring-blue-400 ring-opacity-50 animate-pulse",
   [NodeStatus.WAITING]: "border-amber-500 bg-amber-50 border-dashed",
-  [NodeStatus.SUCCEEDED]: "border-green-500 bg-green-50",
+  [NodeStatus.SUCCEEDED]: "border-green-600 bg-green-100",
   [NodeStatus.FAILED]: "border-red-600 bg-red-50",
   [NodeStatus.SKIPPED]: "border-slate-300 bg-slate-50 opacity-50",
   [NodeStatus.CANCELED]: "border-slate-400 bg-slate-100 opacity-60"
@@ -436,11 +436,7 @@ export function DagView({
                 NODE_STATUS_STYLE_MAP[node.status],
                 selectedNode === node.stateName
                   ? "ring-4 ring-slate-400 ring-offset-2"
-                  : "hover:shadow-lg",
-                // 실행 완료된 노드는 더 명확하게
-                isCompleted && "border-green-600 bg-green-100",
-                // 대기 중인 노드는 점선으로
-                isWaiting && "border-dashed"
+                  : "hover:shadow-lg"
               )}
             >
               {/* 왼쪽 타입 인디케이터 바 */}
@@ -456,7 +452,10 @@ export function DagView({
                   <div className="flex items-center gap-2 mb-1">
                     <p className={cn(
                       "font-semibold truncate",
-                      isRunning ? "text-blue-900" : isCompleted ? "text-green-900" : "text-slate-800"
+                      isRunning ? "text-blue-900" : 
+                      isCompleted ? "text-green-900" : 
+                      isWaiting ? "text-amber-900" :
+                      "text-slate-800"
                     )}>
                       {node.name}
                     </p>
@@ -483,9 +482,27 @@ export function DagView({
                         실행 중
                       </span>
                     )}
+                    {isWaiting && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">
+                        대기 중
+                      </span>
+                    )}
+                    {isCompleted && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">
+                        ✓ 완료
+                      </span>
+                    )}
                   </div>
 
-                  <p className="text-xs text-slate-600 truncate">{node.stateName}</p>
+                  <p className={cn(
+                    "text-xs truncate",
+                    isRunning ? "text-blue-700" :
+                    isCompleted ? "text-green-700" :
+                    isWaiting ? "text-amber-700" :
+                    "text-slate-600"
+                  )}>
+                    {node.stateName}
+                  </p>
                   
                   {node.durationMs !== null && (
                     <p className="mt-1 text-xs font-medium text-slate-700">
