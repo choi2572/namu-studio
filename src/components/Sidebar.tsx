@@ -14,29 +14,26 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
 
   return (
     <aside
       className={cn(
-        "flex h-full flex-col border-r border-slate-200 bg-white transition-all duration-300",
+        "flex h-screen flex-col border-r border-slate-200 bg-white transition-all duration-300",
         isCollapsed ? "w-16" : "w-64"
       )}
     >
-      <div className="flex items-center justify-between px-4 py-4">
-        {!isCollapsed && (
-          <h2 className="text-sm font-semibold text-slate-900">Navigation</h2>
-        )}
+      <div className="flex items-center px-4 py-4">
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
           className={cn(
-            "ml-auto rounded-md p-1.5 text-slate-600 hover:bg-slate-100",
+            "rounded-md p-1.5 text-slate-600 hover:bg-slate-100",
             isCollapsed && "mx-auto"
           )}
           aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           <svg
-            className={cn("h-5 w-5 transition-transform", isCollapsed && "rotate-180")}
+            className="h-6 w-6"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -45,7 +42,7 @@ export function Sidebar() {
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={2}
-              d="M15 19l-7-7 7-7"
+              d="M4 6h16M4 12h16M4 18h16"
             />
           </svg>
         </button>
