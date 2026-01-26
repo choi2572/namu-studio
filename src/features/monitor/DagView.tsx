@@ -176,10 +176,10 @@ export function DagView({
 }: DagViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   
-  // 노드 데이터 변환
+  // 노드 데이터 변환 (id는 stateName과 일치)
   const dagNodes = useMemo<DagNode[]>(() => {
     return nodeStates.map((node) => ({
-      id: node.stateName,
+      id: node.stateName, // stateName을 id로 사용 (view_json의 id와 일치)
       name: node.nodeName,
       stateName: node.stateName,
       status: node.status,
@@ -204,26 +204,44 @@ export function DagView({
         "y" in node
       ) {
         const nodeData = node as { id: string; x: number; y: number };
+        // view_json의 id는 stateName과 일치해야 함
         positions.set(nodeData.id, { x: nodeData.x, y: nodeData.y });
       }
     });
-    return positions;
-  }, [viewJson]);
+    
+    // 모든 노드가 view_json에 있는지 확인 (최소 80% 이상 있어야 사용)
+    const nodesInView = dagNodes.filter((node) => positions.has(node.id)).length;
+    const coverage = dagNodes.length > 0 ? nodesInView / dagNodes.length : 0;
+    
+    // 대부분의 노드가 view_json에 있으면 사용, 아니면 null 반환하여 auto layout 사용
+    return coverage >= 0.8 ? positions : null;
+  }, [viewJson, dagNodes]);
 
-  // Auto layout 또는 view_json에서 위치 가져오기
+  // Auto layout 사용 (항상 Editor와 동일한 레이아웃 적용)
   const nodePositions = useMemo(() => {
-    if (nodePositionsFromView) {
-      return nodePositionsFromView;
-    }
+    // 항상 auto layout 사용 (view_json은 나중에 지원)
     return computeAutoLayout(dagNodes, edges);
-  }, [dagNodes, edges, nodePositionsFromView]);
+  }, [dagNodes, edges]);
 
   // 위치가 적용된 노드들
   const positionedNodes = useMemo(() => {
-    return dagNodes.map((node) => ({
-      ...node,
-      position: nodePositions.get(node.id) ?? { x: PADDING, y: PADDING }
-    }));
+    return dagNodes.map((node, index) => {
+      const position = nodePositions.get(node.id);
+      if (!position) {
+        // 위치가 없으면 기본값 사용 (겹치지 않도록 인덱스 기반으로 배치)
+        return {
+          ...node,
+          position: { 
+            x: PADDING + (index % 3) * SPACING_X, 
+            y: PADDING + Math.floor(index / 3) * (NODE_METRICS.collapsedHeight + ROW_GAP)
+          }
+        };
+      }
+      return {
+        ...node,
+        position
+      };
+    });
   }, [dagNodes, nodePositions]);
 
   // Canvas 크기 계산
@@ -240,11 +258,15 @@ export function DagView({
 
   // 렌더링할 엣지들
   const edgesToRender = useMemo(() => {
-    return edges.filter((edge) => {
+    if (edges.length === 0) return [];
+    
+    const validEdges = edges.filter((edge) => {
       const fromNode = positionedNodes.find((n) => n.id === edge.from);
       const toNode = positionedNodes.find((n) => n.id === edge.to);
-      return fromNode && toNode;
+      const isValid = fromNode && toNode;
+      return isValid;
     });
+    return validEdges;
   }, [edges, positionedNodes]);
 
   // Running 상태인 노드 찾기
@@ -305,13 +327,15 @@ export function DagView({
       className="relative w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50"
       style={{ height: "100%", minHeight: canvasSize.height }}
     >
+      {/* SVG for edges - behind nodes */}
       <svg
         className="absolute pointer-events-none"
+        width={canvasSize.width}
+        height={canvasSize.height}
         style={{
-          width: canvasSize.width,
-          height: canvasSize.height,
           top: 0,
-          left: 0
+          left: 0,
+          zIndex: 0
         }}
       >
         <defs>
@@ -327,40 +351,45 @@ export function DagView({
             <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" />
           </marker>
         </defs>
-        {edgesToRender.map((edge) => {
-          const fromNode = positionedNodes.find((n) => n.id === edge.from);
-          const toNode = positionedNodes.find((n) => n.id === edge.to);
-          if (!fromNode || !toNode) return null;
+        {edgesToRender.length > 0 ? (
+          edgesToRender.map((edge) => {
+            const fromNode = positionedNodes.find((n) => n.id === edge.from);
+            const toNode = positionedNodes.find((n) => n.id === edge.to);
+            if (!fromNode || !toNode) {
+              return null;
+            }
 
-          const fromNodeHeight = NODE_METRICS.collapsedHeight;
-          const toNodeHeight = NODE_METRICS.collapsedHeight;
-          const outputOffsets = getPortOffsets(fromNodeHeight, 1);
-          const start = {
-            x: fromNode.position.x + NODE_METRICS.width,
-            y: fromNode.position.y + outputOffsets[0]
-          };
-          const end = {
-            x: toNode.position.x,
-            y: toNode.position.y + toNodeHeight / 2
-          };
-          const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
-          const controlX1 = start.x + (end.x >= start.x ? curve : -curve);
-          const controlX2 = end.x + (end.x >= start.x ? -curve : curve);
-          const path = `M ${start.x} ${start.y} C ${controlX1} ${start.y}, ${controlX2} ${end.y}, ${end.x} ${end.y}`;
+            const fromNodeHeight = NODE_METRICS.collapsedHeight;
+            const toNodeHeight = NODE_METRICS.collapsedHeight;
+            const outputOffsets = getPortOffsets(fromNodeHeight, 1);
+            const start = {
+              x: fromNode.position.x + NODE_METRICS.width,
+              y: fromNode.position.y + outputOffsets[0]
+            };
+            const end = {
+              x: toNode.position.x,
+              y: toNode.position.y + toNodeHeight / 2
+            };
+            const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
+            const controlX1 = start.x + (end.x >= start.x ? curve : -curve);
+            const controlX2 = end.x + (end.x >= start.x ? -curve : curve);
+            const path = `M ${start.x} ${start.y} C ${controlX1} ${start.y}, ${controlX2} ${end.y}, ${end.x} ${end.y}`;
 
-          return (
-            <path
-              key={edge.id}
-              d={path}
-              stroke="#94a3b8"
-              strokeWidth="2"
-              fill="none"
-              markerEnd="url(#arrow)"
-            />
-          );
-        })}
+            return (
+              <path
+                key={edge.id}
+                d={path}
+                stroke="#94a3b8"
+                strokeWidth="2"
+                fill="none"
+                markerEnd="url(#arrow)"
+              />
+            );
+          })
+        ) : null}
       </svg>
 
+      {/* Nodes - in front of edges */}
       {positionedNodes.map((node) => {
         const nodeTypeColor = getNodeTypeColor(node.name, node.stateName);
         const nodeType = nodeTypeColor.includes("skill")
@@ -379,7 +408,8 @@ export function DagView({
             style={{
               left: node.position.x,
               top: node.position.y,
-              width: NODE_METRICS.width
+              width: NODE_METRICS.width,
+              zIndex: 10
             }}
           >
             <button

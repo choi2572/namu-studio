@@ -197,6 +197,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       }
 
       // Choice (Condition)의 경우 Choices에서 엣지 추출
+      // Choices는 객체 배열이며 각각 Next 속성을 가짐
       if (state.Choices && Array.isArray(state.Choices)) {
         state.Choices.forEach((choice) => {
           // Choices가 객체인 경우 (Next 속성 포함)
@@ -212,6 +213,17 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             }
           }
         });
+      }
+      
+      // Condition 노드가 Next를 직접 가지는 경우도 처리 (mock data의 경우)
+      if (state.Type === "Condition" && state.Next && typeof state.Next === "string") {
+        const edgeKey = `${stateName}-${state.Next}`;
+        if (!edgeMap.has(edgeKey)) {
+          edgeMap.set(edgeKey, {
+            from: stateName,
+            to: state.Next
+          });
+        }
       }
     });
 
