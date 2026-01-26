@@ -9,7 +9,7 @@ import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableCell, TableHead, TableRow } from "@/components/Table";
 import { formatDateTime, formatDuration } from "@/lib/format";
-import { RunStatus } from "@/domain/types";
+import { RunStatus, NodeStatus } from "@/domain/types";
 import { Button } from "@/components/Button";
 import { cn } from "@/lib/cn";
 
@@ -37,6 +37,22 @@ export function DashboardPage() {
     .length;
   const successRuns = runs.filter((run) => run.status === RunStatus.SUCCESS)
     .length;
+
+  // Get snapshot for latest run if it's running
+  const isLatestRunActive =
+    latestRun &&
+    (latestRun.status === RunStatus.RUNNING ||
+      latestRun.status === RunStatus.WAITING);
+  const { data: latestRunSnapshot } = useQuery({
+    queryKey: ["run-snapshot", latestRun?.runId],
+    queryFn: () => runsApi.getSnapshot(latestRun!.runId),
+    enabled: Boolean(latestRun && isLatestRunActive)
+  });
+
+  // Find current running node
+  const currentRunningNode = latestRunSnapshot?.nodeStates.find(
+    (node) => node.status === NodeStatus.RUNNING
+  );
 
   return (
     <div className="space-y-6">
@@ -100,6 +116,34 @@ export function DashboardPage() {
                   <StatusBadge status={latestRun.status} />
                 </div>
               </div>
+
+              {/* Current Status / Running Node */}
+              {isLatestRunActive && currentRunningNode ? (
+                <div className="rounded-lg border-2 border-blue-300 bg-blue-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-blue-700">
+                    Currently Running
+                  </p>
+                  <p className="mt-2 text-lg font-bold text-blue-900">
+                    {currentRunningNode.nodeName}
+                  </p>
+                </div>
+              ) : !isLatestRunActive ? (
+                <div className="rounded-lg border-2 border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                    Status
+                  </p>
+                  <p className="mt-2 text-lg font-bold text-slate-900">
+                    {latestRun.status === RunStatus.SUCCESS && "✓ Completed"}
+                    {latestRun.status === RunStatus.FAILED && "✗ Failed"}
+                    {latestRun.status === RunStatus.CANCELED && "⊘ Canceled"}
+                    {latestRun.status === RunStatus.CREATED && "○ Created"}
+                    {!["SUCCESS", "FAILED", "CANCELED", "CREATED"].includes(
+                      latestRun.status
+                    ) && latestRun.status}
+                  </p>
+                </div>
+              ) : null}
+
               <div className="grid grid-cols-2 gap-4 rounded-lg border-2 border-slate-200 bg-white p-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
