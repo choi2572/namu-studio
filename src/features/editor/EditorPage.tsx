@@ -575,7 +575,7 @@ function NodeCard({
   return (
     <div
       className={cn(
-        "relative rounded-lg border-2 bg-white p-3 shadow-sm overflow-hidden",
+        "relative rounded-lg border-2 bg-white p-3 shadow-sm overflow-visible",
         isSelected ? "border-slate-900 ring-4 ring-slate-400 ring-offset-2" : "border-slate-200"
       )}
       data-node-card
@@ -596,7 +596,7 @@ function NodeCard({
         <button
           type="button"
           className={cn(
-            "absolute left-0 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm",
+            "absolute left-0 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
             inputConnected ? "border-slate-400" : "border-slate-200"
           )}
           style={{ top: nodeHeight / 2 }}
@@ -626,12 +626,12 @@ function NodeCard({
       {outputs.map((output, index) => (
         <div
           key={output.key}
-          className="absolute right-0 flex items-center gap-1"
-          style={{ top: outputOffsets[index], transform: "translateY(-50%)" }}
+          className="absolute right-0 flex items-center gap-1 z-10"
+          style={{ top: outputOffsets[index], transform: "translate(50%, -50%)" }}
         >
           <span
             className={cn(
-              "text-[9px]",
+              "text-[9px] whitespace-nowrap",
               output.isActive ? "text-slate-900" : "text-slate-500"
             )}
           >
@@ -641,7 +641,7 @@ function NodeCard({
             type="button"
             draggable
             className={cn(
-              "flex h-3.5 w-3.5 translate-x-1/2 items-center justify-center rounded-full border bg-white shadow-sm",
+              "flex h-3.5 w-3.5 items-center justify-center rounded-full border bg-white shadow-sm",
               output.isActive
                 ? "border-slate-900"
                 : output.isConnected
@@ -738,19 +738,50 @@ function NodeCard({
             </span>
           </div>
 
-          {!node.isExpanded && (
+          {(!node.isExpanded || config.category === "skill") && (
             <p className="text-xs text-slate-600 truncate">{node.kind}</p>
           )}
         </div>
         <button
           type="button"
-          className="text-[10px] text-slate-500 hover:text-slate-900 flex-shrink-0"
+          data-no-drag
+          className="flex-shrink-0 text-slate-500 hover:text-slate-900"
           onClick={(event) => {
             event.stopPropagation();
             onToggleExpand();
           }}
         >
-          {node.isExpanded ? "Fold" : "Unfold"}
+          {node.isExpanded ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              stroke="currentColor"
+              className="w-4 h-4"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4.5 15.75l7.5-7.5 7.5 7.5"
+              />
+            </svg>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              stroke="currentColor"
+              className="w-4 h-4"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19.5 8.25l-7.5 7.5-7.5-7.5"
+              />
+            </svg>
+          )}
         </button>
       </div>
 
