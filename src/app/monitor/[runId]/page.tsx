@@ -1,5 +1,10 @@
 import { MonitorPage } from "@/features/monitor/MonitorPage";
 
-export default function Page({ params }: { params: { runId: string } }) {
-  return <MonitorPage runId={params.runId} />;
+export default async function Page({
+  params
+}: {
+  params: Promise<{ runId: string }>;
+}) {
+  const { runId } = await params;
+  return <MonitorPage runId={runId} />;
 }

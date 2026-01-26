@@ -1,5 +1,10 @@
 import { EditorPage } from "@/features/editor/EditorPage";
 
-export default function Page({ params }: { params: { workflowId: string } }) {
-  return <EditorPage workflowId={params.workflowId} />;
+export default async function Page({
+  params
+}: {
+  params: Promise<{ workflowId: string }>;
+}) {
+  const { workflowId } = await params;
+  return <EditorPage workflowId={workflowId} />;
 }
