@@ -661,13 +661,15 @@ function NodeCard({
       {outputs.map((output, index) => (
         <div
           key={output.key}
-          className="absolute right-0 flex items-center gap-2 z-10 pr-1"
-          style={{ top: outputOffsets[index], transform: "translateY(-50%)" }}
+          className="absolute right-0 flex items-center gap-1.5 z-20"
+          style={{ top: outputOffsets[index], transform: "translate(50%, -50%)" }}
         >
           <span
             className={cn(
               "text-[9px] whitespace-nowrap text-right",
-              output.isActive ? "text-slate-900 font-medium" : "text-slate-500"
+              output.isActive 
+                ? "text-slate-700 font-medium opacity-80" 
+                : "text-slate-400 opacity-60"
             )}
           >
             {output.label}
@@ -822,7 +824,7 @@ function NodeCard({
 
 
       {node.isExpanded && node.kind === "flow_control.condition" && (
-        <div className="mt-3 space-y-2 text-xs text-slate-600">
+        <div className="mt-3 space-y-2 text-xs text-slate-600 pr-12">
           {conditionExpressions.map((expression, index) => (
             <div key={expression.id} className="space-y-1">
               <span className="text-[10px] text-slate-500">Expression</span>
