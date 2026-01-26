@@ -791,6 +791,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const nextNodeIndex = useRef(1);
   const nextEdgeIndex = useRef(1);
   const nextConditionIndex = useRef(1);
@@ -803,11 +804,21 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const activeDraft = draftOverride ?? draft;
 
+  const getViewportCanvasSize = useCallback(() => {
+    if (!containerRef.current) return CANVAS_DEFAULT;
+    const rect = containerRef.current.getBoundingClientRect();
+    return {
+      width: Math.max(CANVAS_DEFAULT.width, rect.width * 1.5),
+      height: Math.max(CANVAS_DEFAULT.height, rect.height * 1.5)
+    };
+  }, []);
+
   const applyDraftToEditor = useCallback((draftToApply: WorkflowDraft | null) => {
+    const viewportSize = getViewportCanvasSize();
     if (!draftToApply) {
       setNodes([]);
       setEdges([]);
-      setCanvasBase(CANVAS_DEFAULT);
+      setCanvasBase(viewportSize);
       setZoom(1);
       return;
     }
@@ -815,7 +826,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     if (!parsed) {
       setNodes([]);
       setEdges([]);
-      setCanvasBase(CANVAS_DEFAULT);
+      setCanvasBase(viewportSize);
       setZoom(1);
       return;
     }
@@ -823,14 +834,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setEdges(parsed.edges);
     if (parsed.canvas) {
       setCanvasBase({
-        width: parsed.canvas.width,
-        height: parsed.canvas.height
+        width: Math.max(viewportSize.width, parsed.canvas.width),
+        height: Math.max(viewportSize.height, parsed.canvas.height)
       });
       setZoom(
         clamp(parsed.canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
       );
     } else {
-      setCanvasBase(CANVAS_DEFAULT);
+      setCanvasBase(viewportSize);
       setZoom(1);
     }
     nextNodeIndex.current = getNextIndexFromIds(
@@ -860,6 +871,25 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     loadedWorkflowId.current = activeDraft.workflowId;
     applyDraftToEditor(activeDraft);
   }, [activeDraft, applyDraftToEditor]);
+
+  useEffect(() => {
+    const updateCanvasSize = () => {
+      const viewportSize = getViewportCanvasSize();
+      setCanvasBase((prev) => ({
+        width: Math.max(viewportSize.width, prev.width),
+        height: Math.max(viewportSize.height, prev.height)
+      }));
+    };
+
+    const resizeObserver = new ResizeObserver(updateCanvasSize);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [getViewportCanvasSize]);
 
   const { data: validationErrors = [] } = useQuery({
     queryKey: ["workflow-validation", workflowId],
@@ -1598,7 +1628,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         )}
 
         <Card className="border-dashed min-w-0">
-          <div className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50">
+          <div
+            ref={containerRef}
+            className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50"
+          >
             <div
               ref={scrollRef}
               className="h-full w-full min-w-0 min-h-0 overflow-x-auto overflow-y-auto"
