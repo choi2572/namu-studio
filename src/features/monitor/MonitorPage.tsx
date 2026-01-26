@@ -8,14 +8,13 @@ import { runsApi } from "@/api";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Table, TableCell, TableHead, TableRow } from "@/components/Table";
 import { NodeStateSnapshot } from "@/api/interfaces";
 import { NodeStatus, RunEvent, RunStatus } from "@/domain/types";
-import { cn } from "@/lib/cn";
-import { formatDateTime, formatDuration } from "@/lib/format";
+import { formatDuration } from "@/lib/format";
 import { isRunTerminal } from "@/domain/types";
 import { SIMULATED_EVENTS_BY_RUN } from "@/features/monitor/simulatedEvents";
 import { DagView } from "@/features/monitor/DagView";
+import { TimelineTable } from "@/features/monitor/TimelineTable";
 
 type MonitorPageProps = {
   runId: string;
@@ -227,8 +226,8 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       </div>
 
       {/* Center: DAG view, Right Panel: Debug Panel */}
-      <div className="flex-1 overflow-auto p-6">
-        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+      <div className="flex-1 overflow-hidden p-6">
+        <div className="grid h-full gap-6 lg:grid-cols-[2fr_1fr]">
         {/* DAG View - Center */}
         <Card
           title="DAG View"
@@ -238,12 +237,13 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               : "Live monitoring: node statuses update in real-time"
           }
         >
-          <div className="h-[600px] p-6">
+          <div className="h-full p-6">
             <DagView
               nodeStates={nodeStates}
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
               edges={edges}
+              runStatus={runStatus}
             />
           </div>
         </Card>
@@ -346,55 +346,11 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             }}
             className="h-72 overflow-y-auto rounded-lg border border-slate-200"
           >
-            <Table className="text-xs">
-              <TableHead>
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-                    Seq
-                  </th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-                    Time
-                  </th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-                    Event
-                  </th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-                    Node
-                  </th>
-                </tr>
-              </TableHead>
-              <tbody>
-                {events.length === 0 ? (
-                  <tr>
-                    <TableCell colSpan={4} className="text-center text-slate-500">
-                      No events yet
-                    </TableCell>
-                  </tr>
-                ) : (
-                  events.map((event) => (
-                    <TableRow
-                      key={event.eventId}
-                      onClick={() => {
-                        if (event.stateName) {
-                          setSelectedNode(event.stateName);
-                        }
-                      }}
-                      className={cn(
-                        "cursor-pointer transition-colors",
-                        event.stateName &&
-                          selectedNode === event.stateName &&
-                          "bg-blue-50"
-                      )}
-                    >
-                      <TableCell>{event.seq}</TableCell>
-                      <TableCell>{formatDateTime(event.timestamp)}</TableCell>
-                      <TableCell>{event.eventType}</TableCell>
-                      <TableCell>{event.stateName ?? "-"}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </tbody>
-            </Table>
+            <TimelineTable
+              events={events}
+              selectedNode={selectedNode}
+              onSelectNode={setSelectedNode}
+            />
           </div>
         </Card>
       </div>

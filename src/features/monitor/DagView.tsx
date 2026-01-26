@@ -2,10 +2,11 @@
 
 import { useMemo } from "react";
 import { NodeStateSnapshot } from "@/api/interfaces";
-import { NodeStatus } from "@/domain/types";
+import { NodeStatus, RunStatus } from "@/domain/types";
 import { cn } from "@/lib/cn";
 import { formatDuration } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useEffect, useRef } from "react";
 
 // Editor의 상수들 재사용
 const NODE_METRICS = {
@@ -48,6 +49,7 @@ type DagViewProps = {
   selectedNode: string | null;
   onSelectNode: (stateName: string) => void;
   edges?: DagEdge[];
+  runStatus?: RunStatus | null;
 };
 
 // Node status color mapping per UI notes
@@ -141,12 +143,36 @@ function getPortOffsets(nodeHeight: number, count: number) {
   return Array.from({ length: count }, (_, index) => gap * (index + 1));
 }
 
+// Node type별 색상 (Editor와 유사)
+const NODE_TYPE_COLORS: Record<string, string> = {
+  skill: "border-blue-200 bg-blue-50 text-blue-700",
+  flow_control: "border-cyan-200 bg-cyan-50 text-cyan-700",
+  event: "border-purple-200 bg-purple-50 text-purple-700",
+  condition: "border-amber-200 bg-amber-50 text-amber-700"
+};
+
+function getNodeTypeColor(nodeName: string, stateName: string): string {
+  const name = nodeName.toLowerCase();
+  if (name.includes("condition") || name.includes("if")) {
+    return NODE_TYPE_COLORS.condition;
+  }
+  if (name.includes("skill") || name.includes("pick") || name.includes("place")) {
+    return NODE_TYPE_COLORS.skill;
+  }
+  if (name.includes("event") || name.includes("wait") || name.includes("webhook")) {
+    return NODE_TYPE_COLORS.event;
+  }
+  return NODE_TYPE_COLORS.flow_control;
+}
+
 export function DagView({
   nodeStates,
   selectedNode,
   onSelectNode,
-  edges = []
+  edges = [],
+  runStatus
 }: DagViewProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   // 노드 데이터 변환
   const dagNodes = useMemo<DagNode[]>(() => {
     return nodeStates.map((node) => ({
@@ -193,6 +219,50 @@ export function DagView({
     });
   }, [edges, positionedNodes]);
 
+  // Running 상태인 노드 찾기
+  const runningNode = useMemo(() => {
+    return positionedNodes.find((node) => node.status === NodeStatus.RUNNING);
+  }, [positionedNodes]);
+
+  // Auto focus & scroll to running node
+  useEffect(() => {
+    if (!runningNode || !containerRef.current || runStatus !== RunStatus.RUNNING) {
+      return;
+    }
+
+    const container = containerRef.current;
+    const nodeElement = container.querySelector(
+      `[data-node-id="${runningNode.id}"]`
+    ) as HTMLElement;
+
+    if (nodeElement) {
+      // 노드 선택
+      onSelectNode(runningNode.stateName);
+
+      // 스크롤하여 노드가 보이도록
+      const containerRect = container.getBoundingClientRect();
+      const nodeRect = nodeElement.getBoundingClientRect();
+      const scrollLeft =
+        container.scrollLeft +
+        nodeRect.left -
+        containerRect.left -
+        containerRect.width / 2 +
+        nodeRect.width / 2;
+      const scrollTop =
+        container.scrollTop +
+        nodeRect.top -
+        containerRect.top -
+        containerRect.height / 2 +
+        nodeRect.height / 2;
+
+      container.scrollTo({
+        left: scrollLeft,
+        top: scrollTop,
+        behavior: "smooth"
+      });
+    }
+  }, [runningNode, runStatus, onSelectNode]);
+
   if (nodeStates.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
@@ -202,7 +272,10 @@ export function DagView({
   }
 
   return (
-    <div className="relative h-full w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50">
+    <div
+      ref={containerRef}
+      className="relative h-full w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50"
+    >
       <svg
         className="absolute inset-0 pointer-events-none"
         style={{ width: canvasSize.width, height: canvasSize.height }}
@@ -254,42 +327,64 @@ export function DagView({
         })}
       </svg>
 
-      {positionedNodes.map((node) => (
-        <div
-          key={node.id}
-          className="absolute"
-          style={{
-            left: node.position.x,
-            top: node.position.y,
-            width: NODE_METRICS.width
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => onSelectNode(node.stateName)}
-            className={cn(
-              "w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all",
-              NODE_STATUS_STYLE_MAP[node.status],
-              selectedNode === node.stateName
-                ? "ring-4 ring-slate-400 ring-offset-2"
-                : "hover:shadow-md"
-            )}
+      {positionedNodes.map((node) => {
+        const nodeTypeColor = getNodeTypeColor(node.name, node.stateName);
+        const nodeType = nodeTypeColor.includes("skill")
+          ? "Skill"
+          : nodeTypeColor.includes("condition")
+            ? "Condition"
+            : nodeTypeColor.includes("event")
+              ? "Event"
+              : "Flow Control";
+
+        return (
+          <div
+            key={node.id}
+            data-node-id={node.id}
+            className="absolute"
+            style={{
+              left: node.position.x,
+              top: node.position.y,
+              width: NODE_METRICS.width
+            }}
           >
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <p className="font-semibold text-slate-900">{node.name}</p>
-                <p className="mt-1 text-xs text-slate-500">{node.stateName}</p>
+            <button
+              type="button"
+              onClick={() => onSelectNode(node.stateName)}
+              className={cn(
+                "w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all",
+                NODE_STATUS_STYLE_MAP[node.status],
+                selectedNode === node.stateName
+                  ? "ring-4 ring-slate-400 ring-offset-2"
+                  : "hover:shadow-md"
+              )}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-slate-900">{node.name}</p>
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[9px] font-semibold",
+                        nodeTypeColor
+                      )}
+                    >
+                      {nodeType}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">{node.stateName}</p>
+                </div>
+                <StatusBadge status={node.status} />
               </div>
-              <StatusBadge status={node.status} />
-            </div>
-            {node.durationMs !== null && (
-              <p className="mt-2 text-xs text-slate-500">
-                {formatDuration(node.durationMs)}
-              </p>
-            )}
-          </button>
-        </div>
-      ))}
+              {node.durationMs !== null && (
+                <p className="mt-2 text-xs text-slate-500">
+                  {formatDuration(node.durationMs)}
+                </p>
+              )}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
