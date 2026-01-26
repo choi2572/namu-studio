@@ -3,7 +3,7 @@ import { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 type CardProps = {
-  title?: string;
+  title?: ReactNode;
   description?: string;
   actions?: ReactNode;
   children: ReactNode;
