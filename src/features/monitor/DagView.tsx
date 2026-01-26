@@ -53,14 +53,14 @@ type DagViewProps = {
   viewJson?: Record<string, unknown> | null;
 };
 
-// Node status color mapping per UI notes
+// Node status color mapping - 더 명확한 구분
 const NODE_STATUS_STYLE_MAP: Record<NodeStatus, string> = {
-  [NodeStatus.RUNNING]: "border-blue-500 bg-blue-100 shadow-md ring-2 ring-blue-300",
-  [NodeStatus.WAITING]: "border-amber-400 bg-amber-50",
-  [NodeStatus.SUCCEEDED]: "border-slate-300 bg-white",
-  [NodeStatus.FAILED]: "border-red-500 bg-red-50",
-  [NodeStatus.SKIPPED]: "border-slate-200 bg-slate-50 opacity-60",
-  [NodeStatus.CANCELED]: "border-slate-300 bg-slate-100 opacity-60"
+  [NodeStatus.RUNNING]: "border-blue-600 bg-blue-50 shadow-lg ring-4 ring-blue-400 ring-opacity-50 animate-pulse",
+  [NodeStatus.WAITING]: "border-amber-500 bg-amber-50 border-dashed",
+  [NodeStatus.SUCCEEDED]: "border-green-500 bg-green-50",
+  [NodeStatus.FAILED]: "border-red-600 bg-red-50",
+  [NodeStatus.SKIPPED]: "border-slate-300 bg-slate-50 opacity-50",
+  [NodeStatus.CANCELED]: "border-slate-400 bg-slate-100 opacity-60"
 };
 
 // Auto layout 함수 (Editor의 handleAutoLayout과 동일한 로직)
@@ -144,26 +144,46 @@ function getPortOffsets(nodeHeight: number, count: number) {
   return Array.from({ length: count }, (_, index) => gap * (index + 1));
 }
 
-// Node type별 색상 (Editor와 유사)
-const NODE_TYPE_COLORS: Record<string, string> = {
-  skill: "border-blue-200 bg-blue-50 text-blue-700",
-  flow_control: "border-cyan-200 bg-cyan-50 text-cyan-700",
-  event: "border-purple-200 bg-purple-50 text-purple-700",
-  condition: "border-amber-200 bg-amber-50 text-amber-700"
+// Node type별 색상 - 왼쪽 인디케이터용
+const NODE_TYPE_COLORS: Record<string, { border: string; bg: string; text: string; indicator: string }> = {
+  skill: {
+    border: "border-blue-200",
+    bg: "bg-blue-50",
+    text: "text-blue-700",
+    indicator: "bg-blue-500"
+  },
+  flow_control: {
+    border: "border-cyan-200",
+    bg: "bg-cyan-50",
+    text: "text-cyan-700",
+    indicator: "bg-cyan-500"
+  },
+  event: {
+    border: "border-purple-200",
+    bg: "bg-purple-50",
+    text: "text-purple-700",
+    indicator: "bg-purple-500"
+  },
+  condition: {
+    border: "border-amber-200",
+    bg: "bg-amber-50",
+    text: "text-amber-700",
+    indicator: "bg-amber-500"
+  }
 };
 
-function getNodeTypeColor(nodeName: string, stateName: string): string {
+function getNodeTypeInfo(nodeName: string, stateName: string): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
   const name = nodeName.toLowerCase();
   if (name.includes("condition") || name.includes("if")) {
-    return NODE_TYPE_COLORS.condition;
+    return { type: "Condition", colors: NODE_TYPE_COLORS.condition };
   }
   if (name.includes("skill") || name.includes("pick") || name.includes("place")) {
-    return NODE_TYPE_COLORS.skill;
+    return { type: "Skill", colors: NODE_TYPE_COLORS.skill };
   }
   if (name.includes("event") || name.includes("wait") || name.includes("webhook")) {
-    return NODE_TYPE_COLORS.event;
+    return { type: "Event", colors: NODE_TYPE_COLORS.event };
   }
-  return NODE_TYPE_COLORS.flow_control;
+  return { type: "Flow Control", colors: NODE_TYPE_COLORS.flow_control };
 }
 
 export function DagView({
@@ -391,14 +411,10 @@ export function DagView({
 
       {/* Nodes - in front of edges */}
       {positionedNodes.map((node) => {
-        const nodeTypeColor = getNodeTypeColor(node.name, node.stateName);
-        const nodeType = nodeTypeColor.includes("skill")
-          ? "Skill"
-          : nodeTypeColor.includes("condition")
-            ? "Condition"
-            : nodeTypeColor.includes("event")
-              ? "Event"
-              : "Flow Control";
+        const nodeTypeInfo = getNodeTypeInfo(node.name, node.stateName);
+        const isRunning = node.status === NodeStatus.RUNNING;
+        const isCompleted = node.status === NodeStatus.SUCCEEDED;
+        const isWaiting = node.status === NodeStatus.WAITING;
 
         return (
           <div
@@ -416,35 +432,73 @@ export function DagView({
               type="button"
               onClick={() => onSelectNode(node.stateName)}
               className={cn(
-                "w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all",
+                "relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
                 NODE_STATUS_STYLE_MAP[node.status],
                 selectedNode === node.stateName
                   ? "ring-4 ring-slate-400 ring-offset-2"
-                  : "hover:shadow-md"
+                  : "hover:shadow-lg",
+                // 실행 완료된 노드는 더 명확하게
+                isCompleted && "border-green-600 bg-green-100",
+                // 대기 중인 노드는 점선으로
+                isWaiting && "border-dashed"
               )}
             >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-slate-900">{node.name}</p>
+              {/* 왼쪽 타입 인디케이터 바 */}
+              <div
+                className={cn(
+                  "absolute left-0 top-0 bottom-0 w-1",
+                  nodeTypeInfo.colors.indicator
+                )}
+              />
+
+              <div className="flex items-start justify-between pl-1">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className={cn(
+                      "font-semibold truncate",
+                      isRunning ? "text-blue-900" : isCompleted ? "text-green-900" : "text-slate-900"
+                    )}>
+                      {node.name}
+                    </p>
+                  </div>
+                  
+                  {/* 노드 타입 배지 */}
+                  <div className="flex items-center gap-2 mb-1">
                     <span
                       className={cn(
-                        "rounded px-1.5 py-0.5 text-[9px] font-semibold",
-                        nodeTypeColor
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                        nodeTypeInfo.colors.bg,
+                        nodeTypeInfo.colors.text,
+                        "border border-current"
                       )}
                     >
-                      {nodeType}
+                      {nodeTypeInfo.type}
                     </span>
+                    {isRunning && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-700">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
+                        </span>
+                        실행 중
+                      </span>
+                    )}
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">{node.stateName}</p>
+
+                  <p className="text-xs text-slate-500 truncate">{node.stateName}</p>
+                  
+                  {node.durationMs !== null && (
+                    <p className="mt-1 text-xs font-medium text-slate-600">
+                      ⏱ {formatDuration(node.durationMs)}
+                    </p>
+                  )}
                 </div>
-                <StatusBadge status={node.status} />
+                
+                {/* 상태 배지 */}
+                <div className="ml-2 flex-shrink-0">
+                  <StatusBadge status={node.status} />
+                </div>
               </div>
-              {node.durationMs !== null && (
-                <p className="mt-2 text-xs text-slate-500">
-                  {formatDuration(node.durationMs)}
-                </p>
-              )}
             </button>
           </div>
         );
