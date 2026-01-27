@@ -27,18 +27,14 @@ def create_app(config_class=Config):
 
     if _should_seed(app):
         from app.seed import seed_data
+        from app.repos import registry
         seed_data(
-            workflow_repo=workflows._workflow_repo,
-            version_repo=workflows._version_repo,
-            view_repo=workflows._view_repo,
-            reset=False,
-        )
-        seed_data(
-            workflow_repo=runs._workflow_repo,
-            version_repo=runs._workflow_version_repo,
-            run_repo=runs._run_repo,
-            node_run_repo=runs._node_run_repo,
-            run_event_repo=runs._run_event_repo,
+            workflow_repo=registry.workflow_repo,
+            version_repo=registry.version_repo,
+            view_repo=registry.view_repo,
+            run_repo=registry.run_repo,
+            node_run_repo=registry.node_run_repo,
+            run_event_repo=registry.run_event_repo,
             reset=False,
         )
     

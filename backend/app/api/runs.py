@@ -4,22 +4,15 @@ from werkzeug.exceptions import BadRequest, NotFound, Conflict
 
 from app.services.run_service import RunService
 from app.services.workflow_service import WorkflowService
-from app.repos.memory import (
-    InMemoryRunRepository,
-    InMemoryNodeRunRepository,
-    InMemoryRunEventRepository,
-    InMemoryWorkflowRepository,
-    InMemoryWorkflowVersionRepository,
+from app.repos.registry import (
+    run_repo as _run_repo,
+    node_run_repo as _node_run_repo,
+    run_event_repo as _run_event_repo,
+    workflow_repo as _workflow_repo,
+    version_repo as _workflow_version_repo,
 )
 from app.adapters.execution_engine import DummyExecutionEngineAdapter
 
-
-# Initialize repositories
-_run_repo = InMemoryRunRepository()
-_node_run_repo = InMemoryNodeRunRepository()
-_run_event_repo = InMemoryRunEventRepository()
-_workflow_repo = InMemoryWorkflowRepository()
-_workflow_version_repo = InMemoryWorkflowVersionRepository()
 
 # Initialize execution adapter
 _execution_adapter = DummyExecutionEngineAdapter(

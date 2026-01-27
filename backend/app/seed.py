@@ -48,36 +48,80 @@ SEED_BASE_TIME = datetime(2024, 1, 15, 9, 0, 0)
 PUBLISHED_DSL = {
     "StartAt": SEED_IDS.node_fetch_state,
     "States": {
-        SEED_IDS.node_fetch_state: {"Type": "Task", "Next": SEED_IDS.node_transform_state},
-        SEED_IDS.node_transform_state: {"Type": "Task", "Next": SEED_IDS.node_process_state},
-        SEED_IDS.node_process_state: {"Type": "Task"},
+        SEED_IDS.node_fetch_state: {
+            "Type": "Task",
+            "Next": SEED_IDS.node_transform_state,
+            "Label": "Fetch Data",
+        },
+        SEED_IDS.node_transform_state: {
+            "Type": "Task",
+            "Next": SEED_IDS.node_process_state,
+            "Label": "Transform Data",
+        },
+        SEED_IDS.node_process_state: {
+            "Type": "Task",
+            "End": True,
+            "Label": "Process Data",
+        },
     },
 }
 
 DRAFT_DSL = {
     "StartAt": "DraftStart",
     "States": {
-        "DraftStart": {"Type": "Task"},
+        "DraftStart": {"Type": "Task", "End": True, "Label": "Draft Start"},
     },
 }
 
 PUBLISHED_VIEW = {
+    "version": "v1",
     "nodes": [
-        {"id": SEED_IDS.node_fetch_state, "position": {"x": 120, "y": 100}},
-        {"id": SEED_IDS.node_transform_state, "position": {"x": 320, "y": 100}},
-        {"id": SEED_IDS.node_process_state, "position": {"x": 520, "y": 100}},
+        {
+            "id": "node-1",
+            "name": SEED_IDS.node_fetch_state,
+            "kind": "skill.pick",
+            "position": {"x": 140, "y": 120},
+            "isExpanded": False,
+            "params": {"target": "bin-A", "quantity": "1"},
+        },
+        {
+            "id": "node-2",
+            "name": SEED_IDS.node_transform_state,
+            "kind": "skill.place",
+            "position": {"x": 380, "y": 120},
+            "isExpanded": False,
+            "params": {"destination": "slot-3", "orientation": "north"},
+        },
+        {
+            "id": "node-3",
+            "name": SEED_IDS.node_process_state,
+            "kind": "event.webhook",
+            "position": {"x": 620, "y": 120},
+            "isExpanded": False,
+            "params": {"url": "https://hooks.example/process", "method": "POST"},
+        },
     ],
     "edges": [
-        {"from": SEED_IDS.node_fetch_state, "to": SEED_IDS.node_transform_state},
-        {"from": SEED_IDS.node_transform_state, "to": SEED_IDS.node_process_state},
+        {"id": "edge-1", "from": "node-1", "fromPort": "next", "to": "node-2"},
+        {"id": "edge-2", "from": "node-2", "fromPort": "next", "to": "node-3"},
     ],
+    "canvas": {"width": 1000, "height": 600, "zoom": 1},
 }
 
 DRAFT_VIEW = {
+    "version": "v1",
     "nodes": [
-        {"id": "DraftStart", "position": {"x": 140, "y": 140}},
+        {
+            "id": "node-1",
+            "name": "DraftStart",
+            "kind": "skill.pick",
+            "position": {"x": 180, "y": 160},
+            "isExpanded": False,
+            "params": {"target": "bin-A", "quantity": "1"},
+        },
     ],
     "edges": [],
+    "canvas": {"width": 1000, "height": 600, "zoom": 1},
 }
 
 

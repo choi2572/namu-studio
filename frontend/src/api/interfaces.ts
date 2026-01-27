@@ -31,6 +31,7 @@ export type RunSnapshot = {
 
 export interface WorkflowsApi {
   list(): Promise<WorkflowListItem[]>;
+  create(payload?: { name?: string; description?: string }): Promise<WorkflowListItem>;
   getDraft(workflowId: string): Promise<WorkflowDraft>;
   saveDraft(workflowId: string, payload: WorkflowDraft): Promise<WorkflowDraft>;
   validateDraft(workflowId: string): Promise<ValidationError[]>;

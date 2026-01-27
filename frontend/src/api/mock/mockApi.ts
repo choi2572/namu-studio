@@ -167,6 +167,28 @@ export const mockWorkflowsApi: WorkflowsApi = {
     ];
     return delay(deepClone(merged));
   },
+  async create(payload?: {
+    name?: string;
+    description?: string;
+  }): Promise<WorkflowListItem> {
+    const workflowId = createWorkflowId();
+    const workflowName = payload?.name ?? "Untitled Workflow";
+    const item: WorkflowListItem = {
+      workflowId,
+      name: workflowName,
+      state: "DRAFT",
+      latestVersion: null,
+      latestRun: null
+    };
+    workflowList.unshift(item);
+    workflowDrafts[workflowId] = {
+      workflowId,
+      dsl_json: {},
+      view_json: {},
+      updatedAt: new Date().toISOString()
+    };
+    return delay(deepClone(item));
+  },
   async getDraft(workflowId: string): Promise<WorkflowDraft> {
     const stored = findWorkflowFile(workflowId);
     if (stored) {
