@@ -119,10 +119,18 @@ class WorkflowService:
     def validate_draft(self, workflow_id: str) -> List[ValidationError]:
         """Validate draft workflow."""
         draft = self.version_repo.get_latest_draft(workflow_id)
-        if not draft:
+        if draft:
+            return validate_workflow_dsl(draft.dsl_json)
+
+        workflow = self.workflow_repo.get(workflow_id)
+        if not workflow or not workflow.current_published_version_id:
             return [ValidationError(id="no_draft", message="No draft version found")]
-        
-        return validate_workflow_dsl(draft.dsl_json)
+
+        published = self.version_repo.get(workflow.current_published_version_id)
+        if not published:
+            return [ValidationError(id="no_published", message="Published version not found")]
+
+        return validate_workflow_dsl(published.dsl_json)
     
     def publish_workflow(self, workflow_id: str) -> Optional[WorkflowVersion]:
         """Publish workflow version."""
