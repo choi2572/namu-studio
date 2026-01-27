@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableCell, TableHead, TableRow } from "@/components/Table";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { RunStatus, NodeStatus } from "@/domain/types";
+import type { RunSummary } from "@/domain/types";
 import { Button } from "@/components/Button";
 import { cn } from "@/lib/cn";
 
@@ -23,6 +25,26 @@ export function DashboardPage() {
     queryKey: ["runs"],
     queryFn: () => runsApi.list()
   });
+
+  const latestRunsByWorkflow = useMemo(() => {
+    const map = new Map<string, RunSummary>();
+    runs.forEach((run) => {
+      const existing = map.get(run.workflowId);
+      if (!existing) {
+        map.set(run.workflowId, run);
+        return;
+      }
+      const existingTime = new Date(existing.startedAt).getTime();
+      const nextTime = new Date(run.startedAt).getTime();
+      if (
+        Number.isNaN(existingTime) ||
+        (!Number.isNaN(nextTime) && nextTime > existingTime)
+      ) {
+        map.set(run.workflowId, run);
+      }
+    });
+    return map;
+  }, [runs]);
 
   const latestRun = [...runs].sort((a, b) =>
     a.startedAt < b.startedAt ? 1 : -1
@@ -276,20 +298,25 @@ export function DashboardPage() {
                 </tr>
               </TableHead>
               <tbody>
-                {workflows.map((workflow) => (
-                  <TableRow
-                    key={workflow.workflowId}
-                    onClick={() => {
-                      if (workflow.state === "DRAFT") {
-                        router.push(`/editor/${workflow.workflowId}`);
-                        return;
-                      }
-                      if (workflow.latestRun) {
-                        router.push(`/monitor/${workflow.latestRun.runId}`);
-                      }
-                    }}
-                    className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50"
-                  >
+                {workflows.map((workflow) => {
+                  const latestRunForWorkflow =
+                    workflow.latestRun ??
+                    latestRunsByWorkflow.get(workflow.workflowId) ??
+                    null;
+                  return (
+                    <TableRow
+                      key={workflow.workflowId}
+                      onClick={() => {
+                        if (workflow.state === "DRAFT") {
+                          router.push(`/editor/${workflow.workflowId}`);
+                          return;
+                        }
+                        if (latestRunForWorkflow) {
+                          router.push(`/monitor/${latestRunForWorkflow.runId}`);
+                        }
+                      }}
+                      className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50"
+                    >
                     <TableCell className="px-5 py-4">
                       <div className="space-y-1.5">
                         <p className="text-base font-bold text-slate-900">
@@ -306,8 +333,8 @@ export function DashboardPage() {
                       </div>
                     </TableCell>
                     <TableCell className="px-5 py-4">
-                      {workflow.latestRun ? (
-                        <StatusBadge status={workflow.latestRun.status} />
+                      {latestRunForWorkflow ? (
+                        <StatusBadge status={latestRunForWorkflow.status} />
                       ) : (
                         <span className="text-sm font-medium text-slate-400">
                           No runs
@@ -315,9 +342,9 @@ export function DashboardPage() {
                       )}
                     </TableCell>
                     <TableCell className="px-5 py-4">
-                      {workflow.latestRun ? (
+                      {latestRunForWorkflow ? (
                         <span className="text-base font-semibold text-slate-700">
-                          {formatDuration(workflow.latestRun.durationMs)}
+                          {formatDuration(latestRunForWorkflow.durationMs)}
                         </span>
                       ) : (
                         <span className="text-sm text-slate-400">-</span>
@@ -335,8 +362,9 @@ export function DashboardPage() {
                         Edit
                       </Button>
                     </TableCell>
-                  </TableRow>
-                ))}
+                    </TableRow>
+                  );
+                })}
               </tbody>
             </Table>
           </div>

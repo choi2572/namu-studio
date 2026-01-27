@@ -1032,21 +1032,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const nextConditionIndex = useRef(1);
   const nextVariableRowIndex = useRef(1);
   const loadedWorkflowId = useRef<string | null>(null);
-  const hasTriggeredCreate = useRef(false);
-
-  const createMutation = useMutation({
-    mutationFn: () => workflowsApi.create({ name: "Untitled Workflow" }),
-    onSuccess: (workflow) => {
-      queryClient.invalidateQueries({ queryKey: ["workflows"] });
-      router.replace(`/editor/${workflow.workflowId}`);
-    }
-  });
-
-  useEffect(() => {
-    if (!isNewWorkflow || hasTriggeredCreate.current) return;
-    hasTriggeredCreate.current = true;
-    createMutation.mutate();
-  }, [createMutation, isNewWorkflow]);
 
   const { data: draft } = useQuery({
     queryKey: ["workflow-draft", workflowId],
@@ -1195,8 +1180,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   });
 
   const saveMutation = useMutation({
-    mutationFn: (payload: WorkflowDraft) =>
-      workflowsApi.saveDraft(workflowId, payload),
+    mutationFn: ({
+      workflowId: targetWorkflowId,
+      payload
+    }: {
+      workflowId: string;
+      payload: WorkflowDraft;
+    }) => workflowsApi.saveDraft(targetWorkflowId, payload),
     onSuccess: (saved) => {
       setDraftOverride(saved);
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
@@ -1404,14 +1394,38 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     ]
   );
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const view_json = buildViewJson(nodes, edges, canvasBase, zoom);
     const dsl_json = buildDslJson(nodes, edges);
+    const updatedAt = new Date().toISOString();
+
+    if (isNewWorkflow) {
+      const name = workflowName.trim() || "Untitled Workflow";
+      try {
+        const created = await workflowsApi.create({ name });
+        saveMutation.mutate({
+          workflowId: created.workflowId,
+          payload: {
+            workflowId: created.workflowId,
+            dsl_json,
+            view_json,
+            updatedAt
+          }
+        });
+      } catch (error) {
+        console.error("Failed to create workflow draft", error);
+      }
+      return;
+    }
+
     saveMutation.mutate({
       workflowId,
-      dsl_json,
-      view_json,
-      updatedAt: new Date().toISOString()
+      payload: {
+        workflowId,
+        dsl_json,
+        view_json,
+        updatedAt
+      }
     });
   };
 
