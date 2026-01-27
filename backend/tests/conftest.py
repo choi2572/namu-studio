@@ -16,6 +16,10 @@ from app.adapters.execution_engine import DummyExecutionEngineAdapter
 from app.seed import seed_data, SEED_IDS
 from app.repos import registry
 
+# Import parametrized fixtures (only if not already defined)
+# Note: conftest_repos fixtures will override the non-parametrized ones below
+pytest_plugins = ["tests.conftest_repos"]
+
 
 @pytest.fixture
 def app():

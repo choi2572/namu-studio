@@ -23,6 +23,12 @@ backend/
     repos/               # 리포지토리
       interfaces.py      # 인터페이스
       memory.py          # In-memory 구현
+      sqlite.py          # SQLite 구현
+      registry.py        # 저장소 인스턴스 관리
+    db/                  # 데이터베이스 모듈 (SQLite)
+      __init__.py
+      connection.py      # 연결 관리
+      schema.py          # 스키마 및 마이그레이션
     adapters/            # 외부 시스템 어댑터
       execution_engine.py  # Dummy ExecutionEngineAdapter
   tests/                 # 테스트
@@ -52,6 +58,49 @@ python -m app
 ```
 
 서버는 기본적으로 `http://localhost:5000`에서 실행됩니다.
+
+## 저장소 백엔드 설정
+
+백엔드는 두 가지 저장소 백엔드를 지원합니다:
+
+### In-Memory (기본값)
+데이터는 메모리에만 저장되며 서버 재시작 시 사라집니다. 개발 및 테스트에 적합합니다.
+
+```bash
+# 기본값 (명시적으로 설정하려면)
+export REPO_BACKEND=inmemory
+python run.py
+```
+
+### SQLite
+데이터는 SQLite 데이터베이스 파일에 영구 저장됩니다.
+
+```bash
+# SQLite 사용
+export REPO_BACKEND=sqlite
+export DB_PATH=./data/app.db  # 선택사항 (기본값: ./data/app.db)
+export SEED_DATA=1  # 개발용 시드 데이터 추가 (선택사항)
+python run.py
+```
+
+**SQLite 설정:**
+- `REPO_BACKEND=sqlite`: SQLite 백엔드 활성화
+- `DB_PATH`: 데이터베이스 파일 경로 (기본값: `./data/app.db`)
+- `SEED_DATA=1`: 개발 환경에서만 시드 데이터 추가 (DEV 전용)
+
+**SQLite PRAGMA 설정:**
+- `journal_mode=WAL`: Write-Ahead Logging 활성화
+- `foreign_keys=ON`: 외래 키 제약 조건 활성화
+- `synchronous=NORMAL`: 성능과 안정성 균형
+- `busy_timeout=5000`: 동시 접근 대기 시간 (5초)
+
+**데이터베이스 파일 위치:**
+- 기본값: `./data/app.db` (프로젝트 루트의 `data` 디렉토리)
+- 프로덕션 권장: `/var/lib/<app>/app.db` 또는 환경 변수로 지정
+
+**마이그레이션:**
+- 앱 시작 시 자동으로 스키마 버전을 확인하고 필요한 마이그레이션을 적용합니다.
+- 간단한 버전 테이블(`schema_version`)을 사용하여 마이그레이션을 관리합니다.
 
 ## API 엔드포인트
 
@@ -93,21 +142,26 @@ pytest
 pytest --cov=app --cov-report=html
 ```
 
+**테스트 파라미터화:**
+주요 테스트는 `inmemory`와 `sqlite` 백엔드 모두에서 실행됩니다. 각 테스트는 두 백엔드에서 자동으로 실행되어 동일한 동작을 보장합니다.
+
 ## 현재 구현 상태
 
 ### 완료
 - ✅ In-memory 리포지토리
+- ✅ SQLite 리포지토리 (Python stdlib sqlite3)
+- ✅ 저장소 백엔드 선택 (REPO_BACKEND 환경 변수)
+- ✅ 자동 스키마 마이그레이션
 - ✅ Dummy ExecutionEngineAdapter (시뮬레이션)
 - ✅ Workflow CRUD 및 버전 관리
 - ✅ Run 실행 및 모니터링
 - ✅ 이벤트 페이지네이션
 - ✅ 검증 로직
 - ✅ 하나의 활성 실행 제약 조건
+- ✅ 시드 데이터 (DEV 전용, SEED_DATA=1)
 
 ### 미구현 (M1 범위 밖)
-- ❌ 실제 SQLite 데이터베이스
 - ❌ 실제 미들웨어 연결
-- ❌ JSON 파일 기반 영속성 (옵션으로 추가 가능)
 
 ## CORS
 

@@ -5,31 +5,6 @@ from datetime import datetime
 
 from app.adapters.execution_engine import DummyExecutionEngineAdapter
 from app.domain.models import Run, RunStatus, NodeStatus
-from app.repos.memory import (
-    InMemoryRunRepository,
-    InMemoryNodeRunRepository,
-    InMemoryRunEventRepository,
-    InMemoryWorkflowRepository,
-    InMemoryWorkflowVersionRepository,
-)
-
-
-@pytest.fixture
-def repos():
-    """Create in-memory repositories."""
-    run_repo = InMemoryRunRepository()
-    node_run_repo = InMemoryNodeRunRepository()
-    event_repo = InMemoryRunEventRepository()
-    workflow_repo = InMemoryWorkflowRepository()
-    version_repo = InMemoryWorkflowVersionRepository()
-    
-    return {
-        "run_repo": run_repo,
-        "node_run_repo": node_run_repo,
-        "event_repo": event_repo,
-        "workflow_repo": workflow_repo,
-        "version_repo": version_repo,
-    }
 
 
 @pytest.fixture
@@ -89,7 +64,7 @@ def test_linear_flow_execution(adapter, run, repos):
     assert updated_run.finished_at is not None
     
     # Check node runs
-    node_runs = repos["node_run_repo"].list_all({"run_id": run.run_id})
+    node_runs = repos["node_run_repo"].get_by_run(run.run_id)
     assert len(node_runs) == 2
     
     state1_run = next((nr for nr in node_runs if nr.state_name == "State1"), None)

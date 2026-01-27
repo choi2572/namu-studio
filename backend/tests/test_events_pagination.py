@@ -1,30 +1,15 @@
 """Test events pagination."""
 import pytest
+import time
 
-from app.domain.models import RunEvent, Run
-from app.repos.memory import InMemoryRunEventRepository, InMemoryRunRepository
 from app.services.run_service import RunService
 from app.services.workflow_service import WorkflowService
-from app.repos.memory import (
-    InMemoryNodeRunRepository,
-    InMemoryWorkflowRepository,
-    InMemoryWorkflowVersionRepository,
-    InMemoryWorkflowViewRepository,
-)
 from app.adapters.execution_engine import DummyExecutionEngineAdapter
-from datetime import datetime
 
 
-def test_events_pagination():
+def test_events_pagination(workflow_repo, version_repo, view_repo, run_repo, node_run_repo, run_event_repo):
     """Test events pagination with after_seq."""
     # Setup
-    workflow_repo = InMemoryWorkflowRepository()
-    version_repo = InMemoryWorkflowVersionRepository()
-    view_repo = InMemoryWorkflowViewRepository()
-    run_repo = InMemoryRunRepository()
-    node_run_repo = InMemoryNodeRunRepository()
-    run_event_repo = InMemoryRunEventRepository()
-    
     workflow_service = WorkflowService(workflow_repo, version_repo, view_repo)
     execution_adapter = DummyExecutionEngineAdapter(
         run_repo, node_run_repo, run_event_repo, workflow_repo, version_repo
@@ -51,7 +36,6 @@ def test_events_pagination():
     assert run is not None
     
     # Wait a bit for events to be generated
-    import time
     time.sleep(2)
     
     # Get all events

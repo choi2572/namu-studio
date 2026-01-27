@@ -5,27 +5,12 @@ import time
 from app.domain.models import RunStatus
 from app.services.run_service import RunService
 from app.services.workflow_service import WorkflowService
-from app.repos.memory import (
-    InMemoryRunRepository,
-    InMemoryNodeRunRepository,
-    InMemoryRunEventRepository,
-    InMemoryWorkflowRepository,
-    InMemoryWorkflowVersionRepository,
-    InMemoryWorkflowViewRepository,
-)
 from app.adapters.execution_engine import DummyExecutionEngineAdapter
 
 
-def test_one_active_run_constraint():
+def test_one_active_run_constraint(workflow_repo, version_repo, view_repo, run_repo, node_run_repo, run_event_repo):
     """Test that only one active run is allowed at a time."""
     # Setup
-    workflow_repo = InMemoryWorkflowRepository()
-    version_repo = InMemoryWorkflowVersionRepository()
-    view_repo = InMemoryWorkflowViewRepository()
-    run_repo = InMemoryRunRepository()
-    node_run_repo = InMemoryNodeRunRepository()
-    run_event_repo = InMemoryRunEventRepository()
-    
     workflow_service = WorkflowService(workflow_repo, version_repo, view_repo)
     execution_adapter = DummyExecutionEngineAdapter(
         run_repo, node_run_repo, run_event_repo, workflow_repo, version_repo

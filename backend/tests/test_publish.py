@@ -3,18 +3,10 @@ import pytest
 
 from app.domain.models import WorkflowState, VersionState
 from app.services.workflow_service import WorkflowService
-from app.repos.memory import (
-    InMemoryWorkflowRepository,
-    InMemoryWorkflowVersionRepository,
-    InMemoryWorkflowViewRepository,
-)
 
 
-def test_publish_workflow_success():
+def test_publish_workflow_success(workflow_repo, version_repo, view_repo):
     """Test successful publish flow."""
-    workflow_repo = InMemoryWorkflowRepository()
-    version_repo = InMemoryWorkflowVersionRepository()
-    view_repo = InMemoryWorkflowViewRepository()
     service = WorkflowService(workflow_repo, version_repo, view_repo)
     
     # Create workflow
@@ -48,11 +40,8 @@ def test_publish_workflow_success():
     assert updated_workflow.current_published_version_id == version.version_id
 
 
-def test_publish_with_validation_error():
+def test_publish_with_validation_error(workflow_repo, version_repo, view_repo):
     """Test that publish fails when validation errors exist."""
-    workflow_repo = InMemoryWorkflowRepository()
-    version_repo = InMemoryWorkflowVersionRepository()
-    view_repo = InMemoryWorkflowViewRepository()
     service = WorkflowService(workflow_repo, version_repo, view_repo)
     
     # Create workflow

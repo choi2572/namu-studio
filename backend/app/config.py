@@ -13,9 +13,11 @@ class Config:
     JSON_SORT_KEYS = False
     SEED_DATA = _get_bool_env("SEED_DATA", "false")
     
-    # Persistence mode: "memory" or "json_file"
-    PERSISTENCE_MODE = os.environ.get("PERSISTENCE_MODE", "memory")
-    JSON_FILE_PATH = os.environ.get("JSON_FILE_PATH", "data.json")
+    # Repository backend: "inmemory" or "sqlite"
+    REPO_BACKEND = os.environ.get("REPO_BACKEND", "inmemory")
+    
+    # SQLite database path (only used when REPO_BACKEND=sqlite)
+    DB_PATH = os.environ.get("DB_PATH", "./data/app.db")
 
 
 class DevelopmentConfig(Config):

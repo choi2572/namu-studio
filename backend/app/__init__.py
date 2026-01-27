@@ -13,6 +13,12 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
     
+    # Initialize database if using SQLite
+    repo_backend = app.config.get("REPO_BACKEND", "inmemory")
+    if repo_backend == "sqlite":
+        from app.db import init_db
+        init_db()
+    
     # Enable CORS for frontend dev
     CORS(app, origins=["http://localhost:3000"])
     
