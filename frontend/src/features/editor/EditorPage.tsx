@@ -1003,6 +1003,7 @@ function NodeCard({
 export function EditorPage({ workflowId }: EditorPageProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const isNewWorkflow = workflowId === "new";
   const [showPalette, setShowPalette] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -1031,10 +1032,26 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const nextConditionIndex = useRef(1);
   const nextVariableRowIndex = useRef(1);
   const loadedWorkflowId = useRef<string | null>(null);
+  const hasTriggeredCreate = useRef(false);
+
+  const createMutation = useMutation({
+    mutationFn: () => workflowsApi.create({ name: "Untitled Workflow" }),
+    onSuccess: (workflow) => {
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      router.replace(`/editor/${workflow.workflowId}`);
+    }
+  });
+
+  useEffect(() => {
+    if (!isNewWorkflow || hasTriggeredCreate.current) return;
+    hasTriggeredCreate.current = true;
+    createMutation.mutate();
+  }, [createMutation, isNewWorkflow]);
 
   const { data: draft } = useQuery({
     queryKey: ["workflow-draft", workflowId],
-    queryFn: () => workflowsApi.getDraft(workflowId)
+    queryFn: () => workflowsApi.getDraft(workflowId),
+    enabled: !isNewWorkflow
   });
 
   const { data: workflows } = useQuery({

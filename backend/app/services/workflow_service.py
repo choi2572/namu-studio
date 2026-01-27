@@ -39,7 +39,20 @@ class WorkflowService:
             description=description,
             state=WorkflowState.DRAFT,
         )
-        return self.workflow_repo.create(workflow)
+        workflow = self.workflow_repo.create(workflow)
+
+        version_number = f"v{len(self.version_repo.get_by_workflow(workflow.workflow_id)) + 1}"
+        draft = WorkflowVersion(
+            version_id=str(uuid.uuid4()),
+            workflow_id=workflow.workflow_id,
+            version_number=version_number,
+            state=VersionState.DRAFT,
+            dsl_json={},
+        )
+        self.version_repo.create(draft)
+        self.view_repo.save(WorkflowView(version_id=draft.version_id, view_json={}))
+
+        return workflow
     
     def list_workflows(self) -> List[Workflow]:
         """List all workflows."""
@@ -142,14 +155,28 @@ class WorkflowService:
     def get_draft(self, workflow_id: str) -> Optional[dict]:
         """Get draft with view."""
         draft = self.version_repo.get_latest_draft(workflow_id)
-        if not draft:
+        if draft:
+            view = self.view_repo.get(draft.version_id)
+            return {
+                "workflowId": workflow_id,
+                "dsl_json": draft.dsl_json,
+                "view_json": view.view_json if view else {},
+                "updatedAt": draft.created_at.isoformat(),
+            }
+
+        workflow = self.workflow_repo.get(workflow_id)
+        if not workflow or not workflow.current_published_version_id:
             return None
-        
-        view = self.view_repo.get(draft.version_id)
-        
+
+        published = self.version_repo.get(workflow.current_published_version_id)
+        if not published:
+            return None
+
+        view = self.view_repo.get(published.version_id)
+        updated_at = published.published_at or published.created_at
         return {
             "workflowId": workflow_id,
-            "dsl_json": draft.dsl_json,
+            "dsl_json": published.dsl_json,
             "view_json": view.view_json if view else {},
-            "updatedAt": draft.created_at.isoformat(),
+            "updatedAt": updated_at.isoformat(),
         }

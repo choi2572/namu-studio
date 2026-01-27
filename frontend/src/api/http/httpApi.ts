@@ -40,6 +40,25 @@ export const httpWorkflowsApi: WorkflowsApi = {
     return handleResponse<WorkflowListItem[]>(response);
   },
 
+  async create(payload?: {
+    name?: string;
+    description?: string;
+  }): Promise<WorkflowListItem> {
+    const url = getApiUrl("/workflows");
+    logApiCall("POST", url, payload);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: payload?.name,
+        description: payload?.description
+      })
+    });
+    return handleResponse<WorkflowListItem>(response);
+  },
+
   async getDraft(workflowId: string): Promise<WorkflowDraft> {
     const url = getApiUrl(`/workflows/${workflowId}/draft`);
     logApiCall("GET", url);
