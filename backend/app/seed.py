@@ -329,6 +329,18 @@ def _seed_workflows(
             updated_at=draft_updated,
         ))
 
+    # Create published workflow BEFORE creating its version (for foreign key constraint)
+    if not workflow_repo.get(SEED_IDS.workflow_published_id):
+        workflow_repo.create(Workflow(
+            workflow_id=SEED_IDS.workflow_published_id,
+            name="Seeded Published Workflow",
+            description="Published workflow with sample runs.",
+            state=WorkflowState.PUBLISHED,
+            current_published_version_id=None,  # Will be set after version is created
+            created_at=published_created,
+            updated_at=published_updated,
+        ))
+
     if not version_repo.get(SEED_IDS.published_version_id):
         version_repo.create(WorkflowVersion(
             version_id=SEED_IDS.published_version_id,
@@ -339,17 +351,11 @@ def _seed_workflows(
             created_at=published_created + timedelta(minutes=2),
             published_at=published_created + timedelta(minutes=4),
         ))
-
-    if not workflow_repo.get(SEED_IDS.workflow_published_id):
-        workflow_repo.create(Workflow(
-            workflow_id=SEED_IDS.workflow_published_id,
-            name="Seeded Published Workflow",
-            description="Published workflow with sample runs.",
-            state=WorkflowState.PUBLISHED,
-            current_published_version_id=SEED_IDS.published_version_id,
-            created_at=published_created,
-            updated_at=published_updated,
-        ))
+        # Update workflow with published version ID
+        workflow = workflow_repo.get(SEED_IDS.workflow_published_id)
+        if workflow:
+            workflow.current_published_version_id = SEED_IDS.published_version_id
+            workflow_repo.update(workflow)
 
     if view_repo and not view_repo.get(SEED_IDS.published_version_id):
         view_repo.save(WorkflowView(
@@ -360,13 +366,14 @@ def _seed_workflows(
         ))
     
     # Seed Condition + Parallel workflow
+    # Create workflow BEFORE creating its version (for foreign key constraint)
     if not workflow_repo.get(SEED_IDS.workflow_condition_parallel_id):
         workflow_repo.create(Workflow(
             workflow_id=SEED_IDS.workflow_condition_parallel_id,
             name="Seeded Condition + Parallel Workflow",
             description="Published workflow with Condition and Parallel states.",
             state=WorkflowState.PUBLISHED,
-            current_published_version_id=SEED_IDS.condition_parallel_version_id,
+            current_published_version_id=None,  # Will be set after version is created
             created_at=published_created + timedelta(hours=1),
             updated_at=published_updated + timedelta(hours=1),
         ))
@@ -381,6 +388,11 @@ def _seed_workflows(
             created_at=published_created + timedelta(hours=1, minutes=2),
             published_at=published_created + timedelta(hours=1, minutes=4),
         ))
+        # Update workflow with published version ID
+        workflow = workflow_repo.get(SEED_IDS.workflow_condition_parallel_id)
+        if workflow:
+            workflow.current_published_version_id = SEED_IDS.condition_parallel_version_id
+            workflow_repo.update(workflow)
     
     if view_repo and not view_repo.get(SEED_IDS.condition_parallel_version_id):
         view_repo.save(WorkflowView(
@@ -391,13 +403,14 @@ def _seed_workflows(
         ))
     
     # Seed Wait workflow
+    # Create workflow BEFORE creating its version (for foreign key constraint)
     if not workflow_repo.get(SEED_IDS.workflow_wait_id):
         workflow_repo.create(Workflow(
             workflow_id=SEED_IDS.workflow_wait_id,
             name="Seeded Wait Workflow",
             description="Published workflow with Wait state.",
             state=WorkflowState.PUBLISHED,
-            current_published_version_id=SEED_IDS.wait_version_id,
+            current_published_version_id=None,  # Will be set after version is created
             created_at=published_created + timedelta(hours=2),
             updated_at=published_updated + timedelta(hours=2),
         ))
@@ -412,6 +425,11 @@ def _seed_workflows(
             created_at=published_created + timedelta(hours=2, minutes=2),
             published_at=published_created + timedelta(hours=2, minutes=4),
         ))
+        # Update workflow with published version ID
+        workflow = workflow_repo.get(SEED_IDS.workflow_wait_id)
+        if workflow:
+            workflow.current_published_version_id = SEED_IDS.wait_version_id
+            workflow_repo.update(workflow)
     
     if view_repo and not view_repo.get(SEED_IDS.wait_version_id):
         view_repo.save(WorkflowView(
