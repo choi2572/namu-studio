@@ -30,8 +30,12 @@ class SeedIds:
     """Stable IDs used across seeded data."""
     workflow_draft_id: str = "wf-seed-draft"
     workflow_published_id: str = "wf-seed-published"
+    workflow_condition_parallel_id: str = "wf-seed-condition-parallel"
+    workflow_wait_id: str = "wf-seed-wait"
     draft_version_id: str = "wfv-seed-draft-v1"
     published_version_id: str = "wfv-seed-published-v1"
+    condition_parallel_version_id: str = "wfv-seed-condition-parallel-v1"
+    wait_version_id: str = "wfv-seed-wait-v1"
     run_success_id: str = "run-seed-success"
     run_failed_id: str = "run-seed-failed"
     node_fetch_state: str = "FetchData"
@@ -45,31 +49,134 @@ SEED_FAILURE_MESSAGE = "TransformData failed validation"
 
 SEED_BASE_TIME = datetime(2024, 1, 15, 9, 0, 0)
 
+# DSL v1: Simple linear flow
 PUBLISHED_DSL = {
     "StartAt": SEED_IDS.node_fetch_state,
     "States": {
         SEED_IDS.node_fetch_state: {
-            "Type": "Task",
+            "Type": "Skill",
+            "Skill": "Pick",
+            "Parameters": {"target": "bin-A", "quantity": 1},
             "Next": SEED_IDS.node_transform_state,
-            "Label": "Fetch Data",
         },
         SEED_IDS.node_transform_state: {
-            "Type": "Task",
+            "Type": "Skill",
+            "Skill": "Place",
+            "Parameters": {"destination": "slot-3", "orientation": "north"},
             "Next": SEED_IDS.node_process_state,
-            "Label": "Transform Data",
         },
         SEED_IDS.node_process_state: {
-            "Type": "Task",
+            "Type": "Skill",
+            "Skill": "Process",
+            "Parameters": {"mode": "standard"},
             "End": True,
-            "Label": "Process Data",
         },
     },
 }
 
+# DSL v1: Simple draft (linear)
 DRAFT_DSL = {
     "StartAt": "DraftStart",
     "States": {
-        "DraftStart": {"Type": "Task", "End": True, "Label": "Draft Start"},
+        "DraftStart": {
+            "Type": "Skill",
+            "Skill": "Pick",
+            "Parameters": {"target": "bin-A"},
+            "End": True,
+        },
+    },
+}
+
+# DSL v1: Condition + Parallel flow
+CONDITION_PARALLEL_DSL = {
+    "StartAt": "CheckCondition",
+    "States": {
+        "CheckCondition": {
+            "Type": "Condition",
+            "If": {
+                "Condition": {
+                    "Variable": "$.var_1",
+                    "Operator": "==",
+                    "Value": True,
+                },
+                "Then": "ParallelSplit",
+            },
+            "Else": "EndNode",
+        },
+        "ParallelSplit": {
+            "Type": "Parallel",
+            "Branches": [
+                {
+                    "StartAt": "Branch1Start",
+                    "States": {
+                        "Branch1Start": {
+                            "Type": "Skill",
+                            "Skill": "Pick",
+                            "Parameters": {"target": "bin-A"},
+                            "Next": "Branch1End",
+                        },
+                        "Branch1End": {
+                            "Type": "Pass",
+                            "End": True,
+                        },
+                    },
+                },
+                {
+                    "StartAt": "Branch2Start",
+                    "States": {
+                        "Branch2Start": {
+                            "Type": "Skill",
+                            "Skill": "Place",
+                            "Parameters": {"destination": "slot-1"},
+                            "Next": "Branch2End",
+                        },
+                        "Branch2End": {
+                            "Type": "Pass",
+                            "End": True,
+                        },
+                    },
+                },
+            ],
+            "Next": "JoinNode",
+        },
+        "JoinNode": {
+            "Type": "Skill",
+            "Skill": "Process",
+            "Parameters": {"mode": "combined"},
+            "End": True,
+        },
+        "EndNode": {
+            "Type": "Pass",
+            "End": True,
+        },
+    },
+}
+
+# DSL v1: Wait example
+WAIT_DSL = {
+    "StartAt": "StartNode",
+    "States": {
+        "StartNode": {
+            "Type": "Skill",
+            "Skill": "Pick",
+            "Parameters": {"target": "bin-A"},
+            "Next": "WaitForEvent",
+        },
+        "WaitForEvent": {
+            "Type": "Wait",
+            "Event": {
+                "Type": "webhook",
+                "Topic": "user_confirmation",
+            },
+            "Timeout": 300,
+            "Next": "ContinueAfterWait",
+        },
+        "ContinueAfterWait": {
+            "Type": "Skill",
+            "Skill": "Place",
+            "Parameters": {"destination": "slot-3"},
+            "End": True,
+        },
     },
 }
 
@@ -250,6 +357,68 @@ def _seed_workflows(
             view_json=PUBLISHED_VIEW,
             created_at=published_created + timedelta(minutes=3),
             updated_at=published_updated,
+        ))
+    
+    # Seed Condition + Parallel workflow
+    if not workflow_repo.get(SEED_IDS.workflow_condition_parallel_id):
+        workflow_repo.create(Workflow(
+            workflow_id=SEED_IDS.workflow_condition_parallel_id,
+            name="Seeded Condition + Parallel Workflow",
+            description="Published workflow with Condition and Parallel states.",
+            state=WorkflowState.PUBLISHED,
+            current_published_version_id=SEED_IDS.condition_parallel_version_id,
+            created_at=published_created + timedelta(hours=1),
+            updated_at=published_updated + timedelta(hours=1),
+        ))
+    
+    if not version_repo.get(SEED_IDS.condition_parallel_version_id):
+        version_repo.create(WorkflowVersion(
+            version_id=SEED_IDS.condition_parallel_version_id,
+            workflow_id=SEED_IDS.workflow_condition_parallel_id,
+            version_number="v1",
+            state=VersionState.PUBLISHED,
+            dsl_json=CONDITION_PARALLEL_DSL,
+            created_at=published_created + timedelta(hours=1, minutes=2),
+            published_at=published_created + timedelta(hours=1, minutes=4),
+        ))
+    
+    if view_repo and not view_repo.get(SEED_IDS.condition_parallel_version_id):
+        view_repo.save(WorkflowView(
+            version_id=SEED_IDS.condition_parallel_version_id,
+            view_json={},  # Empty view for now
+            created_at=published_created + timedelta(hours=1, minutes=3),
+            updated_at=published_updated + timedelta(hours=1),
+        ))
+    
+    # Seed Wait workflow
+    if not workflow_repo.get(SEED_IDS.workflow_wait_id):
+        workflow_repo.create(Workflow(
+            workflow_id=SEED_IDS.workflow_wait_id,
+            name="Seeded Wait Workflow",
+            description="Published workflow with Wait state.",
+            state=WorkflowState.PUBLISHED,
+            current_published_version_id=SEED_IDS.wait_version_id,
+            created_at=published_created + timedelta(hours=2),
+            updated_at=published_updated + timedelta(hours=2),
+        ))
+    
+    if not version_repo.get(SEED_IDS.wait_version_id):
+        version_repo.create(WorkflowVersion(
+            version_id=SEED_IDS.wait_version_id,
+            workflow_id=SEED_IDS.workflow_wait_id,
+            version_number="v1",
+            state=VersionState.PUBLISHED,
+            dsl_json=WAIT_DSL,
+            created_at=published_created + timedelta(hours=2, minutes=2),
+            published_at=published_created + timedelta(hours=2, minutes=4),
+        ))
+    
+    if view_repo and not view_repo.get(SEED_IDS.wait_version_id):
+        view_repo.save(WorkflowView(
+            version_id=SEED_IDS.wait_version_id,
+            view_json={},  # Empty view for now
+            created_at=published_created + timedelta(hours=2, minutes=3),
+            updated_at=published_updated + timedelta(hours=2),
         ))
 
 

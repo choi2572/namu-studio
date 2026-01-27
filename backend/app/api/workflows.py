@@ -147,14 +147,14 @@ def save_draft(workflow_id: str):
 
 @bp.route("/<workflow_id>/validate", methods=["POST"])
 def validate_draft(workflow_id: str):
-    """Validate draft workflow."""
+    """Validate draft workflow (DSL v1)."""
     errors = _workflow_service.validate_draft(workflow_id)
     
     return jsonify([
         {
-            "id": e.id,
+            "node_name": e.nodeId if e.nodeId else None,
+            "error_code": e.error_code if e.error_code else e.id.upper(),
             "message": e.message,
-            "nodeId": e.nodeId if e.nodeId else None,
         }
         for e in errors
     ])
