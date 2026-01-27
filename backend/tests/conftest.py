@@ -13,6 +13,9 @@ from app.repos.memory import (
 from app.services.workflow_service import WorkflowService
 from app.services.run_service import RunService
 from app.adapters.execution_engine import DummyExecutionEngineAdapter
+from app.seed import seed_data, SEED_IDS
+from app.api import workflows as workflows_api
+from app.api import runs as runs_api
 
 
 @pytest.fixture
@@ -94,3 +97,29 @@ def run_service(run_repo, node_run_repo, run_event_repo, workflow_repo, version_
         version_repo,
         execution_adapter,
     )
+
+
+@pytest.fixture
+def seeded_data():
+    """Seed deterministic data into API repositories."""
+    seed_data(
+        workflow_repo=workflows_api._workflow_repo,
+        version_repo=workflows_api._version_repo,
+        view_repo=workflows_api._view_repo,
+        reset=True,
+    )
+    seed_data(
+        workflow_repo=runs_api._workflow_repo,
+        version_repo=runs_api._workflow_version_repo,
+        run_repo=runs_api._run_repo,
+        node_run_repo=runs_api._node_run_repo,
+        run_event_repo=runs_api._run_event_repo,
+        reset=True,
+    )
+    return SEED_IDS
+
+
+@pytest.fixture
+def seeded_client(client, seeded_data):
+    """Create test client with seeded repositories."""
+    return client

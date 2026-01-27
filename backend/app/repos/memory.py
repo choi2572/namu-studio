@@ -26,6 +26,10 @@ class InMemoryWorkflowRepository(WorkflowRepository):
     
     def __init__(self):
         self._workflows: Dict[str, Workflow] = {}
+
+    def clear(self) -> None:
+        """Clear all workflows."""
+        self._workflows.clear()
     
     def create(self, workflow: Workflow) -> Workflow:
         self._workflows[workflow.workflow_id] = workflow
@@ -48,6 +52,10 @@ class InMemoryWorkflowVersionRepository(WorkflowVersionRepository):
     
     def __init__(self):
         self._versions: Dict[str, WorkflowVersion] = {}
+
+    def clear(self) -> None:
+        """Clear all versions."""
+        self._versions.clear()
     
     def create(self, version: WorkflowVersion) -> WorkflowVersion:
         self._versions[version.version_id] = version
@@ -78,6 +86,10 @@ class InMemoryWorkflowViewRepository(WorkflowViewRepository):
     
     def __init__(self):
         self._views: Dict[str, WorkflowView] = {}
+
+    def clear(self) -> None:
+        """Clear all views."""
+        self._views.clear()
     
     def get(self, version_id: str) -> Optional[WorkflowView]:
         return self._views.get(version_id)
@@ -93,6 +105,10 @@ class InMemoryRunRepository(RunRepository):
     
     def __init__(self):
         self._runs: Dict[str, Run] = {}
+
+    def clear(self) -> None:
+        """Clear all runs."""
+        self._runs.clear()
     
     def create(self, run: Run) -> Run:
         self._runs[run.run_id] = run
@@ -127,6 +143,10 @@ class InMemoryNodeRunRepository(NodeRunRepository):
     
     def __init__(self):
         self._node_runs: Dict[str, NodeRun] = {}
+
+    def clear(self) -> None:
+        """Clear all node runs."""
+        self._node_runs.clear()
     
     def create(self, node_run: NodeRun) -> NodeRun:
         self._node_runs[node_run.node_run_id] = node_run
@@ -155,6 +175,11 @@ class InMemoryRunEventRepository(RunEventRepository):
     def __init__(self):
         self._events: Dict[str, RunEvent] = {}
         self._run_events: Dict[str, List[RunEvent]] = {}  # run_id -> events
+
+    def clear(self) -> None:
+        """Clear all events."""
+        self._events.clear()
+        self._run_events.clear()
     
     def create(self, event: RunEvent) -> RunEvent:
         self._events[event.event_id] = event

@@ -2,10 +2,16 @@
 import os
 
 
+def _get_bool_env(name: str, default: str = "false") -> bool:
+    value = os.environ.get(name, default)
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
 class Config:
     """Base configuration."""
     SECRET_KEY = os.environ.get("SECRET_KEY") or "dev-secret-key-change-in-production"
     JSON_SORT_KEYS = False
+    SEED_DATA = _get_bool_env("SEED_DATA", "false")
     
     # Persistence mode: "memory" or "json_file"
     PERSISTENCE_MODE = os.environ.get("PERSISTENCE_MODE", "memory")
