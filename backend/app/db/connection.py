@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from app.db.schema import migrate_schema
+
 # Thread-local storage for connections
 _local = threading.local()
 
