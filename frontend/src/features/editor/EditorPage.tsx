@@ -191,15 +191,8 @@ function createNodeTypeConfigFromSkillset(skillset: import("@/domain/types").Ski
     placeholder: param.description || key
   }));
   
-  const outputs: NodeOutputPort[] = Object.entries(skillset.outputs).map(([key, output]) => ({
-    key,
-    label: output.description || key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
-  }));
-  
-  // 기본적으로 next 출력이 없으면 추가
-  if (outputs.length === 0) {
-    outputs.push({ key: "next", label: "Next" });
-  }
+  // Skill 노드는 transition 표현이므로 next 포트 하나만 사용
+  const outputs: NodeOutputPort[] = [{ key: "next", label: "Next" }];
   
   return {
     label: skillName.replace(/([A-Z])/g, " $1").trim(),
@@ -620,6 +613,7 @@ function NodeCard({
   onInputDragOver: (event: DragEvent<HTMLButtonElement>) => void;
   onInputDrop: (event: DragEvent<HTMLButtonElement>) => void;
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
+  skillset?: import("@/domain/types").Skillset;
 }) {
   const nodeHeight = getNodeHeight(node, nodeTypeConfig);
   const outputOffsets = getPortOffsets(nodeHeight, outputs.length);
@@ -666,6 +660,11 @@ function NodeCard({
     ? "Condition" 
     : NODE_CATEGORY_LABELS[config.category];
 
+  // 툴팁 내용 생성
+  const tooltipContent = skillset
+    ? `${skillset.name} (${skillset.version})\nType: ${node.kind}\n\n${skillset.description}`
+    : node.kind;
+
   return (
     <div
       className={cn(
@@ -678,6 +677,7 @@ function NodeCard({
         height: nodeHeight
       }}
       onClick={onSelect}
+      title={tooltipContent}
     >
       {/* 왼쪽 타입 인디케이터 바 */}
       <div
@@ -690,7 +690,7 @@ function NodeCard({
         <button
           type="button"
           className={cn(
-            "cursor-pointer absolute left-0 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
+            "cursor-pointer absolute left-0 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
             inputConnected ? "border-slate-400" : "border-slate-200"
           )}
           style={{ top: nodeHeight / 2 }}
@@ -710,7 +710,7 @@ function NodeCard({
         >
           <span
             className={cn(
-              "h-1.5 w-1.5 rounded-full",
+              "h-2 w-2 rounded-full",
               inputConnected ? "bg-slate-600" : "bg-slate-400"
             )}
           />
@@ -723,21 +723,11 @@ function NodeCard({
           className="absolute right-0 flex items-center gap-1.5 z-20"
           style={{ top: outputOffsets[index], transform: "translate(50%, -50%)" }}
         >
-          <span
-            className={cn(
-              "text-[9px] whitespace-nowrap text-right",
-              output.isActive 
-                ? "text-slate-700 font-medium opacity-80" 
-                : "text-slate-400 opacity-60"
-            )}
-          >
-            {output.label}
-          </span>
           <button
             type="button"
             draggable
             className={cn(
-              "cursor-pointer flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
+              "cursor-pointer flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
               output.isActive
                 ? "border-slate-900"
                 : output.isConnected
@@ -760,7 +750,7 @@ function NodeCard({
           >
             <span
               className={cn(
-                "h-1.5 w-1.5 rounded-full",
+                "h-2 w-2 rounded-full",
                 output.isActive
                   ? "bg-slate-900"
                   : output.isConnected
@@ -834,9 +824,6 @@ function NodeCard({
             </span>
           </div>
 
-          {(!node.isExpanded || config.category === "skill") && (
-            <p className="text-xs text-slate-600 truncate">{node.kind}</p>
-          )}
         </div>
         <button
           type="button"
@@ -1115,6 +1102,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       return STATIC_NODE_TYPE_CONFIG as Record<NodeKind, NodeTypeConfig>;
     }
     return createNodeTypeConfigFromSkillsets(skillsetsResponse.skillsets);
+  }, [skillsetsResponse]);
+
+  // Skillset 정보를 노드 kind로 매핑
+  const skillsetMap = useMemo(() => {
+    if (!skillsetsResponse) return new Map<string, import("@/domain/types").Skillset>();
+    const map = new Map<string, import("@/domain/types").Skillset>();
+    skillsetsResponse.skillsets.forEach((skillset) => {
+      map.set(`skill.${skillset.name}`, skillset);
+    });
+    return map;
   }, [skillsetsResponse]);
 
   // 노드 타입 목록 생성
@@ -2341,6 +2338,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                         connectingFrom?.nodeId === node.id &&
                         connectingFrom.portKey === output.key
                     }));
+                    const skillset = node.kind.startsWith("skill.")
+                      ? skillsetMap.get(node.kind)
+                      : undefined;
                     return (
                       <div
                         key={node.id}
@@ -2354,6 +2354,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           inputConnected={incomingEdges.has(node.id)}
                           outputs={outputStates}
                           nodeTypeConfig={nodeTypeConfig}
+                          skillset={skillset}
                           onSelect={() => {
                             setSelectedNode(node.id);
                             setSelectedEdgeId(null);
