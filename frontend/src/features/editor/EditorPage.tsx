@@ -956,6 +956,22 @@ function NodeCard({
                     placeholder="=="
                     className="w-16 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                   />
+                </div>
+
+                {/* 2줄째: value를 한 줄 전체로 표시 */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <input
+                    value={valuePart}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      const combined = [variablePart, operatorPart, nextValue]
+                        .filter((item) => item && item.length > 0)
+                        .join(" ");
+                      onConditionExpressionChange(expression.id, combined);
+                    }}
+                    placeholder="value"
+                    className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                  />
                   {index > 0 && (
                     <button
                       type="button"
@@ -983,22 +999,6 @@ function NodeCard({
                       </svg>
                     </button>
                   )}
-                </div>
-
-                {/* 2줄째: value를 한 줄 전체로 표시 */}
-                <div className="flex items-center gap-2 min-w-0">
-                  <input
-                    value={valuePart}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      const combined = [variablePart, operatorPart, nextValue]
-                        .filter((item) => item && item.length > 0)
-                        .join(" ");
-                      onConditionExpressionChange(expression.id, combined);
-                    }}
-                    placeholder="value"
-                    className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                  />
                 </div>
               </div>
             );
@@ -1036,9 +1036,6 @@ function NodeCard({
           <div className="mt-3 space-y-2 text-xs text-slate-600">
             {node.variableRows.map((row) => (
               <div key={row.id} className="flex items-center gap-2 min-w-0">
-                <span className="inline-flex items-center justify-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                  {row.valueType}
-                </span>
                 <input
                   value={row.name}
                   onChange={(event) =>
