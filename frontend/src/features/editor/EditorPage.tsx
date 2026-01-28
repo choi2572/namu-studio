@@ -2594,8 +2594,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             <div className="mt-3 w-72 rounded-lg border border-red-200 bg-white p-3 text-xs text-slate-700 shadow-lg">
               <p className="font-semibold text-red-600">Errors</p>
               <ul className="mt-2 space-y-2">
-                {validationErrors.map((error: ValidationError) => (
-                  <li key={error.id}>
+                {validationErrors.map((error: ValidationError, index) => (
+                  <li key={`${error.id}-${index}`}>
                     <button
                       type="button"
                       onClick={() => setSelectedNode(error.nodeId ?? null)}
