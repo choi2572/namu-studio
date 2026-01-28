@@ -1168,6 +1168,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [isEditingWorkflowName, setIsEditingWorkflowName] = useState(false);
   const [workflowName, setWorkflowName] = useState<string>("");
   const [originalWorkflowName, setOriginalWorkflowName] = useState<string>("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1261,6 +1262,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setEdges([]);
       setCanvasBase(getSize());
       setZoom(1);
+      setHasUnsavedChanges(false);
       return;
     }
     const parsed = parseEditorView(draftToApply.view_json, nodeTypes);
@@ -1269,6 +1271,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setEdges([]);
       setCanvasBase(getSize());
       setZoom(1);
+      setHasUnsavedChanges(false);
       return;
     }
     setNodes(parsed.nodes);
@@ -1312,6 +1315,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setSelectedEdgeId(null);
     setConnectingFrom(null);
     setEditingNodeId(null);
+    setHasUnsavedChanges(false);
   }, [nodeTypes, getViewportCanvasSize]);
 
   useEffect(() => {
@@ -1376,6 +1380,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       if (saved.workflowId !== workflowId) {
         router.replace(`/editor/${saved.workflowId}`);
       }
+      setHasUnsavedChanges(false);
     }
   });
 
@@ -1616,12 +1621,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         updatedAt
       }
     });
+    setHasUnsavedChanges(false);
   };
 
   const handleCancel = () => {
     setDraftOverride(draft ?? null);
     applyDraftToEditor(draft ?? null);
     setSelectedNode(null);
+    setHasUnsavedChanges(false);
   };
 
   const handlePublish = () => {
@@ -1637,13 +1644,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const nextNode = { ...node, isExpanded: nextExpanded };
         const nodeHeight = getNodeHeight(nextNode, nodeTypeConfig);
         const { minX, minY, maxX, maxY } = getCanvasBounds(canvasBase, nodeHeight);
-        return {
+        const updated = {
           ...nextNode,
           position: {
             x: clamp(node.position.x, minX, maxX),
             y: clamp(node.position.y, minY, maxY)
           }
         };
+        setHasUnsavedChanges(true);
+        return updated;
       })
     );
   };
@@ -1652,7 +1661,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setNodes((prev) =>
       prev.map((node) =>
         node.id === nodeId
-          ? { ...node, params: { ...node.params, [key]: value } }
+          ? (() => {
+              setHasUnsavedChanges(true);
+              return { ...node, params: { ...node.params, [key]: value } };
+            })()
           : node
       )
     );
@@ -1674,6 +1686,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             ? { ...expression, expression: value }
             : expression
         );
+        setHasUnsavedChanges(true);
         return { ...node, conditionExpressions: nextExpressions };
       })
     );
@@ -1698,13 +1711,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           canvasBase,
           getNodeHeight(nextNode, nodeTypeConfig)
         );
-        return {
+        const updated = {
           ...nextNode,
           position: {
             x: clamp(node.position.x, minX, maxX),
             y: clamp(node.position.y, minY, maxY)
           }
         };
+        setHasUnsavedChanges(true);
+        return updated;
       })
     );
   };
@@ -1722,13 +1737,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           canvasBase,
           getNodeHeight(nextNode, nodeTypeConfig)
         );
-        return {
+        const updated = {
           ...nextNode,
           position: {
             x: clamp(node.position.x, minX, maxX),
             y: clamp(node.position.y, minY, maxY)
           }
         };
+        setHasUnsavedChanges(true);
+        return updated;
       })
     );
   };
@@ -1750,6 +1767,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const nextRows = rows.map((row) =>
           row.id === rowId ? { ...row, [field]: value } : row
         );
+        setHasUnsavedChanges(true);
         return { ...node, variableRows: nextRows };
       })
     );
@@ -1778,13 +1796,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           canvasBase,
           getNodeHeight(nextNode, nodeTypeConfig)
         );
-        return {
+        const updated = {
           ...nextNode,
           position: {
             x: clamp(node.position.x, minX, maxX),
             y: clamp(node.position.y, minY, maxY)
           }
         };
+        setHasUnsavedChanges(true);
+        return updated;
       })
     );
   };
@@ -1804,20 +1824,29 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           canvasBase,
           getNodeHeight(nextNode, nodeTypeConfig)
         );
-        return {
+        const updated = {
           ...nextNode,
           position: {
             x: clamp(node.position.x, minX, maxX),
             y: clamp(node.position.y, minY, maxY)
           }
         };
+        setHasUnsavedChanges(true);
+        return updated;
       })
     );
   };
 
   const handleNameChange = (nodeId: string, value: string) => {
     setNodes((prev) =>
-      prev.map((node) => (node.id === nodeId ? { ...node, name: value } : node))
+      prev.map((node) =>
+        node.id === nodeId
+          ? (() => {
+              setHasUnsavedChanges(true);
+              return { ...node, name: value };
+            })()
+          : node
+      )
     );
   };
 
@@ -1847,11 +1876,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       prev && prev.nodeId === nodeId ? null : prev
     );
     setEditingNodeId((prev) => (prev === nodeId ? null : prev));
+    setHasUnsavedChanges(true);
   };
 
   const handleDeleteEdge = (edgeId: string) => {
     setEdges((prev) => prev.filter((edge) => edge.id !== edgeId));
     setSelectedEdgeId((prev) => (prev === edgeId ? null : prev));
+    setHasUnsavedChanges(true);
   };
 
   useEffect(() => {
@@ -1961,13 +1992,17 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       height: Math.max(prev.height, requiredHeight)
     }));
 
-    setNodes((prev) =>
-      prev.map((node) =>
+    setNodes((prev) => {
+      const next = prev.map((node) =>
         nextPositions.has(node.id)
           ? { ...node, position: nextPositions.get(node.id)! }
           : node
-      )
-    );
+      );
+      if (next !== prev) {
+        setHasUnsavedChanges(true);
+      }
+      return next;
+    });
   };
 
   const connectNodes = useCallback(
@@ -1990,6 +2025,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         }
       ]);
       setSelectedEdgeId(null);
+      setHasUnsavedChanges(true);
     },
     [incomingEdges, nodeMap, outgoingEdges]
   );
@@ -2076,6 +2112,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const dropX = point.x - NODE_METRICS.width / 2;
     const dropY = point.y - NODE_METRICS.collapsedHeight / 2;
     createNode(rawKind as NodeKind, { x: dropX, y: dropY });
+    setHasUnsavedChanges(true);
   };
 
   const handleCanvasClick = (event: MouseEvent<HTMLDivElement>) => {
@@ -2110,6 +2147,31 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     );
     return `${node.name} - ${output?.label ?? connectingFrom.portKey}`;
   }, [connectingFrom, nodeMap]);
+
+  // 에디터 페이지에서 unsaved 변경 여부를 전역(window)에 노출
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    (window as unknown as { __editorHasUnsavedChanges?: boolean }).__editorHasUnsavedChanges =
+      hasUnsavedChanges;
+    return () => {
+      if (typeof window === "undefined") return;
+      (window as unknown as { __editorHasUnsavedChanges?: boolean }).__editorHasUnsavedChanges =
+        false;
+    };
+  }, [hasUnsavedChanges]);
+
+  // 새로고침/탭 닫기 등 브라우저 단위 이동 시 경고
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => {
+      window.removeEventListener("beforeunload", handler);
+    };
+  }, [hasUnsavedChanges]);
 
   return (
     <div className="space-y-6">

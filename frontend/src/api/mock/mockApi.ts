@@ -270,6 +270,28 @@ export const mockWorkflowsApi: WorkflowsApi = {
       };
     }
     return delay(deepClone(newVersion));
+  },
+
+  async delete(workflowId: string): Promise<void> {
+    // workflow 리스트에서 제거
+    const index = workflowList.findIndex(
+      (workflow) => workflow.workflowId === workflowId
+    );
+    if (index >= 0) {
+      workflowList.splice(index, 1);
+    }
+
+    // draft 제거
+    if (workflowDrafts[workflowId]) {
+      delete workflowDrafts[workflowId];
+    }
+
+    // 로컬 스토리지에 저장된 파일 제거
+    const files = readWorkflowFiles();
+    const nextFiles = files.filter((file) => file.workflowId !== workflowId);
+    writeWorkflowFiles(nextFiles);
+
+    return delay(undefined);
   }
 };
 

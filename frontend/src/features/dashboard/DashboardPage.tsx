@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { workflowsApi, runsApi } from "@/api";
 import { Card } from "@/components/Card";
@@ -17,6 +17,12 @@ import { cn } from "@/lib/cn";
 
 export function DashboardPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const [workflowToDelete, setWorkflowToDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
   const { data: workflows = [] } = useQuery({
     queryKey: ["workflows"],
     queryFn: () => workflowsApi.list()
@@ -75,6 +81,19 @@ export function DashboardPage() {
   const currentRunningNode = latestRunSnapshot?.nodeStates.find(
     (node) => node.status === NodeStatus.RUNNING
   );
+
+  const deleteMutation = useMutation({
+    mutationFn: (workflowId: string) => workflowsApi.delete(workflowId),
+    onSuccess: () => {
+      setWorkflowToDelete(null);
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+    }
+  });
+
+  const handleConfirmDelete = () => {
+    if (!workflowToDelete) return;
+    deleteMutation.mutate(workflowToDelete.id);
+  };
 
   return (
     <div className="space-y-6">
@@ -351,30 +370,59 @@ export function DashboardPage() {
                       )}
                     </TableCell>
                     <TableCell className="px-5 py-4">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          router.push(`/editor/${workflow.workflowId}`);
-                        }}
-                        className="flex items-center justify-center rounded-md border border-slate-200 bg-white p-2 text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
-                        title="Edit workflow"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          strokeWidth={1.5}
-                          stroke="currentColor"
-                          className="h-4 w-4"
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            router.push(`/editor/${workflow.workflowId}`);
+                          }}
+                          className="flex items-center justify-center rounded-md border border-slate-200 bg-white p-2 text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                          title="Edit workflow"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
-                          />
-                        </svg>
-                      </button>
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={1.5}
+                            stroke="currentColor"
+                            className="h-4 w-4"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setWorkflowToDelete({
+                              id: workflow.workflowId,
+                              name: workflow.name
+                            });
+                          }}
+                          className="flex items-center justify-center rounded-md border border-red-100 bg-white p-2 text-red-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                          title="Delete workflow"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={1.5}
+                            stroke="currentColor"
+                            className="h-4 w-4"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M9.75 9.75v7.5M14.25 9.75v7.5M4.5 5.25h15M6.75 5.25l.75-1.5A1.5 1.5 0 0 1 8.88 3h6.24a1.5 1.5 0 0 1 1.35.75l.75 1.5m-12.47 0h12.47M6.75 5.25h10.5M8.25 5.25v-.75A1.5 1.5 0 0 1 9.75 3h4.5a1.5 1.5 0 0 1 1.5 1.5v.75"
+                            />
+                          </svg>
+                        </button>
+                      </div>
                     </TableCell>
                     </TableRow>
                   );
@@ -393,6 +441,43 @@ export function DashboardPage() {
           </div>
         )}
       </Card>
+
+      {workflowToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-900">
+              워크플로 삭제
+            </h2>
+            <p className="mt-3 text-sm text-slate-600">
+              <span className="font-semibold text-slate-900">
+                {workflowToDelete.name}
+              </span>
+              {" "}
+              워크플로를 삭제하시겠습니까?
+              <br />
+              이 작업은 되돌릴 수 없습니다.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                className="cursor-pointer rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                onClick={() => setWorkflowToDelete(null)}
+                disabled={deleteMutation.isLoading}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="cursor-pointer rounded-md border border-red-600 bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                onClick={handleConfirmDelete}
+                disabled={deleteMutation.isLoading}
+              >
+                {deleteMutation.isLoading ? "삭제 중..." : "삭제"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating Action Button */}
       <Link

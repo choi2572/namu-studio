@@ -36,6 +36,7 @@ export interface WorkflowsApi {
   saveDraft(workflowId: string, payload: WorkflowDraft): Promise<WorkflowDraft>;
   validateDraft(workflowId: string): Promise<ValidationError[]>;
   publish(workflowId: string): Promise<WorkflowVersionSummary>;
+  delete(workflowId: string): Promise<void>;
 }
 
 export interface RunsApi {

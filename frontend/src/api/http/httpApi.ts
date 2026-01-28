@@ -98,6 +98,18 @@ export const httpWorkflowsApi: WorkflowsApi = {
       method: "POST"
     });
     return handleResponse<WorkflowVersionSummary>(response);
+  },
+
+  async delete(workflowId: string): Promise<void> {
+    const url = getApiUrl(`/workflows/${workflowId}`);
+    logApiCall("DELETE", url);
+    const response = await fetch(url, {
+      method: "DELETE"
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`API error: ${response.status} ${errorText}`);
+    }
   }
 };
 
