@@ -586,7 +586,8 @@ function NodeCard({
   onOutputDragStart,
   onOutputDragEnd,
   onInputDragOver,
-  onInputDrop
+  onInputDrop,
+  nodeTypeConfig
 }: {
   node: EditorNode;
   config: NodeTypeConfig;
