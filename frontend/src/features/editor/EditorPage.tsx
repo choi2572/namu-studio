@@ -188,7 +188,7 @@ function createNodeTypeConfigFromSkillset(skillset: import("@/domain/types").Ski
   const paramFields: NodeParamField[] = Object.entries(skillset.parameters).map(([key, param]) => ({
     key,
     label: key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
-    placeholder: param.description || key
+    placeholder: param.type || key
   }));
   
   // Skill 노드는 transition 표현이므로 next 포트 하나만 사용
@@ -718,24 +718,43 @@ function NodeCard({
         </button>
       )}
 
-      {outputs.map((output, index) => (
-        <div
-          key={output.key}
-          className="absolute right-0 flex items-center gap-1.5 z-20"
-          style={{ top: outputOffsets[index], transform: "translate(50%, -50%)" }}
-        >
-          <button
-            type="button"
-            draggable
-            className={cn(
-              "cursor-pointer flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
-              output.isActive
-                ? "border-slate-900"
-                : output.isConnected
-                  ? "border-slate-400"
-                  : "border-slate-200"
-            )}
-            title={`Output ${output.label}`}
+      {outputs.map((output, index) => {
+        // Output port 툴팁 내용 생성
+        let outputTooltip = `Output: ${output.label}`;
+        if (skillset) {
+          // skill 노드의 경우 모든 outputs 정보를 표시
+          if (output.key === "next" && Object.keys(skillset.outputs).length > 0) {
+            const outputEntries = Object.entries(skillset.outputs);
+            outputTooltip = outputEntries
+              .map(([key, outputInfo]) => {
+                return `${key}\nType: ${outputInfo.type}${outputInfo.description ? `\n${outputInfo.description}` : ""}`;
+              })
+              .join("\n\n");
+          } else if (skillset.outputs[output.key]) {
+            // 특정 output 키가 있는 경우
+            const outputInfo = skillset.outputs[output.key];
+            outputTooltip = `${output.key}\nType: ${outputInfo.type}${outputInfo.description ? `\n${outputInfo.description}` : ""}`;
+          }
+        }
+        
+        return (
+          <div
+            key={output.key}
+            className="absolute right-0 flex items-center gap-1.5 z-20"
+            style={{ top: outputOffsets[index], transform: "translate(50%, -50%)" }}
+          >
+            <button
+              type="button"
+              draggable
+              className={cn(
+                "cursor-pointer flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
+                output.isActive
+                  ? "border-slate-900"
+                  : output.isConnected
+                    ? "border-slate-400"
+                    : "border-slate-200"
+              )}
+              title={outputTooltip}
             onDragStart={(event) => {
               event.stopPropagation();
               onOutputDragStart(event, output.key);
@@ -761,7 +780,8 @@ function NodeCard({
             />
           </button>
         </div>
-      ))}
+        );
+      })}
 
       <div
         className="flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing pl-1"
