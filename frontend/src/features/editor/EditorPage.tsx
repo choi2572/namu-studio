@@ -580,7 +580,8 @@ function NodeCard({
   onOutputDragEnd,
   onInputDragOver,
   onInputDrop,
-  nodeTypeConfig
+  nodeTypeConfig,
+  skillset
 }: {
   node: EditorNode;
   config: NodeTypeConfig;
