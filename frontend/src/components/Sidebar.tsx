@@ -58,8 +58,8 @@ export function Sidebar() {
             // When leaving editor via sidebar, always warn that edits may be lost
             if (typeof window !== "undefined") {
               const isOnEditor = pathname.startsWith("/editor");
-              const isNavigatingToDifferentPage =
-                !pathname.startsWith(item.href);
+              // Any navigation from /editor... to a different menu item should trigger confirm
+              const isNavigatingToDifferentPage = item.href !== pathname;
 
               if (isOnEditor && isNavigatingToDifferentPage) {
                 const confirmed = window.confirm(
