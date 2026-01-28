@@ -43,16 +43,23 @@ type NodeOutputPort = {
 
 type ConditionOperator = "AND" | "OR";
 
+// Condition 노드의 개별 표현식
+// 내부값은 기존과 동일하게 expression 하나의 문자열로 저장하되,
+// UI에서는 variable / operator / value 세 개의 인풋으로 나누어 다룬다.
 type ConditionExpression = {
   id: string;
+  // 첫 번째 표현식은 null, 두 번째부터 AND/OR
   operator: ConditionOperator | null;
   expression: string;
 };
+
+type VariableValueType = "int" | "bool" | "double" | "string";
 
 type VariableRow = {
   id: string;
   name: string;
   value: string;
+  valueType: VariableValueType;
 };
 
 type NodeTypeConfig = {
@@ -261,7 +268,7 @@ function getExpandedContentHeight(
   }
 
   if (node.kind === "flow_control.input" || node.kind === "flow_control.output") {
-    const rowCount = Math.max(1, node.variableRows?.length ?? 1);
+    const rowCount = node.variableRows?.length ?? 0;
     const rowsHeight =
       rowCount * NODE_METRICS.fieldHeight +
       Math.max(0, rowCount - 1) * NODE_METRICS.fieldGap;
@@ -346,10 +353,18 @@ function isValidConditionExpression(value: unknown): value is ConditionExpressio
 
 function isValidVariableRow(value: unknown): value is VariableRow {
   if (!isRecord(value)) return false;
+  const rawType = (value as { valueType?: unknown }).valueType;
+  const isValidType =
+    rawType === undefined ||
+    rawType === "int" ||
+    rawType === "bool" ||
+    rawType === "double" ||
+    rawType === "string";
   return (
     typeof value.id === "string" &&
     typeof value.name === "string" &&
-    typeof value.value === "string"
+    typeof value.value === "string" &&
+    isValidType
   );
 }
 
@@ -603,7 +618,7 @@ function NodeCard({
   onAddConditionExpression: (operator: ConditionOperator) => void;
   onRemoveConditionExpression: (expressionId: string) => void;
   onVariableRowChange?: (rowId: string, field: "name" | "value", value: string) => void;
-  onAddVariableRow?: () => void;
+  onAddVariableRow?: (valueType: VariableValueType) => void;
   onRemoveVariableRow?: (rowId: string) => void;
   onNameChange: (value: string) => void;
   isEditingName: boolean;
@@ -896,19 +911,57 @@ function NodeCard({
             <div key={expression.id} className="space-y-1">
               <span className="text-[10px] text-slate-500">Expression</span>
               <div className="flex items-center gap-2 min-w-0">
-                {index > 0 && (
-                  <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
-                    {expression.operator}
-                  </span>
-                )}
-                <input
-                  value={expression.expression}
-                  onChange={(event) =>
-                    onConditionExpressionChange(expression.id, event.target.value)
-                  }
-                  placeholder="payload.ok === true"
-                  className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                />
+                {(() => {
+                  const parts = (expression.expression ?? "").trim().split(" ");
+                  const variablePart = parts[0] ?? "";
+                  const operatorPart = parts[1] ?? "";
+                  const valuePart = parts.slice(2).join(" ");
+                  return (
+                    <>
+                      {index > 0 && (
+                        <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
+                          {expression.operator}
+                        </span>
+                      )}
+                      <input
+                        value={variablePart}
+                        onChange={(event) => {
+                          const nextVariable = event.target.value;
+                          const combined = [nextVariable, operatorPart, valuePart]
+                            .filter((item) => item && item.length > 0)
+                            .join(" ");
+                          onConditionExpressionChange(expression.id, combined);
+                        }}
+                        placeholder="variable"
+                        className="w-20 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                      />
+                      <input
+                        value={operatorPart}
+                        onChange={(event) => {
+                          const nextOperator = event.target.value;
+                          const combined = [variablePart, nextOperator, valuePart]
+                            .filter((item) => item && item.length > 0)
+                            .join(" ");
+                          onConditionExpressionChange(expression.id, combined);
+                        }}
+                        placeholder="=="
+                        className="w-16 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                      />
+                      <input
+                        value={valuePart}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          const combined = [variablePart, operatorPart, nextValue]
+                            .filter((item) => item && item.length > 0)
+                            .join(" ");
+                          onConditionExpressionChange(expression.id, combined);
+                        }}
+                        placeholder="value"
+                        className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                      />
+                    </>
+                  );
+                })()}
                 {index > 0 && (
                   <button
                     type="button"
@@ -970,14 +1023,17 @@ function NodeCard({
         (node.kind === "flow_control.input" || node.kind === "flow_control.output") &&
         node.variableRows && (
           <div className="mt-3 space-y-2 text-xs text-slate-600">
-            {node.variableRows.map((row, rowIndex) => (
+            {node.variableRows.map((row) => (
               <div key={row.id} className="flex items-center gap-2 min-w-0">
+                <span className="inline-flex items-center justify-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                  {row.valueType}
+                </span>
                 <input
                   value={row.name}
                   onChange={(event) =>
                     onVariableRowChange?.(row.id, "name", event.target.value)
                   }
-                  placeholder="Variable name"
+                  placeholder="variable"
                   className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                 />
                 <input
@@ -985,10 +1041,10 @@ function NodeCard({
                   onChange={(event) =>
                     onVariableRowChange?.(row.id, "value", event.target.value)
                   }
-                  placeholder="Value"
+                  placeholder={row.valueType}
                   className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                 />
-                {node.variableRows && node.variableRows.length > 1 && (
+                {node.variableRows && node.variableRows.length > 0 && (
                   <button
                     type="button"
                     data-no-drag
@@ -1017,31 +1073,45 @@ function NodeCard({
                 )}
               </div>
             ))}
-            <button
-              type="button"
-              data-no-drag
-              className="cursor-pointer flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddVariableRow?.();
-              }}
-              title="Add row"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={2.5}
-                stroke="currentColor"
-                className="h-3.5 w-3.5"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 4.5v15m7.5-7.5h-15"
-                />
-              </svg>
-            </button>
+            <div className="flex flex-wrap gap-1">
+              {(["int", "bool", "double", "string"] as VariableValueType[]).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  data-no-drag
+                  className="cursor-pointer rounded-full border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddVariableRow?.(type);
+                  }}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      {node.isExpanded &&
+        node.kind !== "flow_control.condition" &&
+        (node.kind === "flow_control.input" || node.kind === "flow_control.output") &&
+        !node.variableRows && (
+          <div className="mt-3 space-y-2 text-xs text-slate-600">
+            <div className="flex flex-wrap gap-1">
+              {(["int", "bool", "double", "string"] as VariableValueType[]).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  data-no-drag
+                  className="cursor-pointer rounded-full border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddVariableRow?.(type);
+                  }}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       {node.isExpanded &&
@@ -1486,9 +1556,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             kind === "flow_control.condition"
               ? [createConditionExpression(null)]
               : undefined,
+          // input / output 노드는 초기 생성 시 파라미터 row 0개
           variableRows:
             kind === "flow_control.input" || kind === "flow_control.output"
-              ? [{ id: `var-${nextVariableRowIndex.current++}`, name: "", value: "" }]
+              ? []
               : undefined
         }
       ]);
@@ -1676,7 +1747,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     );
   };
 
-  const handleAddVariableRow = (nodeId: string) => {
+  const handleAddVariableRow = (nodeId: string, valueType: VariableValueType) => {
     setNodes((prev) =>
       prev.map((node) => {
         if (
@@ -1687,7 +1758,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const rows = node.variableRows ?? [];
         const nextRows = [
           ...rows,
-          { id: `var-${nextVariableRowIndex.current++}`, name: "", value: "" }
+          {
+            id: `var-${nextVariableRowIndex.current++}`,
+            name: "",
+            value: "",
+            valueType
+          }
         ];
         const nextNode = { ...node, variableRows: nextRows };
         const { minX, minY, maxX, maxY } = getCanvasBounds(
@@ -1715,9 +1791,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           return node;
         const rows = node.variableRows ?? [];
         const nextRows = rows.filter((row) => row.id !== rowId);
-        if (nextRows.length === 0) {
-          nextRows.push({ id: `var-${nextVariableRowIndex.current++}`, name: "", value: "" });
-        }
         const nextNode = { ...node, variableRows: nextRows };
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
@@ -2424,7 +2497,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onVariableRowChange={(rowId, field, value) =>
                             handleVariableRowChange(node.id, rowId, field, value)
                           }
-                          onAddVariableRow={() => handleAddVariableRow(node.id)}
+                          onAddVariableRow={(valueType) =>
+                            handleAddVariableRow(node.id, valueType)
+                          }
                           onRemoveVariableRow={(rowId) =>
                             handleRemoveVariableRow(node.id, rowId)
                           }
