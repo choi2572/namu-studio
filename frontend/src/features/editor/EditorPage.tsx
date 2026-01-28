@@ -260,8 +260,16 @@ function getExpandedContentHeight(
 ) {
   if (node.kind === "flow_control.condition") {
     const expressionCount = Math.max(1, node.conditionExpressions?.length ?? 1);
+    // 각 expression 은 2줄(row)로 렌더링되므로, 기존보다 2배 높이를 잡아준다.
+    // 1 expression 기준:
+    //   - 첫 줄: fieldHeight
+    //   - 둘째 줄: fieldHeight
+    //   - 두 줄 사이 gap: fieldGap
+    // expression 들 사이 gap: fieldGap
+    const perExpressionHeight =
+      2 * NODE_METRICS.fieldHeight + NODE_METRICS.fieldGap;
     const expressionsHeight =
-      expressionCount * NODE_METRICS.fieldHeight +
+      expressionCount * perExpressionHeight +
       Math.max(0, expressionCount - 1) * NODE_METRICS.fieldGap;
     const buttonsHeight = NODE_METRICS.conditionButtonHeight + NODE_METRICS.fieldGap;
     return NODE_METRICS.expandedTopPadding + expressionsHeight + buttonsHeight;
