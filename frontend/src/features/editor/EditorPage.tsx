@@ -907,91 +907,94 @@ function NodeCard({
 
       {node.isExpanded && node.kind === "flow_control.condition" && (
         <div className="mt-3 space-y-2 text-xs text-slate-600 pr-12">
-          {conditionExpressions.map((expression, index) => (
-            <div key={expression.id} className="space-y-1">
-              <span className="text-[10px] text-slate-500">Expression</span>
-              <div className="flex items-center gap-2 min-w-0">
-                {(() => {
-                  const parts = (expression.expression ?? "").trim().split(" ");
-                  const variablePart = parts[0] ?? "";
-                  const operatorPart = parts[1] ?? "";
-                  const valuePart = parts.slice(2).join(" ");
-                  return (
-                    <>
-                      {index > 0 && (
-                        <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
-                          {expression.operator}
-                        </span>
-                      )}
-                      <input
-                        value={variablePart}
-                        onChange={(event) => {
-                          const nextVariable = event.target.value;
-                          const combined = [nextVariable, operatorPart, valuePart]
-                            .filter((item) => item && item.length > 0)
-                            .join(" ");
-                          onConditionExpressionChange(expression.id, combined);
-                        }}
-                        placeholder="variable"
-                        className="w-20 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                      />
-                      <input
-                        value={operatorPart}
-                        onChange={(event) => {
-                          const nextOperator = event.target.value;
-                          const combined = [variablePart, nextOperator, valuePart]
-                            .filter((item) => item && item.length > 0)
-                            .join(" ");
-                          onConditionExpressionChange(expression.id, combined);
-                        }}
-                        placeholder="=="
-                        className="w-16 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                      />
-                      <input
-                        value={valuePart}
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          const combined = [variablePart, operatorPart, nextValue]
-                            .filter((item) => item && item.length > 0)
-                            .join(" ");
-                          onConditionExpressionChange(expression.id, combined);
-                        }}
-                        placeholder="value"
-                        className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                      />
-                    </>
-                  );
-                })()}
-                {index > 0 && (
-                  <button
-                    type="button"
-                    data-no-drag
-                    className="cursor-pointer flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveConditionExpression(expression.id);
+          {conditionExpressions.map((expression, index) => {
+            const parts = (expression.expression ?? "").trim().split(" ");
+            const variablePart = parts[0] ?? "";
+            const operatorPart = parts[1] ?? "";
+            const valuePart = parts.slice(2).join(" ");
+
+            return (
+              <div key={expression.id} className="space-y-1">
+                <span className="text-[10px] text-slate-500">Expression</span>
+
+                {/* 1줄째: AND/OR 배지 + variable + operator */}
+                <div className="flex items-center gap-2 min-w-0">
+                  {index > 0 && (
+                    <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
+                      {expression.operator}
+                    </span>
+                  )}
+                  <input
+                    value={variablePart}
+                    onChange={(event) => {
+                      const nextVariable = event.target.value;
+                      const combined = [nextVariable, operatorPart, valuePart]
+                        .filter((item) => item && item.length > 0)
+                        .join(" ");
+                      onConditionExpressionChange(expression.id, combined);
                     }}
-                    title="Remove expression"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={2.5}
-                      stroke="currentColor"
-                      className="h-3.5 w-3.5"
+                    placeholder="variable"
+                    className="w-24 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                  />
+                  <input
+                    value={operatorPart}
+                    onChange={(event) => {
+                      const nextOperator = event.target.value;
+                      const combined = [variablePart, nextOperator, valuePart]
+                        .filter((item) => item && item.length > 0)
+                        .join(" ");
+                      onConditionExpressionChange(expression.id, combined);
+                    }}
+                    placeholder="=="
+                    className="w-16 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                  />
+                  {index > 0 && (
+                    <button
+                      type="button"
+                      data-no-drag
+                      className="cursor-pointer flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveConditionExpression(expression.id);
+                      }}
+                      title="Remove expression"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19.5 12h-15"
-                      />
-                    </svg>
-                  </button>
-                )}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2.5}
+                        stroke="currentColor"
+                        className="h-3.5 w-3.5"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M19.5 12h-15"
+                        />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+
+                {/* 2줄째: value를 한 줄 전체로 표시 */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <input
+                    value={valuePart}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      const combined = [variablePart, operatorPart, nextValue]
+                        .filter((item) => item && item.length > 0)
+                        .join(" ");
+                      onConditionExpressionChange(expression.id, combined);
+                    }}
+                    placeholder="value"
+                    className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div className="flex items-center gap-2">
             <button
               type="button"
