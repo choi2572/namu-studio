@@ -45,3 +45,7 @@ export interface RunsApi {
   getNodeDebug(runId: string, stateName: string): Promise<NodeDebugBundle>;
   getEvents(runId: string, afterSeq: number): Promise<RunEvent[]>;
 }
+
+export interface SkillsetsApi {
+  list(): Promise<import("@/domain/types").SkillsetsResponse>;
+}

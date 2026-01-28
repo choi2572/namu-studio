@@ -58,7 +58,7 @@ export function HistoryPage() {
             onChange={(event) =>
               setStatusFilter(event.target.value as "all" | RunStatus)
             }
-            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+            className="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
           >
             <option value="all">All Status</option>
             <option value={RunStatus.RUNNING}>RUNNING</option>
@@ -69,7 +69,7 @@ export function HistoryPage() {
           <select
             value={workflowFilter}
             onChange={(event) => setWorkflowFilter(event.target.value)}
-            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+            className="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
           >
             {workflowOptions.map((option) => (
               <option key={option.id} value={option.id}>
@@ -82,7 +82,7 @@ export function HistoryPage() {
             onChange={(event) =>
               setTimeRange(event.target.value as "24h" | "7d" | "30d" | "all")
             }
-            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+            className="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
           >
             <option value="all">All Time</option>
             <option value="24h">Last 24h</option>

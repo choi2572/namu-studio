@@ -432,7 +432,7 @@ export function DagView({
               type="button"
               onClick={() => onSelectNode(node.stateName)}
               className={cn(
-                "relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
+                "cursor-pointer relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
                 NODE_STATUS_STYLE_MAP[node.status],
                 selectedNode === node.stateName
                   ? "ring-4 ring-slate-400 ring-offset-2"

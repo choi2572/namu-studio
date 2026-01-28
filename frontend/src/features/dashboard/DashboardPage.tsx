@@ -187,7 +187,7 @@ export function DashboardPage() {
               <button
                 type="button"
                 onClick={() => router.push(`/monitor/${latestRun.runId}`)}
-                className="w-full rounded-lg border-2 border-slate-900 bg-slate-900 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-800"
+                className="cursor-pointer w-full rounded-lg border-2 border-slate-900 bg-slate-900 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-800"
               >
                 View Run Details →
               </button>
@@ -220,7 +220,7 @@ export function DashboardPage() {
           actions={
             <Link
               href="/history"
-              className="text-xs font-bold text-slate-600 hover:text-slate-900"
+              className="cursor-pointer text-xs font-bold text-slate-600 hover:text-slate-900"
             >
               View all
             </Link>
@@ -239,7 +239,7 @@ export function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => router.push(`/monitor/${run.runId}`)}
-                    className="w-full rounded-lg border-2 border-red-300 bg-white p-4 text-left transition-all hover:border-red-400 hover:bg-red-50 hover:shadow-sm"
+                    className="cursor-pointer w-full rounded-lg border-2 border-red-300 bg-white p-4 text-left transition-all hover:border-red-400 hover:bg-red-50 hover:shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
@@ -351,16 +351,30 @@ export function DashboardPage() {
                       )}
                     </TableCell>
                     <TableCell className="px-5 py-4">
-                      <Button
-                        variant="secondary"
-                        size="sm"
+                      <button
+                        type="button"
                         onClick={(event) => {
                           event.stopPropagation();
                           router.push(`/editor/${workflow.workflowId}`);
                         }}
+                        className="flex items-center justify-center rounded-md border border-slate-200 bg-white p-2 text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                        title="Edit workflow"
                       >
-                        Edit
-                      </Button>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={1.5}
+                          stroke="currentColor"
+                          className="h-4 w-4"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                          />
+                        </svg>
+                      </button>
                     </TableCell>
                     </TableRow>
                   );
@@ -383,7 +397,7 @@ export function DashboardPage() {
       {/* Floating Action Button */}
       <Link
         href="/editor/new"
-        className="fixed bottom-8 right-8 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-2xl font-light text-white shadow-lg transition-all hover:bg-slate-800 hover:shadow-xl"
+        className="cursor-pointer fixed bottom-8 right-8 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-2xl font-light text-white shadow-lg transition-all hover:bg-slate-800 hover:shadow-xl"
         title="Create new workflow"
       >
         +

@@ -91,3 +91,28 @@ export function isRunTerminal(status: RunStatus) {
 export function isRunActive(status: RunStatus) {
   return status === RunStatus.RUNNING || status === RunStatus.WAITING;
 }
+
+export type SkillParameter = {
+  type: string;
+  description: string;
+};
+
+export type SkillOutput = {
+  type: string;
+  description: string;
+};
+
+export type Skillset = {
+  name: string;
+  version: string;
+  description: string;
+  parameters: Record<string, SkillParameter>;
+  outputs: Record<string, SkillOutput>;
+  feedback: unknown[];
+  pre_conditions: string[];
+  post_effects: string[];
+};
+
+export type SkillsetsResponse = {
+  skillsets: Skillset[];
+};

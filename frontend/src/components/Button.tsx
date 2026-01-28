@@ -16,7 +16,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "rounded-md font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+        "cursor-pointer rounded-md font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
         size === "sm" ? "px-3 py-1 text-xs" : "px-4 py-2 text-sm",
         variant === "primary" &&
           "bg-slate-900 text-white hover:bg-slate-800",

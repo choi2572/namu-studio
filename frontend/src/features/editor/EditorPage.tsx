@@ -9,7 +9,7 @@ import type {
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { workflowsApi } from "@/api";
+import { skillsetsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -22,8 +22,7 @@ type EditorPageProps = {
 };
 
 type NodeKind =
-  | "skill.pick"
-  | "skill.place"
+  | `skill.${string}`
   | "flow_control.input"
   | "flow_control.condition"
   | "flow_control.output"
@@ -108,14 +107,7 @@ type EdgeDragPayload = {
   portKey: string;
 };
 
-const NODE_TYPES: NodeKind[] = [
-  "skill.pick",
-  "skill.place",
-  "flow_control.input",
-  "flow_control.condition",
-  "flow_control.output",
-  "event.webhook"
-];
+// NODE_TYPES는 skillset에서 동적으로 생성됩니다
 
 const NODE_CATEGORIES: { id: NodeCategory; label: string }[] = [
   { id: "skill", label: "Skill" },
@@ -129,29 +121,8 @@ const NODE_CATEGORY_LABELS: Record<NodeCategory, string> = {
   event: "Event"
 };
 
-const NODE_TYPE_CONFIG: Record<NodeKind, NodeTypeConfig> = {
-  "skill.pick": {
-    label: "Pick",
-    category: "skill",
-    iconText: "PK",
-    colorClass: "border-blue-200 bg-blue-100 text-blue-700",
-    paramFields: [
-      { key: "target", label: "Target", placeholder: "bin-A" },
-      { key: "quantity", label: "Quantity", placeholder: "1" }
-    ],
-    outputs: [{ key: "next", label: "Next" }]
-  },
-  "skill.place": {
-    label: "Place",
-    category: "skill",
-    iconText: "PL",
-    colorClass: "border-emerald-200 bg-emerald-100 text-emerald-700",
-    paramFields: [
-      { key: "destination", label: "Destination", placeholder: "slot-3" },
-      { key: "orientation", label: "Orientation", placeholder: "north" }
-    ],
-    outputs: [{ key: "next", label: "Next" }]
-  },
+// 정적 노드 타입 설정 (flow_control, event)
+const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
   "flow_control.input": {
     label: "Input",
     category: "flow_control",
@@ -193,6 +164,67 @@ const NODE_TYPE_CONFIG: Record<NodeKind, NodeTypeConfig> = {
   }
 };
 
+// Skillset 기반으로 노드 타입 설정 생성
+function createNodeTypeConfigFromSkillset(skillset: import("@/domain/types").Skillset): NodeTypeConfig {
+  const skillName = skillset.name;
+  const iconText = skillName
+    .split(/(?=[A-Z])/)
+    .map((word) => word[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+  
+  // 색상 클래스는 skill 이름의 해시 기반으로 결정 (간단한 방법)
+  const colorClasses = [
+    "border-blue-200 bg-blue-100 text-blue-700",
+    "border-emerald-200 bg-emerald-100 text-emerald-700",
+    "border-purple-200 bg-purple-100 text-purple-700",
+    "border-orange-200 bg-orange-100 text-orange-700",
+    "border-pink-200 bg-pink-100 text-pink-700",
+    "border-indigo-200 bg-indigo-100 text-indigo-700"
+  ];
+  const colorIndex = skillName.length % colorClasses.length;
+  
+  const paramFields: NodeParamField[] = Object.entries(skillset.parameters).map(([key, param]) => ({
+    key,
+    label: key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+    placeholder: param.description || key
+  }));
+  
+  const outputs: NodeOutputPort[] = Object.entries(skillset.outputs).map(([key, output]) => ({
+    key,
+    label: output.description || key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+  }));
+  
+  // 기본적으로 next 출력이 없으면 추가
+  if (outputs.length === 0) {
+    outputs.push({ key: "next", label: "Next" });
+  }
+  
+  return {
+    label: skillName.replace(/([A-Z])/g, " $1").trim(),
+    category: "skill",
+    iconText,
+    colorClass: colorClasses[colorIndex],
+    paramFields,
+    outputs
+  };
+}
+
+// Skillset 배열로부터 전체 노드 타입 설정 생성
+function createNodeTypeConfigFromSkillsets(
+  skillsets: import("@/domain/types").Skillset[]
+): Record<string, NodeTypeConfig> {
+  const config: Record<string, NodeTypeConfig> = { ...STATIC_NODE_TYPE_CONFIG };
+  
+  skillsets.forEach((skillset) => {
+    const nodeKind = `skill.${skillset.name}` as NodeKind;
+    config[nodeKind] = createNodeTypeConfigFromSkillset(skillset);
+  });
+  
+  return config as Record<NodeKind, NodeTypeConfig>;
+}
+
 const NODE_METRICS = {
   width: 220,
   collapsedHeight: 86,
@@ -222,7 +254,10 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function getExpandedContentHeight(node: EditorNode) {
+function getExpandedContentHeight(
+  node: EditorNode,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+) {
   if (node.kind === "flow_control.condition") {
     const expressionCount = Math.max(1, node.conditionExpressions?.length ?? 1);
     const expressionsHeight =
@@ -241,7 +276,9 @@ function getExpandedContentHeight(node: EditorNode) {
     return NODE_METRICS.expandedTopPadding + rowsHeight + addButtonHeight;
   }
 
-  const fieldCount = NODE_TYPE_CONFIG[node.kind].paramFields.length;
+  const config = nodeTypeConfig[node.kind];
+  if (!config) return 0;
+  const fieldCount = config.paramFields.length;
   if (fieldCount === 0) return 0;
   return (
     NODE_METRICS.expandedTopPadding +
@@ -250,13 +287,20 @@ function getExpandedContentHeight(node: EditorNode) {
   );
 }
 
-function getNodeHeight(node: EditorNode) {
+function getNodeHeight(
+  node: EditorNode,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+) {
   if (!node.isExpanded) return NODE_METRICS.collapsedHeight;
-  return NODE_METRICS.collapsedHeight + getExpandedContentHeight(node);
+  return NODE_METRICS.collapsedHeight + getExpandedContentHeight(node, nodeTypeConfig);
 }
 
-function getNodeTypeLabel(kind: NodeKind) {
-  const config = NODE_TYPE_CONFIG[kind];
+function getNodeTypeLabel(
+  kind: NodeKind,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+) {
+  const config = nodeTypeConfig[kind];
+  if (!config) return kind;
   return `${NODE_CATEGORY_LABELS[config.category]} - ${config.label}`;
 }
 
@@ -316,10 +360,13 @@ function isValidVariableRow(value: unknown): value is VariableRow {
   );
 }
 
-function isValidEditorNode(value: unknown): value is EditorNode {
+function isValidEditorNode(
+  value: unknown,
+  nodeTypes: NodeKind[]
+): value is EditorNode {
   if (!isRecord(value)) return false;
   if (typeof value.id !== "string" || typeof value.name !== "string") return false;
-  if (typeof value.kind !== "string" || !NODE_TYPES.includes(value.kind as NodeKind)) {
+  if (typeof value.kind !== "string" || !nodeTypes.includes(value.kind as NodeKind)) {
     return false;
   }
   if (
@@ -348,11 +395,14 @@ function isValidEditorNode(value: unknown): value is EditorNode {
   return true;
 }
 
-function parseEditorView(viewJson: Record<string, unknown>): EditorViewJson | null {
+function parseEditorView(
+  viewJson: Record<string, unknown>,
+  nodeTypes: NodeKind[]
+): EditorViewJson | null {
   const rawNodes = viewJson.nodes;
   const rawEdges = viewJson.edges;
   if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
-  if (!rawNodes.every(isValidEditorNode) || !rawEdges.every(isValidEditorEdge)) {
+  if (!rawNodes.every((node) => isValidEditorNode(node, nodeTypes)) || !rawEdges.every(isValidEditorEdge)) {
     return null;
   }
   const rawCanvas = isRecord(viewJson.canvas) ? viewJson.canvas : null;
@@ -457,9 +507,13 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
       }
     } else {
       const next = getNext("next");
+      // skill 노드인 경우 skill 이름 추출
+      const skillName = node.kind.startsWith("skill.") 
+        ? node.kind.replace("skill.", "") 
+        : node.kind;
       state = {
-        Type: node.kind === "flow_control.input" ? "Pass" : "Task",
-        Resource: node.kind,
+        Type: node.kind === "flow_control.input" ? "Pass" : "Skill",
+        Skill: skillName,
         Parameters: node.params
       };
       if (next) {
@@ -564,8 +618,9 @@ function NodeCard({
   onOutputDragEnd: () => void;
   onInputDragOver: (event: DragEvent<HTMLButtonElement>) => void;
   onInputDrop: (event: DragEvent<HTMLButtonElement>) => void;
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
 }) {
-  const nodeHeight = getNodeHeight(node);
+  const nodeHeight = getNodeHeight(node, nodeTypeConfig);
   const outputOffsets = getPortOffsets(nodeHeight, outputs.length);
   const conditionExpressions =
     node.kind === "flow_control.condition" ? node.conditionExpressions ?? [] : [];
@@ -634,7 +689,7 @@ function NodeCard({
         <button
           type="button"
           className={cn(
-            "absolute left-0 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
+            "cursor-pointer absolute left-0 flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
             inputConnected ? "border-slate-400" : "border-slate-200"
           )}
           style={{ top: nodeHeight / 2 }}
@@ -681,7 +736,7 @@ function NodeCard({
             type="button"
             draggable
             className={cn(
-              "flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
+              "cursor-pointer flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
               output.isActive
                 ? "border-slate-900"
                 : output.isConnected
@@ -752,7 +807,7 @@ function NodeCard({
               <button
                 type="button"
                 data-no-drag
-                className="truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700"
+                className="cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700"
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   onStartEditName();
@@ -785,7 +840,7 @@ function NodeCard({
         <button
           type="button"
           data-no-drag
-          className="flex-shrink-0 text-slate-500 hover:text-slate-900"
+          className="cursor-pointer flex-shrink-0 text-slate-500 hover:text-slate-900"
           onClick={(event) => {
             event.stopPropagation();
             onToggleExpand();
@@ -849,7 +904,7 @@ function NodeCard({
                   <button
                     type="button"
                     data-no-drag
-                    className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                    className="cursor-pointer flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
                     onClick={(e) => {
                       e.stopPropagation();
                       onRemoveConditionExpression(expression.id);
@@ -879,7 +934,7 @@ function NodeCard({
             <button
               type="button"
               data-no-drag
-              className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
+              className="cursor-pointer rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
               onClick={(e) => {
                 e.stopPropagation();
                 onAddConditionExpression("AND");
@@ -890,7 +945,7 @@ function NodeCard({
             <button
               type="button"
               data-no-drag
-              className="rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
+              className="cursor-pointer rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
               onClick={(e) => {
                 e.stopPropagation();
                 onAddConditionExpression("OR");
@@ -928,7 +983,7 @@ function NodeCard({
                   <button
                     type="button"
                     data-no-drag
-                    className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                    className="cursor-pointer flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
                     onClick={(e) => {
                       e.stopPropagation();
                       onRemoveVariableRow?.(row.id);
@@ -956,7 +1011,7 @@ function NodeCard({
             <button
               type="button"
               data-no-drag
-              className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+              className="cursor-pointer flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
               onClick={(e) => {
                 e.stopPropagation();
                 onAddVariableRow?.();
@@ -1042,10 +1097,38 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     enabled: !isNewWorkflow
   });
 
-  const { data: workflows } = useQuery({
+  const { data: workflows, isLoading: isLoadingWorkflows } = useQuery({
     queryKey: ["workflows"],
     queryFn: () => workflowsApi.list()
   });
+
+  // Skillset 가져오기 (초기화 시 한 번만)
+  const { data: skillsetsResponse } = useQuery({
+    queryKey: ["skillsets"],
+    queryFn: () => skillsetsApi.list()
+  });
+
+  // Skillset 기반으로 동적 노드 타입 생성
+  const nodeTypeConfig = useMemo(() => {
+    if (!skillsetsResponse) {
+      return STATIC_NODE_TYPE_CONFIG as Record<NodeKind, NodeTypeConfig>;
+    }
+    return createNodeTypeConfigFromSkillsets(skillsetsResponse.skillsets);
+  }, [skillsetsResponse]);
+
+  // 노드 타입 목록 생성
+  const nodeTypes = useMemo(() => {
+    const staticTypes: NodeKind[] = [
+      "flow_control.input",
+      "flow_control.condition",
+      "flow_control.output",
+      "event.webhook"
+    ];
+    const skillTypes: NodeKind[] = skillsetsResponse?.skillsets.map(
+      (s) => `skill.${s.name}` as NodeKind
+    ) ?? [];
+    return [...skillTypes, ...staticTypes];
+  }, [skillsetsResponse]);
 
   const activeDraft = draftOverride ?? draft;
   
@@ -1083,7 +1166,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setZoom(1);
       return;
     }
-    const parsed = parseEditorView(draftToApply.view_json);
+    const parsed = parseEditorView(draftToApply.view_json, nodeTypes);
     if (!parsed) {
       setNodes([]);
       setEdges([]);
@@ -1132,7 +1215,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setSelectedEdgeId(null);
     setConnectingFrom(null);
     setEditingNodeId(null);
-  }, []);
+  }, [nodeTypes, getViewportCanvasSize]);
 
   useEffect(() => {
     if (!activeDraft) return;
@@ -1193,7 +1276,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     onSuccess: (saved) => {
       setDraftOverride(saved);
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
-      downloadJsonFile(`${saved.workflowId}.asl.json`, saved.dsl_json);
       if (saved.workflowId !== workflowId) {
         router.replace(`/editor/${saved.workflowId}`);
       }
@@ -1211,9 +1293,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [nodes]);
 
   const nodeTypesByCategory = useMemo(() => {
-    return NODE_TYPES.reduce(
+    return nodeTypes.reduce(
       (acc, kind) => {
-        acc[NODE_TYPE_CONFIG[kind].category].push(kind);
+        const config = nodeTypeConfig[kind];
+        if (config) {
+          acc[config.category].push(kind);
+        }
         return acc;
       },
       {
@@ -1222,7 +1307,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         event: []
       } as Record<NodeCategory, NodeKind[]>
     );
-  }, []);
+  }, [nodeTypes, nodeTypeConfig]);
 
   const incomingEdges = useMemo(() => {
     const map = new Map<string, EditorEdge>();
@@ -1311,14 +1396,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [canvasBase.height, canvasBase.width, dragState, getCanvasPoint]);
 
   const buildDefaultParams = useCallback((kind: NodeKind) => {
-    return NODE_TYPE_CONFIG[kind].paramFields.reduce(
+    const config = nodeTypeConfig[kind];
+    if (!config) return {};
+    return config.paramFields.reduce(
       (acc, field) => ({
         ...acc,
         [field.key]: ""
       }),
       {} as Record<string, string>
     );
-  }, []);
+  }, [nodeTypeConfig]);
 
   const createConditionExpression = useCallback(
     (operator: ConditionOperator | null): ConditionExpression => ({
@@ -1365,7 +1452,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
       const index = nextNodeIndex.current++;
       const id = `node-${index}`;
-      const name = `${NODE_TYPE_CONFIG[kind].label} ${index}`;
+      const config = nodeTypeConfig[kind];
+      const name = config ? `${config.label} ${index}` : `${kind} ${index}`;
       setNodes((prev) => [
         ...prev,
         {
@@ -1449,7 +1537,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         if (node.id !== nodeId) return node;
         const nextExpanded = !node.isExpanded;
         const nextNode = { ...node, isExpanded: nextExpanded };
-        const nodeHeight = getNodeHeight(nextNode);
+        const nodeHeight = getNodeHeight(nextNode, nodeTypeConfig);
         const { minX, minY, maxX, maxY } = getCanvasBounds(canvasBase, nodeHeight);
         return {
           ...nextNode,
@@ -1510,7 +1598,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const nextNode = { ...node, conditionExpressions: nextExpressions };
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
-          getNodeHeight(nextNode)
+          getNodeHeight(nextNode, nodeTypeConfig)
         );
         return {
           ...nextNode,
@@ -1534,7 +1622,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const nextNode = { ...node, conditionExpressions: nextExpressions };
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
-          getNodeHeight(nextNode)
+          getNodeHeight(nextNode, nodeTypeConfig)
         );
         return {
           ...nextNode,
@@ -1585,7 +1673,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const nextNode = { ...node, variableRows: nextRows };
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
-          getNodeHeight(nextNode)
+          getNodeHeight(nextNode, nodeTypeConfig)
         );
         return {
           ...nextNode,
@@ -1614,7 +1702,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const nextNode = { ...node, variableRows: nextRows };
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
-          getNodeHeight(nextNode)
+          getNodeHeight(nextNode, nodeTypeConfig)
         );
         return {
           ...nextNode,
@@ -1755,7 +1843,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         );
         let yCursor = padding;
         sortedGroup.forEach((node) => {
-          const nodeHeight = getNodeHeight(node);
+          const nodeHeight = getNodeHeight(node, nodeTypeConfig);
           const x = padding + layer * spacingX;
           const y = yCursor;
           yCursor += nodeHeight + rowGap;
@@ -1787,7 +1875,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       if (fromNodeId === toNodeId) return;
       const toNode = nodeMap.get(toNodeId);
       if (!toNode) return;
-      if (NODE_TYPE_CONFIG[toNode.kind].inputEnabled === false) return;
+      const toConfig = nodeTypeConfig[toNode.kind];
+      if (toConfig?.inputEnabled === false) return;
       if (incomingEdges.has(toNodeId)) return;
       if (outgoingEdges.has(`${fromNodeId}:${fromPort}`)) return;
 
@@ -1880,7 +1969,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     event.preventDefault();
     const rawKind = event.dataTransfer.getData("application/x-node-kind");
     if (!rawKind) return;
-    if (!NODE_TYPES.includes(rawKind as NodeKind)) return;
+    if (!nodeTypes.includes(rawKind as NodeKind)) return;
     const point = getCanvasPoint(event.clientX, event.clientY);
     if (!point) return;
 
@@ -1903,16 +1992,20 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const fromNode = nodeMap.get(edge.from);
       const toNode = nodeMap.get(edge.to);
       if (!fromNode || !toNode) return false;
-      const outputs = NODE_TYPE_CONFIG[fromNode.kind].outputs;
+      const config = nodeTypeConfig[fromNode.kind];
+      if (!config) return false;
+      const outputs = config.outputs;
       return outputs.some((output) => output.key === edge.fromPort);
     });
-  }, [edges, nodeMap]);
+  }, [edges, nodeMap, nodeTypeConfig]);
 
   const connectingLabel = useMemo(() => {
     if (!connectingFrom) return null;
     const node = nodeMap.get(connectingFrom.nodeId);
     if (!node) return null;
-    const output = NODE_TYPE_CONFIG[node.kind].outputs.find(
+    const config = nodeTypeConfig[node.kind];
+    if (!config) return `${node.name} - ${connectingFrom.portKey}`;
+    const output = config.outputs.find(
       (item) => item.key === connectingFrom.portKey
     );
     return `${node.name} - ${output?.label ?? connectingFrom.portKey}`;
@@ -1975,7 +2068,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   }}
                   title="더블클릭하여 이름 변경"
                 >
-                  {workflowName || activeDraft?.workflowId || "Loading..."}
+                  {isLoadingWorkflows ? "Loading..." : (workflowName || activeDraft?.workflowId || "Untitled Workflow")}
                 </h1>
                 <button
                   type="button"
@@ -1983,7 +2076,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     e.stopPropagation();
                     setIsEditingWorkflowName(true);
                   }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100"
+                  className="cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100"
                   title="이름 변경"
                 >
                   <svg
@@ -2032,7 +2125,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         <button
           type="button"
           onClick={() => setShowPalette((prev) => !prev)}
-          className="absolute left-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg"
+          className="cursor-pointer absolute left-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg"
         >
           +
         </button>
@@ -2047,7 +2140,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     type="button"
                     onClick={() => setSelectedCategory(category.id)}
                     className={cn(
-                      "w-full rounded-md px-2 py-1 text-left text-xs",
+                      "cursor-pointer w-full rounded-md px-2 py-1 text-left text-xs",
                       selectedCategory === category.id
                         ? "bg-slate-900 text-white"
                         : "text-slate-600 hover:bg-slate-100"
@@ -2064,7 +2157,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               </p>
               <div className="mt-3 space-y-2">
                 {nodeTypesByCategory[selectedCategory].map((kind) => {
-                  const config = NODE_TYPE_CONFIG[kind];
+                  const config = nodeTypeConfig[kind];
                   return (
                     <button
                       key={kind}
@@ -2075,7 +2168,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                         event.dataTransfer.effectAllowed = "copy";
                       }}
                       onClick={() => createNode(kind)}
-                      className="flex w-full items-center gap-3 rounded-md border border-slate-200 px-2 py-2 text-left text-xs text-slate-700 hover:border-slate-300"
+                      className="cursor-pointer flex w-full items-center gap-3 rounded-md border border-slate-200 px-2 py-2 text-left text-xs text-slate-700 hover:border-slate-300"
                     >
                       <div
                         className={cn(
@@ -2176,13 +2269,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       const fromNode = nodeMap.get(edge.from);
                       const toNode = nodeMap.get(edge.to);
                       if (!fromNode || !toNode) return null;
-                      const outputs = NODE_TYPE_CONFIG[fromNode.kind].outputs;
+                      const fromConfig = nodeTypeConfig[fromNode.kind];
+                      if (!fromConfig) return null;
+                      const outputs = fromConfig.outputs;
                       const outputIndex = outputs.findIndex(
                         (output) => output.key === edge.fromPort
                       );
                       if (outputIndex < 0) return null;
                       const outputOffsets = getPortOffsets(
-                        getNodeHeight(fromNode),
+                        getNodeHeight(fromNode, nodeTypeConfig),
                         outputs.length
                       );
                       const start = {
@@ -2191,7 +2286,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       };
                       const end = {
                         x: toNode.position.x,
-                        y: toNode.position.y + getNodeHeight(toNode) / 2
+                        y: toNode.position.y + getNodeHeight(toNode, nodeTypeConfig) / 2
                       };
                       const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
                       const controlX1 =
@@ -2235,7 +2330,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   </svg>
 
                   {nodes.map((node) => {
-                    const config = NODE_TYPE_CONFIG[node.kind];
+                    const config = nodeTypeConfig[node.kind];
+                    if (!config) return null;
                     const outputStates = config.outputs.map((output) => ({
                       key: output.key,
                       label: output.label,
@@ -2256,6 +2352,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           isSelected={selectedNode === node.id}
                           inputConnected={incomingEdges.has(node.id)}
                           outputs={outputStates}
+                          nodeTypeConfig={nodeTypeConfig}
                           onSelect={() => {
                             setSelectedNode(node.id);
                             setSelectedEdgeId(null);
@@ -2278,7 +2375,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                               nodeId: node.id,
                               offsetX,
                               offsetY,
-                              height: getNodeHeight(node)
+                              height: getNodeHeight(node, nodeTypeConfig)
                             });
                           }}
                           onStartConnect={(portKey) =>
@@ -2343,7 +2440,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             <div className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
               <button
                 type="button"
-                className="rounded px-1 text-slate-600 hover:text-slate-900"
+                className="cursor-pointer rounded px-1 text-slate-600 hover:text-slate-900"
                 onClick={() =>
                   setZoom((prev) =>
                     clamp(prev - ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
@@ -2357,7 +2454,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               </span>
               <button
                 type="button"
-                className="rounded px-1 text-slate-600 hover:text-slate-900"
+                className="cursor-pointer rounded px-1 text-slate-600 hover:text-slate-900"
                 onClick={() =>
                   setZoom((prev) =>
                     clamp(prev + ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
@@ -2368,7 +2465,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               </button>
               <button
                 type="button"
-                className="rounded px-1 text-slate-500 hover:text-slate-900"
+                className="cursor-pointer rounded px-1 text-slate-500 hover:text-slate-900"
                 onClick={() => setZoom(1)}
               >
                 Reset
@@ -2382,7 +2479,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         <div className="fixed bottom-6 right-6 z-20">
           <button
             type="button"
-            className="flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-lg"
+            className="cursor-pointer flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-lg"
             onClick={() => setShowValidation((prev) => !prev)}
           >
             {validationErrors.length} Validation Errors
@@ -2396,7 +2493,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     <button
                       type="button"
                       onClick={() => setSelectedNode(error.nodeId ?? null)}
-                      className="text-left text-slate-700 hover:text-slate-900"
+                      className="cursor-pointer text-left text-slate-700 hover:text-slate-900"
                     >
                       {error.message}
                     </button>
