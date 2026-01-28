@@ -14,6 +14,9 @@ from app.repos.interfaces import (
     WorkflowRepository,
     WorkflowVersionRepository,
     WorkflowViewRepository,
+    RunRepository,
+    NodeRunRepository,
+    RunEventRepository,
 )
 from app.services.validation import validate_workflow_dsl, ValidationError
 
@@ -26,10 +29,16 @@ class WorkflowService:
         workflow_repo: WorkflowRepository,
         version_repo: WorkflowVersionRepository,
         view_repo: WorkflowViewRepository,
+        run_repo: RunRepository,
+        node_run_repo: NodeRunRepository,
+        run_event_repo: RunEventRepository,
     ):
         self.workflow_repo = workflow_repo
         self.version_repo = version_repo
         self.view_repo = view_repo
+        self.run_repo = run_repo
+        self.node_run_repo = node_run_repo
+        self.run_event_repo = run_event_repo
     
     def create_workflow(self, name: str, description: Optional[str] = None) -> Workflow:
         """Create a new workflow."""
@@ -188,3 +197,26 @@ class WorkflowService:
             "view_json": view.view_json if view else {},
             "updatedAt": updated_at.isoformat(),
         }
+
+    def delete_workflow(self, workflow_id: str) -> bool:
+        """Delete workflow and all related versions, views, runs and events."""
+        workflow = self.workflow_repo.get(workflow_id)
+        if not workflow:
+            return False
+
+        # Delete runs and their node runs / events first to satisfy FK constraints
+        runs = self.run_repo.list_all({"workflow_id": workflow_id})
+        for run in runs:
+            self.node_run_repo.delete_by_run(run.run_id)
+            self.run_event_repo.delete_by_run(run.run_id)
+            self.run_repo.delete(run.run_id)
+
+        # Delete workflow versions and their views
+        versions = self.version_repo.get_by_workflow(workflow_id)
+        for version in versions:
+            self.view_repo.delete(version.version_id)
+            self.version_repo.delete(version.version_id)
+
+        # Finally delete the workflow
+        self.workflow_repo.delete(workflow_id)
+        return True

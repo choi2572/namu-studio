@@ -46,6 +46,9 @@ class InMemoryWorkflowRepository(WorkflowRepository):
         self._workflows[workflow.workflow_id] = workflow
         return workflow
 
+    def delete(self, workflow_id: str) -> None:
+        self._workflows.pop(workflow_id, None)
+
 
 class InMemoryWorkflowVersionRepository(WorkflowVersionRepository):
     """In-memory workflow version repository."""
@@ -80,6 +83,9 @@ class InMemoryWorkflowVersionRepository(WorkflowVersionRepository):
         self._versions[version.version_id] = version
         return version
 
+    def delete(self, version_id: str) -> None:
+        self._versions.pop(version_id, None)
+
 
 class InMemoryWorkflowViewRepository(WorkflowViewRepository):
     """In-memory workflow view repository."""
@@ -98,6 +104,9 @@ class InMemoryWorkflowViewRepository(WorkflowViewRepository):
         view.updated_at = datetime.utcnow()
         self._views[view.version_id] = view
         return view
+
+    def delete(self, version_id: str) -> None:
+        self._views.pop(version_id, None)
 
 
 class InMemoryRunRepository(RunRepository):
@@ -137,6 +146,9 @@ class InMemoryRunRepository(RunRepository):
         self._runs[run.run_id] = run
         return run
 
+    def delete(self, run_id: str) -> None:
+        self._runs.pop(run_id, None)
+
 
 class InMemoryNodeRunRepository(NodeRunRepository):
     """In-memory node run repository."""
@@ -167,6 +179,11 @@ class InMemoryNodeRunRepository(NodeRunRepository):
     def update(self, node_run: NodeRun) -> NodeRun:
         self._node_runs[node_run.node_run_id] = node_run
         return node_run
+
+    def delete_by_run(self, run_id: str) -> None:
+        to_delete = [nr_id for nr_id, nr in self._node_runs.items() if nr.run_id == run_id]
+        for nr_id in to_delete:
+          self._node_runs.pop(nr_id, None)
 
 
 class InMemoryRunEventRepository(RunEventRepository):
@@ -201,3 +218,11 @@ class InMemoryRunEventRepository(RunEventRepository):
         if not events:
             return 0
         return max(e.seq for e in events)
+
+    def delete_by_run(self, run_id: str) -> None:
+        # Remove all events for the run
+        self._run_events.pop(run_id, None)
+        # Also clean up flat event map
+        to_delete = [event_id for event_id, event in self._events.items() if event.run_id == run_id]
+        for event_id in to_delete:
+            self._events.pop(event_id, None)

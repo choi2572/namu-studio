@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { useState, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
 
@@ -14,7 +14,6 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(true);
 
   return (
@@ -55,19 +54,16 @@ export function Sidebar() {
               ? pathname === "/"
               : pathname.startsWith(item.href);
 
-          const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
-            // 에디터 페이지에서 나갈 때, 편집 중인 내용이 있으면 확인 다이얼로그 표시
+          const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
+            // When leaving editor via sidebar, always warn that edits may be lost
             if (typeof window !== "undefined") {
-              const hasUnsaved =
-                (window as unknown as { __editorHasUnsavedChanges?: boolean })
-                  .__editorHasUnsavedChanges ?? false;
-
               const isOnEditor = pathname.startsWith("/editor");
-              const isNavigatingToDifferentPage = item.href !== pathname;
+              const isNavigatingToDifferentPage =
+                !pathname.startsWith(item.href);
 
-              if (isOnEditor && isNavigatingToDifferentPage && hasUnsaved) {
+              if (isOnEditor && isNavigatingToDifferentPage) {
                 const confirmed = window.confirm(
-                  "편집 중인 내용이 있습니다. 나가시겠습니까?"
+                  "You may have unsaved changes in the editor. Leave this page?"
                 );
                 if (!confirmed) {
                   event.preventDefault();
@@ -75,12 +71,6 @@ export function Sidebar() {
                 }
               }
             }
-
-            // Link 기본 동작 그대로 두되, 서버 사이드에서는 router로 보완 가능
-            if (event.defaultPrevented) {
-              return;
-            }
-            // next/link가 자체적으로 push를 처리하므로 여기서 별도 router.push는 필요 없음
           };
 
           return (

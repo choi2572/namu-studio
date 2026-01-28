@@ -153,6 +153,15 @@ class WorkflowRepositorySqlite(WorkflowRepository):
         conn.commit()
         return workflow
 
+    def delete(self, workflow_id: str) -> None:
+        """Delete workflow by ID."""
+        conn = get_db()
+        conn.execute(
+            "DELETE FROM workflows WHERE workflow_id = ?",
+            (workflow_id,),
+        )
+        conn.commit()
+
 
 class WorkflowVersionRepositorySqlite(WorkflowVersionRepository):
     """SQLite workflow version repository."""
@@ -273,6 +282,15 @@ class WorkflowVersionRepositorySqlite(WorkflowVersionRepository):
         conn.commit()
         return version
 
+    def delete(self, version_id: str) -> None:
+        """Delete version by ID."""
+        conn = get_db()
+        conn.execute(
+            "DELETE FROM workflow_versions WHERE version_id = ?",
+            (version_id,),
+        )
+        conn.commit()
+
 
 class WorkflowViewRepositorySqlite(WorkflowViewRepository):
     """SQLite workflow view repository."""
@@ -321,6 +339,15 @@ class WorkflowViewRepositorySqlite(WorkflowViewRepository):
         ))
         conn.commit()
         return view
+
+    def delete(self, version_id: str) -> None:
+        """Delete view by version ID."""
+        conn = get_db()
+        conn.execute(
+            "DELETE FROM workflow_views WHERE version_id = ?",
+            (version_id,),
+        )
+        conn.commit()
 
 
 class RunRepositorySqlite(RunRepository):
@@ -489,6 +516,15 @@ class RunRepositorySqlite(RunRepository):
         conn.commit()
         return run
 
+    def delete(self, run_id: str) -> None:
+        """Delete run by ID."""
+        conn = get_db()
+        conn.execute(
+            "DELETE FROM runs WHERE run_id = ?",
+            (run_id,),
+        )
+        conn.commit()
+
 
 class NodeRunRepositorySqlite(NodeRunRepository):
     """SQLite node run repository."""
@@ -653,6 +689,15 @@ class NodeRunRepositorySqlite(NodeRunRepository):
         conn.commit()
         return node_run
 
+    def delete_by_run(self, run_id: str) -> None:
+        """Delete all node runs for a run."""
+        conn = get_db()
+        conn.execute(
+            "DELETE FROM node_runs WHERE run_id = ?",
+            (run_id,),
+        )
+        conn.commit()
+
 
 class RunEventRepositorySqlite(RunEventRepository):
     """SQLite run event repository."""
@@ -727,3 +772,12 @@ class RunEventRepositorySqlite(RunEventRepository):
         """, (run_id,))
         row = cursor.fetchone()
         return row["max_seq"] if row and row["max_seq"] is not None else 0
+
+    def delete_by_run(self, run_id: str) -> None:
+        """Delete all events for a run."""
+        conn = get_db()
+        conn.execute(
+            "DELETE FROM run_events WHERE run_id = ?",
+            (run_id,),
+        )
+        conn.commit()

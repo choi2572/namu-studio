@@ -36,6 +36,11 @@ class WorkflowRepository(ABC):
         """Update workflow."""
         pass
 
+    @abstractmethod
+    def delete(self, workflow_id: str) -> None:
+        """Delete workflow by ID."""
+        pass
+
 
 class WorkflowVersionRepository(ABC):
     """Workflow version repository interface."""
@@ -65,6 +70,11 @@ class WorkflowVersionRepository(ABC):
         """Update version."""
         pass
 
+    @abstractmethod
+    def delete(self, version_id: str) -> None:
+        """Delete version by ID."""
+        pass
+
 
 class WorkflowViewRepository(ABC):
     """Workflow view repository interface."""
@@ -77,6 +87,11 @@ class WorkflowViewRepository(ABC):
     @abstractmethod
     def save(self, view: WorkflowView) -> WorkflowView:
         """Save or update view."""
+        pass
+
+    @abstractmethod
+    def delete(self, version_id: str) -> None:
+        """Delete view by version ID."""
         pass
 
 
@@ -108,6 +123,11 @@ class RunRepository(ABC):
         """Update run."""
         pass
 
+    @abstractmethod
+    def delete(self, run_id: str) -> None:
+        """Delete run by ID."""
+        pass
+
 
 class NodeRunRepository(ABC):
     """Node run repository interface."""
@@ -137,6 +157,11 @@ class NodeRunRepository(ABC):
         """Update node run."""
         pass
 
+    @abstractmethod
+    def delete_by_run(self, run_id: str) -> None:
+        """Delete all node runs for a run."""
+        pass
+
 
 class RunEventRepository(ABC):
     """Run event repository interface."""
@@ -154,4 +179,9 @@ class RunEventRepository(ABC):
     @abstractmethod
     def get_max_seq(self, run_id: str) -> int:
         """Get maximum sequence number for a run."""
+        pass
+
+    @abstractmethod
+    def delete_by_run(self, run_id: str) -> None:
+        """Delete all events for a run."""
         pass

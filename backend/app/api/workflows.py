@@ -8,10 +8,19 @@ from app.repos.registry import (
     version_repo as _version_repo,
     view_repo as _view_repo,
     run_repo as _run_repo,
+    node_run_repo as _node_run_repo,
+    run_event_repo as _run_event_repo,
 )
 
 
-_workflow_service = WorkflowService(_workflow_repo, _version_repo, _view_repo)
+_workflow_service = WorkflowService(
+    _workflow_repo,
+    _version_repo,
+    _view_repo,
+    _run_repo,
+    _node_run_repo,
+    _run_event_repo,
+)
 
 
 bp = Blueprint("workflows", __name__)
@@ -175,3 +184,12 @@ def publish_workflow(workflow_id: str):
         }), 201
     except ValueError as e:
         raise BadRequest(str(e))
+
+
+@bp.route("/<workflow_id>", methods=["DELETE"])
+def delete_workflow(workflow_id: str):
+    """Delete workflow and all related data."""
+    deleted = _workflow_service.delete_workflow(workflow_id)
+    if not deleted:
+        raise NotFound(f"Workflow {workflow_id} not found")
+    return ("", 204)

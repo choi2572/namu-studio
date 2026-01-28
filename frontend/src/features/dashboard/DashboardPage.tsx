@@ -87,6 +87,14 @@ export function DashboardPage() {
     onSuccess: () => {
       setWorkflowToDelete(null);
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
+    },
+    onError: (error: unknown) => {
+      console.error("Failed to delete workflow", error);
+      if (typeof window !== "undefined") {
+        window.alert(
+          "Failed to delete workflow. The backend delete API may not be available yet."
+        );
+      }
     }
   });
 
@@ -298,7 +306,7 @@ export function DashboardPage() {
         className="border-2 border-slate-200"
       >
         {workflows.length > 0 ? (
-          <div className="overflow-x-auto">
+          <div className="max-h-[420px] overflow-x-auto overflow-y-auto">
             <Table>
               <TableHead>
                 <tr className="border-b-2 border-slate-200">
@@ -377,7 +385,7 @@ export function DashboardPage() {
                             event.stopPropagation();
                             router.push(`/editor/${workflow.workflowId}`);
                           }}
-                          className="flex items-center justify-center rounded-md border border-slate-200 bg-white p-2 text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                          className="cursor-pointer flex items-center justify-center rounded-md border border-slate-200 bg-white p-2 text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
                           title="Edit workflow"
                         >
                           <svg
@@ -404,7 +412,7 @@ export function DashboardPage() {
                               name: workflow.name
                             });
                           }}
-                          className="flex items-center justify-center rounded-md border border-red-100 bg-white p-2 text-red-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                          className="cursor-pointer flex items-center justify-center rounded-md border border-red-100 bg-white p-2 text-red-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                           title="Delete workflow"
                         >
                           <svg
@@ -446,16 +454,16 @@ export function DashboardPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl">
             <h2 className="text-lg font-semibold text-slate-900">
-              워크플로 삭제
+              Delete workflow
             </h2>
             <p className="mt-3 text-sm text-slate-600">
               <span className="font-semibold text-slate-900">
                 {workflowToDelete.name}
               </span>
               {" "}
-              워크플로를 삭제하시겠습니까?
+              will be deleted.
               <br />
-              이 작업은 되돌릴 수 없습니다.
+              This action cannot be undone.
             </p>
             <div className="mt-6 flex justify-end gap-3">
               <button
@@ -464,7 +472,7 @@ export function DashboardPage() {
                 onClick={() => setWorkflowToDelete(null)}
                 disabled={deleteMutation.isLoading}
               >
-                취소
+                Cancel
               </button>
               <button
                 type="button"
@@ -472,7 +480,7 @@ export function DashboardPage() {
                 onClick={handleConfirmDelete}
                 disabled={deleteMutation.isLoading}
               >
-                {deleteMutation.isLoading ? "삭제 중..." : "삭제"}
+                {deleteMutation.isLoading ? "Deleting..." : "Delete"}
               </button>
             </div>
           </div>
