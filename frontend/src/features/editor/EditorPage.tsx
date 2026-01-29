@@ -12,6 +12,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { skillsetsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
+import {
+  ContainerFrame,
+  type ContainerFrameRegion,
+  type ResizeHandle
+} from "@/components/ContainerFrame";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ValidationError, WorkflowDraft } from "@/domain/types";
 import { cn } from "@/lib/cn";
@@ -26,9 +31,19 @@ type NodeKind =
   | "flow_control.input"
   | "flow_control.condition"
   | "flow_control.output"
+  | "flow_control.repeat"
+  | "flow_control.parallel"
   | "event.webhook";
 
 type NodeCategory = "skill" | "flow_control" | "event";
+
+type ContainerType = "repeat" | "parallel";
+
+type ContainerFrameData = {
+  width: number;
+  height: number;
+  branchCount?: number;
+};
 
 type NodeParamField = {
   key: string;
@@ -81,6 +96,10 @@ type EditorNode = {
   params: Record<string, string>;
   conditionExpressions?: ConditionExpression[];
   variableRows?: VariableRow[];
+  containerId?: string | null;
+  containerType?: ContainerType | null;
+  branchIndex?: number | null;
+  containerFrame?: ContainerFrameData;
 };
 
 type EditorEdge = {
@@ -102,6 +121,14 @@ type DragState = {
   offsetX: number;
   offsetY: number;
   height: number;
+};
+
+type ResizeState = {
+  nodeId: string;
+  handle: ResizeHandle;
+  startPoint: { x: number; y: number };
+  startWidth: number;
+  startHeight: number;
 };
 
 type ConnectingState = {
@@ -157,6 +184,24 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
     colorClass: "border-rose-200 bg-rose-100 text-rose-700",
     paramFields: [],
     outputs: []
+  },
+  "flow_control.repeat": {
+    label: "Repeat",
+    category: "flow_control",
+    iconText: "RP",
+    colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
+    paramFields: [
+      { key: "count", label: "Repeat Count", placeholder: "3" }
+    ],
+    outputs: [{ key: "next", label: "Next" }]
+  },
+  "flow_control.parallel": {
+    label: "Parallel",
+    category: "flow_control",
+    iconText: "PA",
+    colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
+    paramFields: [],
+    outputs: [{ key: "next", label: "Next" }]
   },
   "event.webhook": {
     label: "Webhook",
@@ -232,6 +277,28 @@ const NODE_METRICS = {
   fieldHeight: 44,
   fieldGap: 8,
   conditionButtonHeight: 28
+};
+
+const CONTAINER_FRAME_DEFAULTS = {
+  width: 520,
+  height: 320,
+  branchWidth: 280
+};
+
+const CONTAINER_FRAME_METRICS = {
+  offsetY: 12,
+  headerHeight: 28,
+  padding: 12,
+  minWidth: 360,
+  minHeight: 220
+};
+
+const DEFAULT_PARALLEL_BRANCHES = 2;
+
+const CONTAINER_LAYOUT = {
+  rowGap: 24,
+  padding: 12,
+  columnGap: 120
 };
 
 const CANVAS_PADDING = {
@@ -312,6 +379,113 @@ function getNodeTypeLabel(
   return `${NODE_CATEGORY_LABELS[config.category]} - ${config.label}`;
 }
 
+const CONTAINER_TYPE_BY_KIND: Partial<Record<NodeKind, ContainerType>> = {
+  "flow_control.repeat": "repeat",
+  "flow_control.parallel": "parallel"
+};
+
+function getContainerType(kind: NodeKind): ContainerType | null {
+  return CONTAINER_TYPE_BY_KIND[kind] ?? null;
+}
+
+function isContainerNode(node: EditorNode) {
+  return getContainerType(node.kind) !== null;
+}
+
+function getRepeatCount(node: EditorNode) {
+  const raw = node.params.count ?? "1";
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.floor(parsed);
+}
+
+function getContainerBranchCount(node: EditorNode) {
+  const containerType = getContainerType(node.kind);
+  if (containerType !== "parallel") return 1;
+  const requested = node.containerFrame?.branchCount ?? DEFAULT_PARALLEL_BRANCHES;
+  return Math.max(DEFAULT_PARALLEL_BRANCHES, requested);
+}
+
+function getContainerHeaderLabel(node: EditorNode, branchCount: number) {
+  const containerType = getContainerType(node.kind);
+  if (containerType === "repeat") {
+    return `Repeat x${getRepeatCount(node)}`;
+  }
+  if (containerType === "parallel") {
+    return branchCount > 2 ? `Parallel (${branchCount})` : "Parallel";
+  }
+  return node.name;
+}
+
+function getContainerBranchLabel(containerType: ContainerType, index: number) {
+  if (containerType === "repeat") {
+    return "Body";
+  }
+  return `Branch ${index + 1}`;
+}
+
+function getDefaultContainerFrameSize(containerType: ContainerType, branchCount: number) {
+  const baseWidth =
+    containerType === "parallel"
+      ? Math.max(
+          CONTAINER_FRAME_DEFAULTS.width,
+          branchCount * CONTAINER_FRAME_DEFAULTS.branchWidth
+        )
+      : CONTAINER_FRAME_DEFAULTS.width;
+  return {
+    width: Math.max(baseWidth, CONTAINER_FRAME_METRICS.minWidth),
+    height: Math.max(CONTAINER_FRAME_DEFAULTS.height, CONTAINER_FRAME_METRICS.minHeight)
+  };
+}
+
+function getContainerFrameLayout(
+  node: EditorNode,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+) {
+  const containerType = getContainerType(node.kind);
+  if (!containerType) return null;
+  const branchCount = getContainerBranchCount(node);
+  const defaults = getDefaultContainerFrameSize(containerType, branchCount);
+  const frameWidth = Math.max(
+    node.containerFrame?.width ?? defaults.width,
+    CONTAINER_FRAME_METRICS.minWidth
+  );
+  const frameHeight = Math.max(
+    node.containerFrame?.height ?? defaults.height,
+    CONTAINER_FRAME_METRICS.minHeight
+  );
+  const nodeHeight = getNodeHeight(node, nodeTypeConfig);
+  const frameX = node.position.x;
+  const frameY = node.position.y + nodeHeight + CONTAINER_FRAME_METRICS.offsetY;
+  const headerHeight = CONTAINER_FRAME_METRICS.headerHeight;
+  const bodyX = frameX + CONTAINER_FRAME_METRICS.padding;
+  const bodyY = frameY + headerHeight + CONTAINER_FRAME_METRICS.padding;
+  const bodyWidth = Math.max(0, frameWidth - CONTAINER_FRAME_METRICS.padding * 2);
+  const bodyHeight = Math.max(
+    0,
+    frameHeight - headerHeight - CONTAINER_FRAME_METRICS.padding * 2
+  );
+  const regionWidth = branchCount > 0 ? bodyWidth / branchCount : bodyWidth;
+  const regions: ContainerFrameRegion[] = Array.from(
+    { length: branchCount },
+    (_, index) => ({
+      index,
+      label: getContainerBranchLabel(containerType, index),
+      bounds: {
+        x: bodyX + regionWidth * index,
+        y: bodyY,
+        width: regionWidth,
+        height: bodyHeight
+      }
+    })
+  );
+  return {
+    frame: { x: frameX, y: frameY, width: frameWidth, height: frameHeight },
+    headerHeight,
+    regions
+  };
+}
+
 function getPortOffsets(nodeHeight: number, count: number) {
   if (count <= 0) return [];
   if (count === 1) {
@@ -376,6 +550,21 @@ function isValidVariableRow(value: unknown): value is VariableRow {
   );
 }
 
+function isValidContainerFrameData(value: unknown): value is ContainerFrameData {
+  if (!isRecord(value)) return false;
+  const width = value.width;
+  const height = value.height;
+  if (typeof width !== "number" || typeof height !== "number") return false;
+  const branchCount = (value as { branchCount?: unknown }).branchCount;
+  if (
+    branchCount !== undefined &&
+    (typeof branchCount !== "number" || branchCount < 1)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function isValidEditorNode(
   value: unknown,
   nodeTypes: NodeKind[]
@@ -406,6 +595,31 @@ function isValidEditorNode(
     (!Array.isArray(value.variableRows) ||
       !value.variableRows.every(isValidVariableRow))
   ) {
+    return false;
+  }
+  const containerId = (value as { containerId?: unknown }).containerId;
+  if (containerId !== undefined && containerId !== null && typeof containerId !== "string") {
+    return false;
+  }
+  const containerType = (value as { containerType?: unknown }).containerType;
+  if (
+    containerType !== undefined &&
+    containerType !== null &&
+    containerType !== "repeat" &&
+    containerType !== "parallel"
+  ) {
+    return false;
+  }
+  const branchIndex = (value as { branchIndex?: unknown }).branchIndex;
+  if (
+    branchIndex !== undefined &&
+    branchIndex !== null &&
+    (typeof branchIndex !== "number" || branchIndex < 0)
+  ) {
+    return false;
+  }
+  const containerFrame = (value as { containerFrame?: unknown }).containerFrame;
+  if (containerFrame !== undefined && !isValidContainerFrameData(containerFrame)) {
     return false;
   }
   return true;
@@ -469,11 +683,28 @@ function buildStateNameMap(nodes: EditorNode[]) {
   return nameMap;
 }
 
-function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
-  if (nodes.length === 0) {
-    return {};
-  }
-  const stateNameMap = buildStateNameMap(nodes);
+type ContainerDslPayload = {
+  type: ContainerType;
+  repeatCount?: number;
+  body?: { StartAt: string | null; States: Record<string, Record<string, unknown>> };
+  branches?: Array<{ StartAt: string | null; States: Record<string, Record<string, unknown>> }>;
+};
+
+function findStartNode(nodes: EditorNode[], edges: EditorEdge[]) {
+  if (nodes.length === 0) return null;
+  const inputNode = nodes.find((node) => node.kind === "flow_control.input");
+  if (inputNode) return inputNode;
+  const incoming = new Set(edges.map((edge) => edge.to));
+  const candidate = nodes.find((node) => !incoming.has(node.id));
+  return candidate ?? nodes[0];
+}
+
+function buildStateRecords(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  stateNameMap: Map<string, string>,
+  containerPayloads?: Map<string, ContainerDslPayload>
+) {
   const edgesByFrom = new Map<string, EditorEdge[]>();
   edges.forEach((edge) => {
     if (!stateNameMap.has(edge.from) || !stateNameMap.has(edge.to)) return;
@@ -481,8 +712,6 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
     list.push(edge);
     edgesByFrom.set(edge.from, list);
   });
-  const startNode =
-    nodes.find((node) => node.kind === "flow_control.input") ?? nodes[0];
   const states: Record<string, Record<string, unknown>> = {};
   nodes.forEach((node) => {
     const stateName = stateNameMap.get(node.id);
@@ -521,11 +750,35 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
           expression: expression.expression
         }));
       }
+    } else if (node.kind === "flow_control.repeat") {
+      const payload = containerPayloads?.get(node.id);
+      const next = getNext("next");
+      state = {
+        Type: "Repeat",
+        Count: payload?.repeatCount ?? getRepeatCount(node),
+        Body: payload?.body ?? { StartAt: null, States: {} }
+      };
+      if (next) {
+        state.Next = next;
+      } else {
+        state.End = true;
+      }
+    } else if (node.kind === "flow_control.parallel") {
+      const payload = containerPayloads?.get(node.id);
+      const next = getNext("next");
+      state = {
+        Type: "Parallel",
+        Branches: payload?.branches ?? []
+      };
+      if (next) {
+        state.Next = next;
+      } else {
+        state.End = true;
+      }
     } else {
       const next = getNext("next");
-      // skill 노드인 경우 skill 이름 추출
-      const skillName = node.kind.startsWith("skill.") 
-        ? node.kind.replace("skill.", "") 
+      const skillName = node.kind.startsWith("skill.")
+        ? node.kind.replace("skill.", "")
         : node.kind;
       state = {
         Type: node.kind === "flow_control.input" ? "Pass" : "Skill",
@@ -541,9 +794,92 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
     state.Label = node.name;
     states[stateName] = state;
   });
+  return states;
+}
+
+function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
+  if (nodes.length === 0) {
+    return {};
+  }
+  const containerNodes = nodes.filter(isContainerNode);
+  const containerIds = new Set(containerNodes.map((node) => node.id));
+  const topLevelNodes = nodes.filter(
+    (node) => !node.containerId || !containerIds.has(node.containerId)
+  );
+  const topLevelNodeIds = new Set(topLevelNodes.map((node) => node.id));
+  const topLevelEdges = edges.filter(
+    (edge) => topLevelNodeIds.has(edge.from) && topLevelNodeIds.has(edge.to)
+  );
+  const stateNameMap = buildStateNameMap(nodes);
+  const containerPayloads = new Map<string, ContainerDslPayload>();
+
+  containerNodes.forEach((container) => {
+    const containerType = getContainerType(container.kind);
+    if (!containerType) return;
+    if (containerType === "repeat") {
+      const bodyNodes = nodes.filter((node) => node.containerId === container.id);
+      const bodyNodeIds = new Set(bodyNodes.map((node) => node.id));
+      const bodyEdges = edges.filter(
+        (edge) => bodyNodeIds.has(edge.from) && bodyNodeIds.has(edge.to)
+      );
+      const bodyStartNode = findStartNode(bodyNodes, bodyEdges);
+      const bodyStates = buildStateRecords(
+        bodyNodes,
+        bodyEdges,
+        stateNameMap,
+        containerPayloads
+      );
+      containerPayloads.set(container.id, {
+        type: "repeat",
+        repeatCount: getRepeatCount(container),
+        body: {
+          StartAt: bodyStartNode ? stateNameMap.get(bodyStartNode.id) ?? null : null,
+          States: bodyStates
+        }
+      });
+      return;
+    }
+    const branchCount = getContainerBranchCount(container);
+    const branches = Array.from({ length: branchCount }, (_, index) => {
+      const branchNodes = nodes.filter(
+        (node) =>
+          node.containerId === container.id &&
+          (node.branchIndex ?? 0) === index
+      );
+      const branchNodeIds = new Set(branchNodes.map((node) => node.id));
+      const branchEdges = edges.filter(
+        (edge) => branchNodeIds.has(edge.from) && branchNodeIds.has(edge.to)
+      );
+      const branchStartNode = findStartNode(branchNodes, branchEdges);
+      const branchStates = buildStateRecords(
+        branchNodes,
+        branchEdges,
+        stateNameMap,
+        containerPayloads
+      );
+      return {
+        StartAt: branchStartNode
+          ? stateNameMap.get(branchStartNode.id) ?? null
+          : null,
+        States: branchStates
+      };
+    });
+    containerPayloads.set(container.id, {
+      type: "parallel",
+      branches
+    });
+  });
+
+  const startNode = findStartNode(topLevelNodes, topLevelEdges);
+  const states = buildStateRecords(
+    topLevelNodes,
+    topLevelEdges,
+    stateNameMap,
+    containerPayloads
+  );
   return {
     Comment: "Generated from editor",
-    StartAt: stateNameMap.get(startNode.id),
+    StartAt: startNode ? stateNameMap.get(startNode.id) : undefined,
     States: states
   };
 }
@@ -563,6 +899,569 @@ function buildViewJson(
       height: canvasBase.height,
       zoom
     }
+  };
+}
+
+type DslBranch = {
+  StartAt?: string;
+  States?: Record<string, DslState>;
+};
+
+type DslState = {
+  Type?: string;
+  Next?: string;
+  End?: boolean;
+  Label?: string;
+  Skill?: string;
+  Count?: number;
+  Parameters?: Record<string, unknown>;
+  Choices?: Array<Record<string, unknown>>;
+  Expressions?: Array<{ operator?: string | null; expression?: string }>;
+  Branches?: DslBranch[];
+  Body?: DslBranch;
+};
+
+type ParsedEditorGraph = {
+  nodes: EditorNode[];
+  edges: EditorEdge[];
+  canvas?: { width: number; height: number; zoom: number };
+};
+
+function getContainerTypeById(nodes: EditorNode[]) {
+  const map = new Map<string, ContainerType>();
+  nodes.forEach((node) => {
+    const type = getContainerType(node.kind);
+    if (type) {
+      map.set(node.id, type);
+    }
+  });
+  return map;
+}
+
+function getNodeContainerKey(
+  node: EditorNode,
+  containerTypeById: Map<string, ContainerType>
+) {
+  const containerId = node.containerId;
+  if (!containerId) return null;
+  const containerType = node.containerType ?? containerTypeById.get(containerId);
+  if (!containerType) return null;
+  if (containerType === "parallel") {
+    const branchIndex = node.branchIndex ?? 0;
+    return `${containerId}:branch:${branchIndex}`;
+  }
+  return `${containerId}:body`;
+}
+
+function filterEdgesByContainerRules(nodes: EditorNode[], edges: EditorEdge[]) {
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const containerTypeById = getContainerTypeById(nodes);
+  return edges.filter((edge) => {
+    const fromNode = nodeMap.get(edge.from);
+    const toNode = nodeMap.get(edge.to);
+    if (!fromNode || !toNode) return false;
+    const fromKey = getNodeContainerKey(fromNode, containerTypeById);
+    const toKey = getNodeContainerKey(toNode, containerTypeById);
+    if (!fromKey && !toKey) return true;
+    return fromKey !== null && fromKey === toKey;
+  });
+}
+
+function normalizeContainerAssignments(nodes: EditorNode[]) {
+  const containerTypeById = getContainerTypeById(nodes);
+  return nodes.map((node) => {
+    if (!node.containerId) return node;
+    const containerType = node.containerType ?? containerTypeById.get(node.containerId);
+    if (!containerType) {
+      return {
+        ...node,
+        containerId: null,
+        containerType: null,
+        branchIndex: null
+      };
+    }
+    const branchIndex =
+      containerType === "parallel"
+        ? typeof node.branchIndex === "number"
+          ? node.branchIndex
+          : 0
+        : null;
+    return {
+      ...node,
+      containerType,
+      branchIndex
+    };
+  });
+}
+
+function normalizeContainerFrames(nodes: EditorNode[]) {
+  return nodes.map((node) => {
+    const containerType = getContainerType(node.kind);
+    if (!containerType) return node;
+    const branchCount = containerType === "parallel" ? getContainerBranchCount(node) : 1;
+    const defaults = getDefaultContainerFrameSize(containerType, branchCount);
+    const width = node.containerFrame?.width ?? defaults.width;
+    const height = node.containerFrame?.height ?? defaults.height;
+    const nextFrame: ContainerFrameData = {
+      width,
+      height,
+      ...(containerType === "parallel" ? { branchCount } : {})
+    };
+    if (
+      node.containerFrame &&
+      node.containerFrame.width === nextFrame.width &&
+      node.containerFrame.height === nextFrame.height &&
+      node.containerFrame.branchCount === nextFrame.branchCount
+    ) {
+      return node;
+    }
+    return { ...node, containerFrame: nextFrame };
+  });
+}
+
+function getTopologicalOrder(nodes: EditorNode[], edges: EditorEdge[]) {
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const nodeIds = nodes.map((node) => node.id);
+  const inDegree = new Map<string, number>();
+  const outgoing = new Map<string, string[]>();
+
+  nodeIds.forEach((id) => {
+    inDegree.set(id, 0);
+    outgoing.set(id, []);
+  });
+
+  edges.forEach((edge) => {
+    if (!inDegree.has(edge.to) || !outgoing.has(edge.from)) return;
+    inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
+    outgoing.get(edge.from)?.push(edge.to);
+  });
+
+  const queue = nodeIds
+    .filter((id) => (inDegree.get(id) ?? 0) === 0)
+    .sort((a, b) => (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? ""));
+  const ordered: string[] = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    ordered.push(current);
+    outgoing.get(current)?.forEach((to) => {
+      inDegree.set(to, (inDegree.get(to) ?? 0) - 1);
+      if (inDegree.get(to) === 0) {
+        queue.push(to);
+        queue.sort((a, b) => (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? ""));
+      }
+    });
+  }
+
+  const remaining = nodeIds.filter((id) => !ordered.includes(id));
+  if (remaining.length > 0) {
+    remaining.sort((a, b) => (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? ""));
+  }
+  return [...ordered, ...remaining];
+}
+
+function layoutNodesByLayers(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
+  options: { padding: number; spacingX: number; rowGap: number }
+) {
+  const positions = new Map<string, { x: number; y: number }>();
+  if (nodes.length === 0) return positions;
+  const inDegree = new Map<string, number>();
+  const outgoing = new Map<string, string[]>();
+
+  nodes.forEach((node) => {
+    inDegree.set(node.id, 0);
+    outgoing.set(node.id, []);
+  });
+
+  edges.forEach((edge) => {
+    if (!inDegree.has(edge.to) || !outgoing.has(edge.from)) return;
+    inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
+    outgoing.get(edge.from)?.push(edge.to);
+  });
+
+  const queue = Array.from(inDegree.entries())
+    .filter(([, value]) => value === 0)
+    .map(([id]) => id);
+  const layers = new Map<string, number>();
+  queue.forEach((id) => layers.set(id, 0));
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    const nextLayer = (layers.get(current) ?? 0) + 1;
+    outgoing.get(current)?.forEach((to) => {
+      layers.set(to, Math.max(layers.get(to) ?? 0, nextLayer));
+      inDegree.set(to, (inDegree.get(to) ?? 1) - 1);
+      if (inDegree.get(to) === 0) {
+        queue.push(to);
+      }
+    });
+  }
+
+  nodes.forEach((node) => {
+    if (!layers.has(node.id)) layers.set(node.id, 0);
+  });
+
+  const grouped = new Map<number, EditorNode[]>();
+  nodes.forEach((node) => {
+    const layer = layers.get(node.id) ?? 0;
+    const group = grouped.get(layer) ?? [];
+    group.push(node);
+    grouped.set(layer, group);
+  });
+
+  Array.from(grouped.entries())
+    .sort(([a], [b]) => a - b)
+    .forEach(([layer, group]) => {
+      const sortedGroup = [...group].sort((a, b) => a.name.localeCompare(b.name));
+      let yCursor = options.padding;
+      sortedGroup.forEach((node) => {
+        const nodeHeight = getNodeHeight(node, nodeTypeConfig);
+        const x = options.padding + layer * options.spacingX;
+        const y = yCursor;
+        yCursor += nodeHeight + options.rowGap;
+        positions.set(node.id, { x, y });
+      });
+    });
+
+  return positions;
+}
+
+function layoutNodesInRegion(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  region: ContainerFrameRegion,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+) {
+  const positions = new Map<string, { x: number; y: number }>();
+  const ordered = getTopologicalOrder(nodes, edges);
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  let yCursor = region.bounds.y + CONTAINER_LAYOUT.padding;
+  const x = region.bounds.x + CONTAINER_LAYOUT.padding;
+  ordered.forEach((id) => {
+    const node = nodeMap.get(id);
+    if (!node) return;
+    positions.set(id, { x, y: yCursor });
+    yCursor += getNodeHeight(node, nodeTypeConfig) + CONTAINER_LAYOUT.rowGap;
+  });
+  return positions;
+}
+
+function expandContainerFrameForNodes(
+  containerNode: EditorNode,
+  nodes: EditorNode[]
+) {
+  const containerType = getContainerType(containerNode.kind);
+  if (!containerType) return containerNode;
+  const branchCount = containerType === "parallel" ? getContainerBranchCount(containerNode) : 1;
+  const branchCounts = Array.from({ length: branchCount }, (_, index) => {
+    if (containerType === "repeat") {
+      return nodes.filter((node) => node.containerId === containerNode.id).length;
+    }
+    return nodes.filter(
+      (node) =>
+        node.containerId === containerNode.id &&
+        (node.branchIndex ?? 0) === index
+    ).length;
+  });
+  const maxNodes = Math.max(1, ...branchCounts);
+  const baseWidth =
+    containerType === "parallel"
+      ? Math.max(
+          CONTAINER_FRAME_DEFAULTS.width,
+          branchCount * CONTAINER_FRAME_DEFAULTS.branchWidth
+        )
+      : CONTAINER_FRAME_DEFAULTS.width;
+  const requiredHeight =
+    CONTAINER_FRAME_METRICS.headerHeight +
+    CONTAINER_FRAME_METRICS.padding * 2 +
+    maxNodes * (NODE_METRICS.collapsedHeight + CONTAINER_LAYOUT.rowGap) -
+    CONTAINER_LAYOUT.rowGap;
+  const nextFrame: ContainerFrameData = {
+    width: Math.max(baseWidth, CONTAINER_FRAME_METRICS.minWidth),
+    height: Math.max(requiredHeight, CONTAINER_FRAME_METRICS.minHeight),
+    ...(containerType === "parallel" ? { branchCount } : {})
+  };
+  return { ...containerNode, containerFrame: nextFrame };
+}
+
+function applyImportedLayout(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+) {
+  let nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nodes));
+  const containerTypeById = getContainerTypeById(nextNodes);
+  const containerIds = new Set(containerTypeById.keys());
+  nextNodes = nextNodes.map((node) =>
+    isContainerNode(node) ? expandContainerFrameForNodes(node, nextNodes) : node
+  );
+
+  const topLevelNodes = nextNodes.filter(
+    (node) => !node.containerId || !containerIds.has(node.containerId)
+  );
+  const topLevelNodeIds = new Set(topLevelNodes.map((node) => node.id));
+  const topLevelEdges = edges.filter(
+    (edge) => topLevelNodeIds.has(edge.from) && topLevelNodeIds.has(edge.to)
+  );
+  const topLevelPositions = layoutNodesByLayers(topLevelNodes, topLevelEdges, nodeTypeConfig, {
+    padding: 80,
+    spacingX: 320,
+    rowGap: 60
+  });
+
+  nextNodes = nextNodes.map((node) => {
+    if (topLevelPositions.has(node.id)) {
+      return { ...node, position: topLevelPositions.get(node.id)! };
+    }
+    return node;
+  });
+
+  containerIds.forEach((containerId) => {
+    const containerNode = nextNodes.find((node) => node.id === containerId);
+    if (!containerNode) return;
+    const layout = getContainerFrameLayout(containerNode, nodeTypeConfig);
+    if (!layout) return;
+    const containerType = getContainerType(containerNode.kind);
+    if (!containerType) return;
+    if (containerType === "repeat") {
+      const bodyNodes = nextNodes.filter((node) => node.containerId === containerId);
+      const bodyNodeIds = new Set(bodyNodes.map((node) => node.id));
+      const bodyEdges = edges.filter(
+        (edge) => bodyNodeIds.has(edge.from) && bodyNodeIds.has(edge.to)
+      );
+      const positions = layoutNodesInRegion(bodyNodes, bodyEdges, layout.regions[0], nodeTypeConfig);
+      nextNodes = nextNodes.map((node) =>
+        positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node
+      );
+      return;
+    }
+    layout.regions.forEach((region) => {
+      const branchNodes = nextNodes.filter(
+        (node) =>
+          node.containerId === containerId &&
+          (node.branchIndex ?? 0) === region.index
+      );
+      const branchNodeIds = new Set(branchNodes.map((node) => node.id));
+      const branchEdges = edges.filter(
+        (edge) => branchNodeIds.has(edge.from) && branchNodeIds.has(edge.to)
+      );
+      const positions = layoutNodesInRegion(branchNodes, branchEdges, region, nodeTypeConfig);
+      nextNodes = nextNodes.map((node) =>
+        positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node
+      );
+    });
+  });
+
+  return nextNodes;
+}
+
+function getCanvasSizeForNodes(
+  nodes: EditorNode[],
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+) {
+  let maxX = CANVAS_DEFAULT.width;
+  let maxY = CANVAS_DEFAULT.height;
+  nodes.forEach((node) => {
+    const nodeHeight = getNodeHeight(node, nodeTypeConfig);
+    maxX = Math.max(maxX, node.position.x + NODE_METRICS.width + CANVAS_PADDING.x);
+    maxY = Math.max(maxY, node.position.y + nodeHeight + CANVAS_PADDING.y);
+    if (isContainerNode(node)) {
+      const layout = getContainerFrameLayout(node, nodeTypeConfig);
+      if (layout) {
+        maxX = Math.max(
+          maxX,
+          layout.frame.x + layout.frame.width + CANVAS_PADDING.x
+        );
+        maxY = Math.max(
+          maxY,
+          layout.frame.y + layout.frame.height + CANVAS_PADDING.y
+        );
+      }
+    }
+  });
+  return { width: maxX, height: maxY };
+}
+
+function parseDslToEditor(
+  dslJson: Record<string, unknown>,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+): ParsedEditorGraph | null {
+  if (!isRecord(dslJson)) return null;
+  const states = (dslJson as { States?: Record<string, DslState> }).States;
+  if (!states || !isRecord(states)) return null;
+
+  let nodeIndex = 1;
+  let edgeIndex = 1;
+  let conditionIndex = 1;
+  const nodes: EditorNode[] = [];
+  const edges: EditorEdge[] = [];
+
+  const createNodeKind = (state: DslState, stateName: string): NodeKind => {
+    if (state.Type === "Choice") return "flow_control.condition";
+    if (state.Type === "Succeed") return "flow_control.output";
+    if (state.Type === "Pass") return "flow_control.input";
+    if (state.Type === "Parallel") return "flow_control.parallel";
+    if (state.Type === "Repeat") return "flow_control.repeat";
+    const skillName = typeof state.Skill === "string" ? state.Skill : stateName;
+    return `skill.${skillName}` as NodeKind;
+  };
+
+  const parseStateGroup = (
+    groupStates: Record<string, DslState>,
+    context?: { containerId?: string; containerType?: ContainerType; branchIndex?: number }
+  ) => {
+    const idByState = new Map<string, string>();
+    Object.entries(groupStates).forEach(([stateName, state]) => {
+      const kind = createNodeKind(state, stateName);
+      const id = `node-${nodeIndex++}`;
+      idByState.set(stateName, id);
+      const params = isRecord(state.Parameters)
+        ? Object.entries(state.Parameters).reduce(
+            (acc, [key, value]) => ({
+              ...acc,
+              [key]: typeof value === "string" ? value : JSON.stringify(value)
+            }),
+            {} as Record<string, string>
+          )
+        : {};
+      if (kind === "flow_control.repeat" && typeof state.Count === "number") {
+        params.count = `${state.Count}`;
+      }
+      let conditionExpressions =
+        kind === "flow_control.condition" && Array.isArray(state.Expressions)
+          ? state.Expressions.map((expression) => ({
+              id: `condition-${conditionIndex++}`,
+              operator:
+                expression.operator === "AND" || expression.operator === "OR"
+                  ? expression.operator
+                  : null,
+              expression: expression.expression ?? ""
+            }))
+          : undefined;
+      if (kind === "flow_control.condition" && (!conditionExpressions || conditionExpressions.length === 0)) {
+        conditionExpressions = [
+          { id: `condition-${conditionIndex++}`, operator: null, expression: "" }
+        ];
+      }
+      nodes.push({
+        id,
+        name: state.Label ?? stateName,
+        kind,
+        position: { x: 0, y: 0 },
+        isExpanded: false,
+        params,
+        conditionExpressions,
+        variableRows:
+          kind === "flow_control.input" || kind === "flow_control.output" ? [] : undefined,
+        containerId: context?.containerId ?? null,
+        containerType: context?.containerType ?? null,
+        branchIndex:
+          context?.containerType === "parallel" ? context.branchIndex ?? 0 : null,
+        containerFrame:
+          kind === "flow_control.parallel"
+            ? {
+                ...getDefaultContainerFrameSize(
+                  "parallel",
+                  Array.isArray(state.Branches)
+                    ? Math.max(DEFAULT_PARALLEL_BRANCHES, state.Branches.length)
+                    : DEFAULT_PARALLEL_BRANCHES
+                ),
+                branchCount: Array.isArray(state.Branches)
+                  ? Math.max(DEFAULT_PARALLEL_BRANCHES, state.Branches.length)
+                  : DEFAULT_PARALLEL_BRANCHES
+              }
+            : kind === "flow_control.repeat"
+              ? getDefaultContainerFrameSize("repeat", 1)
+              : undefined
+      });
+    });
+
+    Object.entries(groupStates).forEach(([stateName, state]) => {
+      const fromId = idByState.get(stateName);
+      if (!fromId) return;
+      if (state.Type === "Choice" && Array.isArray(state.Choices)) {
+        const trueChoice = state.Choices.find(
+          (choice) => isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === true
+        );
+        const falseChoice = state.Choices.find(
+          (choice) => isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === false
+        );
+        const remainingChoices = state.Choices.filter(
+          (choice) => choice !== trueChoice && choice !== falseChoice
+        );
+        const resolveNext = (choice: Record<string, unknown> | undefined) => {
+          const next = choice?.Next;
+          return typeof next === "string" ? idByState.get(next) : undefined;
+        };
+        const trueTarget =
+          resolveNext(trueChoice as Record<string, unknown> | undefined) ??
+          resolveNext(remainingChoices[0] as Record<string, unknown> | undefined);
+        const falseTarget =
+          resolveNext(falseChoice as Record<string, unknown> | undefined) ??
+          resolveNext(remainingChoices[1] as Record<string, unknown> | undefined);
+        if (trueTarget) {
+          edges.push({
+            id: `edge-${edgeIndex++}`,
+            from: fromId,
+            fromPort: "true",
+            to: trueTarget
+          });
+        }
+        if (falseTarget) {
+          edges.push({
+            id: `edge-${edgeIndex++}`,
+            from: fromId,
+            fromPort: "false",
+            to: falseTarget
+          });
+        }
+      } else if (typeof state.Next === "string" && idByState.has(state.Next)) {
+        edges.push({
+          id: `edge-${edgeIndex++}`,
+          from: fromId,
+          fromPort: "next",
+          to: idByState.get(state.Next) as string
+        });
+      }
+    });
+
+    Object.entries(groupStates).forEach(([stateName, state]) => {
+      const containerId = idByState.get(stateName);
+      if (!containerId) return;
+      if (state.Type === "Repeat" && state.Body?.States) {
+        parseStateGroup(state.Body.States, {
+          containerId,
+          containerType: "repeat",
+          branchIndex: 0
+        });
+      }
+      if (state.Type === "Parallel" && Array.isArray(state.Branches)) {
+        state.Branches.forEach((branch, index) => {
+          if (!branch.States) return;
+          parseStateGroup(branch.States, {
+            containerId,
+            containerType: "parallel",
+            branchIndex: index
+          });
+        });
+      }
+    });
+  };
+
+  parseStateGroup(states);
+
+  let nextNodes = applyImportedLayout(nodes, edges, nodeTypeConfig);
+  nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nextNodes));
+  const canvas = getCanvasSizeForNodes(nextNodes, nodeTypeConfig);
+  return {
+    nodes: nextNodes,
+    edges: filterEdgesByContainerRules(nextNodes, edges),
+    canvas: { ...canvas, zoom: 1 }
   };
 }
 
@@ -603,6 +1502,7 @@ function NodeCard({
   onOutputDragEnd,
   onInputDragOver,
   onInputDrop,
+  warningLabel,
   nodeTypeConfig,
   skillset
 }: {
@@ -636,6 +1536,7 @@ function NodeCard({
   onOutputDragEnd: () => void;
   onInputDragOver: (event: DragEvent<HTMLButtonElement>) => void;
   onInputDrop: (event: DragEvent<HTMLButtonElement>) => void;
+  warningLabel?: string | null;
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
   skillset?: import("@/domain/types").Skillset;
 }) {
@@ -869,6 +1770,11 @@ function NodeCard({
           </div>
 
         </div>
+        {warningLabel && (
+          <span className="mt-1 inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-700">
+            {warningLabel}
+          </span>
+        )}
         <button
           type="button"
           data-no-drag
@@ -1165,6 +2071,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [nodes, setNodes] = useState<EditorNode[]>([]);
   const [edges, setEdges] = useState<EditorEdge[]>([]);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [resizeState, setResizeState] = useState<ResizeState | null>(null);
+  const [edgeError, setEdgeError] = useState<string | null>(null);
   const [isEditingWorkflowName, setIsEditingWorkflowName] = useState(false);
   const [workflowName, setWorkflowName] = useState<string>("");
   const [originalWorkflowName, setOriginalWorkflowName] = useState<string>("");
@@ -1173,6 +2081,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const edgeErrorTimerRef = useRef<number | null>(null);
   const nextNodeIndex = useRef(1);
   const nextEdgeIndex = useRef(1);
   const nextConditionIndex = useRef(1);
@@ -1220,6 +2129,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       "flow_control.input",
       "flow_control.condition",
       "flow_control.output",
+      "flow_control.repeat",
+      "flow_control.parallel",
       "event.webhook"
     ];
     const skillTypes: NodeKind[] = skillsetsResponse?.skillsets.map(
@@ -1266,7 +2177,26 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       return;
     }
     const parsed = parseEditorView(draftToApply.view_json, nodeTypes);
-    if (!parsed) {
+    let loadedNodes: EditorNode[] = [];
+    let loadedEdges: EditorEdge[] = [];
+    let canvas = parsed?.canvas;
+
+    if (parsed) {
+      const normalizedNodes = normalizeContainerFrames(
+        normalizeContainerAssignments(parsed.nodes)
+      );
+      loadedNodes = normalizedNodes;
+      loadedEdges = filterEdgesByContainerRules(normalizedNodes, parsed.edges);
+    } else {
+      const imported = parseDslToEditor(draftToApply.dsl_json, nodeTypeConfig);
+      if (imported) {
+        loadedNodes = imported.nodes;
+        loadedEdges = imported.edges;
+        canvas = imported.canvas;
+      }
+    }
+
+    if (loadedNodes.length === 0 && loadedEdges.length === 0) {
       setNodes([]);
       setEdges([]);
       setCanvasBase(getSize());
@@ -1274,37 +2204,36 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setHasUnsavedChanges(false);
       return;
     }
-    setNodes(parsed.nodes);
-    setEdges(parsed.edges);
-    if (parsed.canvas) {
+
+    setNodes(loadedNodes);
+    setEdges(loadedEdges);
+    if (canvas) {
       const viewportSize = getViewportCanvasSize();
       setCanvasBase({
-        width: Math.max(viewportSize.width, parsed.canvas.width),
-        height: Math.max(viewportSize.height, parsed.canvas.height)
+        width: Math.max(viewportSize.width, canvas.width),
+        height: Math.max(viewportSize.height, canvas.height)
       });
-      setZoom(
-        clamp(parsed.canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
-      );
+      setZoom(clamp(canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max));
     } else {
       setCanvasBase(getSize());
       setZoom(1);
     }
     nextNodeIndex.current = getNextIndexFromIds(
-      parsed.nodes.map((node) => node.id),
+      loadedNodes.map((node) => node.id),
       "node"
     );
     nextEdgeIndex.current = getNextIndexFromIds(
-      parsed.edges.map((edge) => edge.id),
+      loadedEdges.map((edge) => edge.id),
       "edge"
     );
-    const conditionIds = parsed.nodes.flatMap(
+    const conditionIds = loadedNodes.flatMap(
       (node) => node.conditionExpressions ?? []
     );
     nextConditionIndex.current = getNextIndexFromIds(
       conditionIds.map((expression) => expression.id),
       "condition"
     );
-    const variableRowIds = parsed.nodes.flatMap(
+    const variableRowIds = loadedNodes.flatMap(
       (node) => node.variableRows ?? []
     );
     nextVariableRowIndex.current = getNextIndexFromIds(
@@ -1316,7 +2245,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setConnectingFrom(null);
     setEditingNodeId(null);
     setHasUnsavedChanges(false);
-  }, [nodeTypes, getViewportCanvasSize]);
+  }, [nodeTypeConfig, nodeTypes, getViewportCanvasSize]);
 
   useEffect(() => {
     if (!activeDraft) return;
@@ -1388,11 +2317,95 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     mutationFn: () => workflowsApi.publish(workflowId)
   });
 
-  const hasErrors = validationErrors.length > 0;
+  const containerEmptyBranches = useMemo(() => {
+    const map = new Map<string, Set<number>>();
+    nodes.forEach((node) => {
+      if (!isContainerNode(node)) return;
+      const containerType = getContainerType(node.kind);
+      if (!containerType) return;
+      const branchCount = getContainerBranchCount(node);
+      const empty = new Set<number>();
+      if (containerType === "repeat") {
+        const hasBodyNodes = nodes.some((child) => child.containerId === node.id);
+        if (!hasBodyNodes) {
+          empty.add(0);
+        }
+      } else {
+        for (let index = 0; index < branchCount; index += 1) {
+          const hasBranchNodes = nodes.some(
+            (child) =>
+              child.containerId === node.id && (child.branchIndex ?? 0) === index
+          );
+          if (!hasBranchNodes) {
+            empty.add(index);
+          }
+        }
+      }
+      if (empty.size > 0) {
+        map.set(node.id, empty);
+      }
+    });
+    return map;
+  }, [nodes]);
+
+  const containerWarningLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    nodes.forEach((node) => {
+      const empty = containerEmptyBranches.get(node.id);
+      if (!empty) return;
+      const containerType = getContainerType(node.kind);
+      if (containerType === "repeat") {
+        map.set(node.id, "Empty body");
+      } else {
+        map.set(node.id, `${empty.size} empty`);
+      }
+    });
+    return map;
+  }, [containerEmptyBranches, nodes]);
+
+  const containerWarnings = useMemo<ValidationError[]>(() => {
+    const warnings: ValidationError[] = [];
+    nodes.forEach((node) => {
+      const empty = containerEmptyBranches.get(node.id);
+      if (!empty) return;
+      const containerType = getContainerType(node.kind);
+      if (containerType === "repeat") {
+        warnings.push({
+          id: `${node.id}-empty-body`,
+          message: "Repeat body is empty.",
+          nodeId: node.id
+        });
+        return;
+      }
+      empty.forEach((index) => {
+        warnings.push({
+          id: `${node.id}-branch-${index}`,
+          message: `Parallel branch ${index + 1} is empty.`,
+          nodeId: node.id
+        });
+      });
+    });
+    return warnings;
+  }, [containerEmptyBranches, nodes]);
+
+  const allValidationErrors = useMemo(
+    () => [...validationErrors, ...containerWarnings],
+    [containerWarnings, validationErrors]
+  );
+
+  const hasErrors = allValidationErrors.length > 0;
 
   const nodeMap = useMemo(() => {
     return new Map(nodes.map((node) => [node.id, node]));
   }, [nodes]);
+
+  const containerTypeById = useMemo(() => {
+    return getContainerTypeById(nodes);
+  }, [nodes]);
+
+  const validEdges = useMemo(() => {
+    return filterEdgesByContainerRules(nodes, edges);
+  }, [edges, nodes]);
 
   const nodeTypesByCategory = useMemo(() => {
     return nodeTypes.reduce(
@@ -1413,19 +2426,19 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const incomingEdges = useMemo(() => {
     const map = new Map<string, EditorEdge>();
-    edges.forEach((edge) => {
+    validEdges.forEach((edge) => {
       map.set(edge.to, edge);
     });
     return map;
-  }, [edges]);
+  }, [validEdges]);
 
   const outgoingEdges = useMemo(() => {
     const map = new Map<string, EditorEdge>();
-    edges.forEach((edge) => {
+    validEdges.forEach((edge) => {
       map.set(`${edge.from}:${edge.fromPort}`, edge);
     });
     return map;
-  }, [edges]);
+  }, [validEdges]);
 
   const getCanvasPoint = useCallback(
     (clientX: number, clientY: number) => {
@@ -1455,6 +2468,91 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
   }, [canvasBase, zoom]);
 
+  const resolveContainerAssignment = useCallback(
+    (allNodes: EditorNode[], targetNode: EditorNode) => {
+      if (isContainerNode(targetNode)) return null;
+      const nodeHeight = getNodeHeight(targetNode, nodeTypeConfig);
+      const center = {
+        x: targetNode.position.x + NODE_METRICS.width / 2,
+        y: targetNode.position.y + nodeHeight / 2
+      };
+      const containerNodes = allNodes.filter(isContainerNode);
+      for (const containerNode of containerNodes) {
+        const layout = getContainerFrameLayout(containerNode, nodeTypeConfig);
+        if (!layout) continue;
+        for (const region of layout.regions) {
+          const withinX =
+            center.x >= region.bounds.x &&
+            center.x <= region.bounds.x + region.bounds.width;
+          const withinY =
+            center.y >= region.bounds.y &&
+            center.y <= region.bounds.y + region.bounds.height;
+          if (!withinX || !withinY) continue;
+          const containerType = getContainerType(containerNode.kind);
+          if (!containerType) continue;
+          return {
+            containerId: containerNode.id,
+            containerType,
+            branchIndex: containerType === "parallel" ? region.index : null
+          };
+        }
+      }
+      return null;
+    },
+    [nodeTypeConfig]
+  );
+
+  const finalizeNodeDrag = useCallback(
+    (nodeId: string) => {
+      setNodes((prev) => {
+        const target = prev.find((node) => node.id === nodeId);
+        if (!target || isContainerNode(target)) return prev;
+        const assignment = resolveContainerAssignment(prev, target);
+        const nextContainerId = assignment?.containerId ?? null;
+        const nextContainerType = assignment?.containerType ?? null;
+        const nextBranchIndex = assignment?.branchIndex ?? null;
+        const changed =
+          target.containerId !== nextContainerId ||
+          target.containerType !== nextContainerType ||
+          (target.branchIndex ?? null) !== (nextBranchIndex ?? null);
+        if (!changed) return prev;
+        const nextNodes = prev.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                containerId: nextContainerId,
+                containerType: nextContainerType,
+                branchIndex: nextBranchIndex
+              }
+            : node
+        );
+        setEdges((prevEdges) => filterEdgesByContainerRules(nextNodes, prevEdges));
+        setHasUnsavedChanges(true);
+        return nextNodes;
+      });
+    },
+    [resolveContainerAssignment]
+  );
+
+  const handleContainerResizeStart = useCallback(
+    (nodeId: string, handle: ResizeHandle, event: ReactPointerEvent<HTMLButtonElement>) => {
+      const point = getCanvasPoint(event.clientX, event.clientY);
+      if (!point) return;
+      const target = nodeMap.get(nodeId);
+      if (!target) return;
+      const layout = getContainerFrameLayout(target, nodeTypeConfig);
+      if (!layout) return;
+      setResizeState({
+        nodeId,
+        handle,
+        startPoint: point,
+        startWidth: layout.frame.width,
+        startHeight: layout.frame.height
+      });
+    },
+    [getCanvasPoint, nodeMap, nodeTypeConfig]
+  );
+
   useEffect(() => {
     if (!dragState) return;
     const previousUserSelect = document.body.style.userSelect;
@@ -1471,22 +2569,45 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         dragState.height
       );
 
-      setNodes((prev) =>
-        prev.map((item) =>
-          item.id === dragState.nodeId
-            ? {
-                ...item,
-                position: {
-                  x: clamp(nextX, minX, maxX),
-                  y: clamp(nextY, minY, maxY)
-                }
+    setNodes((prev) => {
+      const target = prev.find((node) => node.id === dragState.nodeId);
+      if (!target) return prev;
+      const nextPosition = {
+        x: clamp(nextX, minX, maxX),
+        y: clamp(nextY, minY, maxY)
+      };
+      const delta = {
+        x: nextPosition.x - target.position.x,
+        y: nextPosition.y - target.position.y
+      };
+      if (delta.x === 0 && delta.y === 0) return prev;
+      if (isContainerNode(target)) {
+        return prev.map((node) => {
+          if (node.id === target.id) {
+            return { ...node, position: nextPosition };
+          }
+          if (node.containerId === target.id) {
+            return {
+              ...node,
+              position: {
+                x: node.position.x + delta.x,
+                y: node.position.y + delta.y
               }
-            : item
-        )
+            };
+          }
+          return node;
+        });
+      }
+      return prev.map((node) =>
+        node.id === target.id ? { ...node, position: nextPosition } : node
       );
+    });
     };
 
-    const handlePointerUp = () => setDragState(null);
+  const handlePointerUp = () => {
+    setDragState(null);
+    finalizeNodeDrag(dragState.nodeId);
+  };
 
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
@@ -1495,7 +2616,80 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       window.removeEventListener("pointerup", handlePointerUp);
       document.body.style.userSelect = previousUserSelect;
     };
-  }, [canvasBase.height, canvasBase.width, dragState, getCanvasPoint]);
+  }, [canvasBase.height, canvasBase.width, dragState, finalizeNodeDrag, getCanvasPoint]);
+
+  useEffect(() => {
+    if (!resizeState) return;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const point = getCanvasPoint(event.clientX, event.clientY);
+      if (!point) return;
+      const deltaX = point.x - resizeState.startPoint.x;
+      const deltaY = point.y - resizeState.startPoint.y;
+      setNodes((prev) => {
+        const target = prev.find((node) => node.id === resizeState.nodeId);
+        if (!target) return prev;
+        const layout = getContainerFrameLayout(target, nodeTypeConfig);
+        if (!layout) return prev;
+        const frameX = layout.frame.x;
+        const frameY = layout.frame.y;
+        const maxWidth = Math.max(
+          CONTAINER_FRAME_METRICS.minWidth,
+          canvasBase.width - frameX - CANVAS_PADDING.x
+        );
+        const maxHeight = Math.max(
+          CONTAINER_FRAME_METRICS.minHeight,
+          canvasBase.height - frameY - CANVAS_PADDING.y
+        );
+        let nextWidth = resizeState.startWidth;
+        let nextHeight = resizeState.startHeight;
+        if (resizeState.handle === "e" || resizeState.handle === "se") {
+          nextWidth += deltaX;
+        }
+        if (resizeState.handle === "s" || resizeState.handle === "se") {
+          nextHeight += deltaY;
+        }
+        nextWidth = clamp(nextWidth, CONTAINER_FRAME_METRICS.minWidth, maxWidth);
+        nextHeight = clamp(
+          nextHeight,
+          CONTAINER_FRAME_METRICS.minHeight,
+          maxHeight
+        );
+        const containerType = getContainerType(target.kind);
+        if (!containerType) return prev;
+        const branchCount = getContainerBranchCount(target);
+        const nextFrame: ContainerFrameData = {
+          width: nextWidth,
+          height: nextHeight,
+          ...(containerType === "parallel" ? { branchCount } : {})
+        };
+        if (
+          target.containerFrame?.width === nextWidth &&
+          target.containerFrame?.height === nextHeight
+        ) {
+          return prev;
+        }
+        return prev.map((node) =>
+          node.id === target.id ? { ...node, containerFrame: nextFrame } : node
+        );
+      });
+    };
+
+    const handlePointerUp = () => {
+      setResizeState(null);
+      setHasUnsavedChanges(true);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [canvasBase.height, canvasBase.width, getCanvasPoint, nodeTypeConfig, resizeState]);
 
   const buildDefaultParams = useCallback((kind: NodeKind) => {
     const config = nodeTypeConfig[kind];
@@ -1556,26 +2750,49 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const id = `node-${index}`;
       const config = nodeTypeConfig[kind];
       const name = config ? `${config.label} ${index}` : `${kind} ${index}`;
-      setNodes((prev) => [
-        ...prev,
-        {
-          id,
-          name,
-          kind,
-          position: clampedPosition,
-          isExpanded: false,
-          params: buildDefaultParams(kind),
-          conditionExpressions:
-            kind === "flow_control.condition"
-              ? [createConditionExpression(null)]
-              : undefined,
-          // input / output 노드는 초기 생성 시 파라미터 row 0개
-          variableRows:
-            kind === "flow_control.input" || kind === "flow_control.output"
-              ? []
-              : undefined
-        }
-      ]);
+      const params = buildDefaultParams(kind);
+      if (kind === "flow_control.repeat" && !params.count) {
+        params.count = "1";
+      }
+      const containerType = getContainerType(kind);
+      const containerFrame =
+        containerType !== null
+          ? {
+              ...getDefaultContainerFrameSize(containerType, DEFAULT_PARALLEL_BRANCHES),
+              ...(containerType === "parallel"
+                ? { branchCount: DEFAULT_PARALLEL_BRANCHES }
+                : {})
+            }
+          : undefined;
+      const baseNode: EditorNode = {
+        id,
+        name,
+        kind,
+        position: clampedPosition,
+        isExpanded: false,
+        params,
+        conditionExpressions:
+          kind === "flow_control.condition"
+            ? [createConditionExpression(null)]
+            : undefined,
+        // input / output 노드는 초기 생성 시 파라미터 row 0개
+        variableRows:
+          kind === "flow_control.input" || kind === "flow_control.output"
+            ? []
+            : undefined,
+        containerId: null,
+        containerType: null,
+        branchIndex: null,
+        containerFrame
+      };
+      setNodes((prev) => {
+        const assignment =
+          containerType === null ? resolveContainerAssignment(prev, baseNode) : null;
+        const nextNode = assignment
+          ? { ...baseNode, ...assignment }
+          : baseNode;
+        return [...prev, nextNode];
+      });
       setSelectedNode(id);
       setSelectedEdgeId(null);
     },
@@ -1584,13 +2801,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       canvasBase,
       createConditionExpression,
       getViewportCenter,
-      nodes
+      nodeTypeConfig,
+      nodes,
+      resolveContainerAssignment
     ]
   );
 
   const handleSave = async () => {
-    const view_json = buildViewJson(nodes, edges, canvasBase, zoom);
-    const dsl_json = buildDslJson(nodes, edges);
+    const view_json = buildViewJson(nodes, validEdges, canvasBase, zoom);
+    const dsl_json = buildDslJson(nodes, validEdges);
     const updatedAt = new Date().toISOString();
 
     if (isNewWorkflow) {
@@ -1864,10 +3083,30 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const connectedEdgeIds = edges
       .filter((edge) => edge.from === nodeId || edge.to === nodeId)
       .map((edge) => edge.id);
-    setNodes((prev) => prev.filter((node) => node.id !== nodeId));
-    setEdges((prev) =>
-      prev.filter((edge) => edge.from !== nodeId && edge.to !== nodeId)
-    );
+    setNodes((prev) => {
+      const isContainer = prev.some(
+        (node) => node.id === nodeId && isContainerNode(node)
+      );
+      const nextNodes = prev
+        .filter((node) => node.id !== nodeId)
+        .map((node) => {
+          if (!isContainer) return node;
+          if (node.containerId !== nodeId) return node;
+          return {
+            ...node,
+            containerId: null,
+            containerType: null,
+            branchIndex: null
+          };
+        });
+      setEdges((prevEdges) => {
+        const trimmed = prevEdges.filter(
+          (edge) => edge.from !== nodeId && edge.to !== nodeId
+        );
+        return filterEdgesByContainerRules(nextNodes, trimmed);
+      });
+      return nextNodes;
+    });
     setSelectedNode((prev) => (prev === nodeId ? null : prev));
     setSelectedEdgeId((prev) =>
       prev && connectedEdgeIds.includes(prev) ? null : prev
@@ -1919,13 +3158,23 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const padding = 80;
     const inDegree = new Map<string, number>();
     const outgoing = new Map<string, string[]>();
+    const containerIds = new Set(
+      nodes.filter(isContainerNode).map((node) => node.id)
+    );
+    const topLevelNodes = nodes.filter(
+      (node) => !node.containerId || !containerIds.has(node.containerId)
+    );
+    const topLevelNodeIds = new Set(topLevelNodes.map((node) => node.id));
+    const topLevelEdges = validEdges.filter(
+      (edge) => topLevelNodeIds.has(edge.from) && topLevelNodeIds.has(edge.to)
+    );
 
-    nodes.forEach((node) => {
+    topLevelNodes.forEach((node) => {
       inDegree.set(node.id, 0);
       outgoing.set(node.id, []);
     });
 
-    edges.forEach((edge) => {
+    topLevelEdges.forEach((edge) => {
       if (!inDegree.has(edge.to) || !outgoing.has(edge.from)) return;
       inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
       outgoing.get(edge.from)?.push(edge.to);
@@ -1950,12 +3199,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       });
     }
 
-    nodes.forEach((node) => {
+    topLevelNodes.forEach((node) => {
       if (!layers.has(node.id)) layers.set(node.id, 0);
     });
 
     const grouped = new Map<number, EditorNode[]>();
-    nodes.forEach((node) => {
+    topLevelNodes.forEach((node) => {
       const layer = layers.get(node.id) ?? 0;
       const group = grouped.get(layer) ?? [];
       group.push(node);
@@ -1993,11 +3242,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     }));
 
     setNodes((prev) => {
-      const next = prev.map((node) =>
-        nextPositions.has(node.id)
-          ? { ...node, position: nextPositions.get(node.id)! }
-          : node
-      );
+      const next = prev.map((node) => {
+        if (nextPositions.has(node.id)) {
+          return { ...node, position: nextPositions.get(node.id)! };
+        }
+        return node;
+      });
       if (next !== prev) {
         setHasUnsavedChanges(true);
       }
@@ -2005,15 +3255,41 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     });
   };
 
+  const showEdgeError = useCallback((message: string) => {
+    setEdgeError(message);
+    if (edgeErrorTimerRef.current) {
+      window.clearTimeout(edgeErrorTimerRef.current);
+    }
+    edgeErrorTimerRef.current = window.setTimeout(() => {
+      setEdgeError(null);
+      edgeErrorTimerRef.current = null;
+    }, 2400);
+  }, []);
+
+  const isEdgeAllowed = useCallback(
+    (fromNode: EditorNode, toNode: EditorNode) => {
+      const fromKey = getNodeContainerKey(fromNode, containerTypeById);
+      const toKey = getNodeContainerKey(toNode, containerTypeById);
+      if (!fromKey && !toKey) return true;
+      return fromKey !== null && fromKey === toKey;
+    },
+    [containerTypeById]
+  );
+
   const connectNodes = useCallback(
     (fromNodeId: string, fromPort: string, toNodeId: string) => {
       if (fromNodeId === toNodeId) return;
+      const fromNode = nodeMap.get(fromNodeId);
       const toNode = nodeMap.get(toNodeId);
-      if (!toNode) return;
+      if (!fromNode || !toNode) return;
       const toConfig = nodeTypeConfig[toNode.kind];
       if (toConfig?.inputEnabled === false) return;
       if (incomingEdges.has(toNodeId)) return;
       if (outgoingEdges.has(`${fromNodeId}:${fromPort}`)) return;
+      if (!isEdgeAllowed(fromNode, toNode)) {
+        showEdgeError("Edges cannot cross container boundaries.");
+        return;
+      }
 
       setEdges((prev) => [
         ...prev,
@@ -2027,7 +3303,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setSelectedEdgeId(null);
       setHasUnsavedChanges(true);
     },
-    [incomingEdges, nodeMap, outgoingEdges]
+    [incomingEdges, isEdgeAllowed, nodeMap, nodeTypeConfig, outgoingEdges, showEdgeError]
   );
 
   const handleStartConnect = (nodeId: string, portKey: string) => {
@@ -2125,7 +3401,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const edgesToRender = useMemo(() => {
-    return edges.filter((edge) => {
+    return validEdges.filter((edge) => {
       const fromNode = nodeMap.get(edge.from);
       const toNode = nodeMap.get(edge.to);
       if (!fromNode || !toNode) return false;
@@ -2134,7 +3410,37 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const outputs = config.outputs;
       return outputs.some((output) => output.key === edge.fromPort);
     });
-  }, [edges, nodeMap, nodeTypeConfig]);
+  }, [nodeMap, nodeTypeConfig, validEdges]);
+
+  const containerFramesToRender = useMemo(() => {
+    return nodes
+      .filter((node) => isContainerNode(node) && node.isExpanded)
+      .map((node) => {
+        const layout = getContainerFrameLayout(node, nodeTypeConfig);
+        if (!layout) return null;
+        const empty = containerEmptyBranches.get(node.id);
+        const regions = layout.regions.map((region) => ({
+          ...region,
+          isEmpty: empty ? empty.has(region.index) : false
+        }));
+        return {
+          node,
+          label: getContainerHeaderLabel(node, regions.length),
+          frame: layout.frame,
+          headerHeight: layout.headerHeight,
+          regions,
+          highlight: Boolean(empty && empty.size > 0)
+        };
+      })
+      .filter(Boolean) as Array<{
+      node: EditorNode;
+      label: string;
+      frame: { x: number; y: number; width: number; height: number };
+      headerHeight: number;
+      regions: ContainerFrameRegion[];
+      highlight: boolean;
+    }>;
+  }, [containerEmptyBranches, nodeTypeConfig, nodes]);
 
   const connectingLabel = useMemo(() => {
     if (!connectingFrom) return null;
@@ -2146,7 +3452,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       (item) => item.key === connectingFrom.portKey
     );
     return `${node.name} - ${output?.label ?? connectingFrom.portKey}`;
-  }, [connectingFrom, nodeMap]);
+  }, [connectingFrom, nodeMap, nodeTypeConfig]);
 
   // 에디터 페이지에서 unsaved 변경 여부를 전역(window)에 노출
   useEffect(() => {
@@ -2491,6 +3797,22 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     })}
                   </svg>
 
+                  {containerFramesToRender.map((frame) => (
+                    <ContainerFrame
+                      key={frame.node.id}
+                      id={frame.node.id}
+                      label={frame.label}
+                      position={{ x: frame.frame.x, y: frame.frame.y }}
+                      size={{ width: frame.frame.width, height: frame.frame.height }}
+                      headerHeight={frame.headerHeight}
+                      regions={frame.regions}
+                      highlight={frame.highlight}
+                      onResizeStart={(handle, event) =>
+                        handleContainerResizeStart(frame.node.id, handle, event)
+                      }
+                    />
+                  ))}
+
                   {nodes.map((node) => {
                     const config = nodeTypeConfig[node.kind];
                     if (!config) return null;
@@ -2519,6 +3841,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           outputs={outputStates}
                           nodeTypeConfig={nodeTypeConfig}
                           skillset={skillset}
+                          warningLabel={containerWarningLabels.get(node.id) ?? null}
                           onSelect={() => {
                             setSelectedNode(node.id);
                             setSelectedEdgeId(null);
@@ -2597,6 +3920,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     </div>
                   )}
 
+                  {edgeError && (
+                    <div className="absolute bottom-12 left-4 rounded-full bg-rose-600 px-3 py-1 text-[10px] font-semibold text-white shadow">
+                      {edgeError}
+                    </div>
+                  )}
                   {connectingFrom && (
                     <div className="absolute bottom-4 left-4 rounded-full bg-slate-900 px-3 py-1 text-[10px] text-white shadow">
                       Connecting: {connectingLabel ?? "Output"} -&gt; select target input.
@@ -2650,13 +3978,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             className="cursor-pointer flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-lg"
             onClick={() => setShowValidation((prev) => !prev)}
           >
-            {validationErrors.length} Validation Errors
+            {allValidationErrors.length} Validation Errors
           </button>
           {showValidation && (
             <div className="mt-3 w-72 rounded-lg border border-red-200 bg-white p-3 text-xs text-slate-700 shadow-lg">
               <p className="font-semibold text-red-600">Errors</p>
               <ul className="mt-2 space-y-2">
-                {validationErrors.map((error: ValidationError, index) => (
+                {allValidationErrors.map((error: ValidationError, index) => (
                   <li key={`${error.id}-${index}`}>
                     <button
                       type="button"
