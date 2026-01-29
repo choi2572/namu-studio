@@ -2399,6 +2399,23 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     return new Map(nodes.map((node) => [node.id, node]));
   }, [nodes]);
 
+  const collapsedContainerIds = useMemo(() => {
+    return new Set(
+      nodes.filter((node) => isContainerNode(node) && !node.isExpanded).map((node) => node.id)
+    );
+  }, [nodes]);
+
+  const visibleNodes = useMemo(() => {
+    if (collapsedContainerIds.size === 0) return nodes;
+    return nodes.filter(
+      (node) => !node.containerId || !collapsedContainerIds.has(node.containerId)
+    );
+  }, [collapsedContainerIds, nodes]);
+
+  const visibleNodeIds = useMemo(() => {
+    return new Set(visibleNodes.map((node) => node.id));
+  }, [visibleNodes]);
+
   const containerTypeById = useMemo(() => {
     return getContainerTypeById(nodes);
   }, [nodes]);
@@ -2856,6 +2873,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleToggleExpand = (nodeId: string) => {
+    const target = nodes.find((node) => node.id === nodeId);
+    const isContainer = target ? isContainerNode(target) : false;
+    const willCollapse = Boolean(target && target.isExpanded && isContainer);
+    const childIds = willCollapse
+      ? new Set(nodes.filter((node) => node.containerId === nodeId).map((node) => node.id))
+      : null;
+
     setNodes((prev) =>
       prev.map((node) => {
         if (node.id !== nodeId) return node;
@@ -2874,6 +2898,28 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         return updated;
       })
     );
+
+    if (willCollapse && childIds) {
+      if (selectedNode && childIds.has(selectedNode)) {
+        setSelectedNode(null);
+      }
+      if (editingNodeId && childIds.has(editingNodeId)) {
+        setEditingNodeId(null);
+      }
+      if (connectingFrom && childIds.has(connectingFrom.nodeId)) {
+        setConnectingFrom(null);
+      }
+      if (
+        selectedEdgeId &&
+        edges.some(
+          (edge) =>
+            edge.id === selectedEdgeId &&
+            (childIds.has(edge.from) || childIds.has(edge.to))
+        )
+      ) {
+        setSelectedEdgeId(null);
+      }
+    }
   };
 
   const handleParamChange = (nodeId: string, key: string, value: string) => {
@@ -3402,6 +3448,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const edgesToRender = useMemo(() => {
     return validEdges.filter((edge) => {
+      if (!visibleNodeIds.has(edge.from) || !visibleNodeIds.has(edge.to)) {
+        return false;
+      }
       const fromNode = nodeMap.get(edge.from);
       const toNode = nodeMap.get(edge.to);
       if (!fromNode || !toNode) return false;
@@ -3410,7 +3459,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const outputs = config.outputs;
       return outputs.some((output) => output.key === edge.fromPort);
     });
-  }, [nodeMap, nodeTypeConfig, validEdges]);
+  }, [nodeMap, nodeTypeConfig, validEdges, visibleNodeIds]);
 
   const containerFramesToRender = useMemo(() => {
     return nodes
@@ -3813,7 +3862,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     />
                   ))}
 
-                  {nodes.map((node) => {
+                  {visibleNodes.map((node) => {
                     const config = nodeTypeConfig[node.kind];
                     if (!config) return null;
                     const outputStates = config.outputs.map((output) => ({
