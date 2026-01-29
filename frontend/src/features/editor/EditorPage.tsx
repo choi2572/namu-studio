@@ -889,22 +889,11 @@ function NodeCard({
   const tooltipContent = skillset
     ? `${skillset.name} (${skillset.version})\nType: ${node.kind}\n\n${skillset.description}`
     : node.kind;
-  const isBlockNode = Boolean(config.block);
-  const repeatCountRaw = Number.parseInt(node.params.count ?? "", 10);
-  const repeatCount = Number.isFinite(repeatCountRaw) && repeatCountRaw > 0 ? repeatCountRaw : 1;
-  const branchCount = node.branches?.length ?? 0;
-  const blockSummary =
-    config.block?.type === "parallel"
-      ? `Branches: ${branchCount}`
-      : config.block?.type === "repeat"
-        ? `Repeat: ${repeatCount}`
-        : null;
 
   return (
     <div
       className={cn(
         "relative rounded-lg border-2 bg-white p-3 shadow-sm overflow-visible",
-        isBlockNode && "border-[3px] border-slate-300",
         isSelected ? "border-slate-900 ring-4 ring-slate-400 ring-offset-2" : "border-slate-200"
       )}
       data-node-card
@@ -1091,42 +1080,12 @@ function NodeCard({
             >
               {nodeTypeLabel}
             </span>
-            {isBlockNode && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-3 w-3"
-                >
-                  <path d="M4 4h5v5H4V4Zm7 0h5v5h-5V4ZM4 11h5v5H4v-5Zm7 0h5v5h-5v-5Z" />
-                </svg>
-                Block
-              </span>
-            )}
             {(hasError || hasNestedError) && (
               <span className="inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">
                 Invalid
               </span>
             )}
           </div>
-
-          {isBlockNode && (
-            <div className="mb-2 rounded-md border border-dashed border-slate-200 bg-slate-50 px-2 py-1 text-[10px] text-slate-600">
-              <div className="flex items-center gap-1 font-semibold text-slate-700">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-3 w-3"
-                >
-                  <path d="M6.5 4a2.5 2.5 0 0 0 0 5H8v2H6.5a2.5 2.5 0 1 0 0 5H9a2.5 2.5 0 0 0 0-5H7v-2h2a2.5 2.5 0 1 0 0-5H6.5Z" />
-                </svg>
-                Contains sub-flow
-              </div>
-              {blockSummary && <div className="text-slate-500">{blockSummary}</div>}
-            </div>
-          )}
 
           {blockLabel && onOpenSubEditor && (
             <button
@@ -2976,7 +2935,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50"
               >
                 {isFocusMode && focusModeLabel && (
-                  <div className="pointer-events-none absolute left-4 top-16 z-20 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-sm backdrop-blur">
+                  <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-full border border-indigo-200 bg-white/90 px-3 py-1 text-[11px] font-semibold text-indigo-700 shadow-sm backdrop-blur">
                     Editing: {focusModeLabel}
                   </div>
                 )}
@@ -3004,9 +2963,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       onDrop={handleCanvasDrop}
                       onClick={handleCanvasClick}
                     >
-                      {isFocusMode && (
-                        <div className="pointer-events-none absolute inset-0 bg-slate-900/10" />
-                      )}
                       <svg
                         className="absolute inset-0"
                         width={canvasBase.width}

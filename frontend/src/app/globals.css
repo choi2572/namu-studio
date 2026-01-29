@@ -20,11 +20,11 @@ body {
 }
 
 .focus-mode-overlay {
-  @apply pointer-events-none absolute inset-0 rounded-xl bg-slate-900/20;
+  @apply pointer-events-none absolute inset-0 rounded-xl bg-indigo-900/10;
 }
 
 .focus-mode-frame {
-  @apply relative z-10 rounded-xl ring-2 ring-indigo-300 shadow-xl;
+  @apply relative z-10 rounded-xl ring-2 ring-indigo-300 shadow-2xl;
 }
 
 .focus-mode-zoom {
