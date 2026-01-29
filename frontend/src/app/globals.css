@@ -7,3 +7,26 @@
 body {
   @apply bg-slate-50 text-slate-900;
 }
+
+@keyframes focusZoomIn {
+  from {
+    transform: scale(0.97);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.focus-mode-overlay {
+  @apply pointer-events-none absolute inset-0 rounded-xl bg-slate-900/5;
+}
+
+.focus-mode-frame {
+  @apply relative z-10 rounded-xl ring-2 ring-slate-300 shadow-2xl;
+}
+
+.focus-mode-zoom {
+  animation: focusZoomIn 220ms ease-out;
+}

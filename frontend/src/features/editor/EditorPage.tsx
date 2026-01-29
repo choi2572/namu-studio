@@ -13,88 +13,44 @@ import { skillsetsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ValidationError, WorkflowDraft } from "@/domain/types";
+import { WorkflowDraft } from "@/domain/types";
+import { Breadcrumbs } from "@/features/editor/Breadcrumbs";
+import {
+  buildGraphRef,
+  createBranchContext,
+  createParallelContext,
+  createRepeatContext,
+  createRootContext,
+  getAllowedNodeKinds,
+  getEditorScope,
+  getFocusModeLabel,
+  navigateToContextIndex,
+  popContext,
+  pushParallelBranchContext,
+  pushRepeatContext
+} from "@/features/editor/editorContext";
+import type { EditorContext, GraphPathSegment } from "@/features/editor/editorContext";
+import type {
+  ConditionExpression,
+  ConditionOperator,
+  EditorEdge,
+  EditorGraph,
+  EditorNode,
+  NodeCategory,
+  NodeKind,
+  NodeOutputPort,
+  NodeParamField,
+  NodeTypeConfig,
+  VariableRow,
+  VariableValueType
+} from "@/features/editor/editorTypes";
+import { FocusModeEditor } from "@/features/editor/FocusModeEditor";
+import { SubflowBanner } from "@/features/editor/SubflowBanner";
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format";
 
 type EditorPageProps = {
   workflowId: string;
-};
-
-type NodeKind =
-  | `skill.${string}`
-  | "flow_control.input"
-  | "flow_control.condition"
-  | "flow_control.output"
-  | "event.webhook";
-
-type NodeCategory = "skill" | "flow_control" | "event";
-
-type NodeParamField = {
-  key: string;
-  label: string;
-  placeholder: string;
-};
-
-type NodeOutputPort = {
-  key: string;
-  label: string;
-};
-
-type ConditionOperator = "AND" | "OR";
-
-// Condition 노드의 개별 표현식
-// 내부값은 기존과 동일하게 expression 하나의 문자열로 저장하되,
-// UI에서는 variable / operator / value 세 개의 인풋으로 나누어 다룬다.
-type ConditionExpression = {
-  id: string;
-  // 첫 번째 표현식은 null, 두 번째부터 AND/OR
-  operator: ConditionOperator | null;
-  expression: string;
-};
-
-type VariableValueType = "int" | "bool" | "double" | "string";
-
-type VariableRow = {
-  id: string;
-  name: string;
-  value: string;
-  valueType: VariableValueType;
-};
-
-type NodeTypeConfig = {
-  label: string;
-  category: NodeCategory;
-  iconText: string;
-  colorClass: string;
-  paramFields: NodeParamField[];
-  outputs: NodeOutputPort[];
-  inputEnabled?: boolean;
-};
-
-type EditorNode = {
-  id: string;
-  name: string;
-  kind: NodeKind;
-  position: { x: number; y: number };
-  isExpanded: boolean;
-  params: Record<string, string>;
-  conditionExpressions?: ConditionExpression[];
-  variableRows?: VariableRow[];
-};
-
-type EditorEdge = {
-  id: string;
-  from: string;
-  fromPort: string;
-  to: string;
-};
-
-type EditorViewJson = {
-  version: "v1";
-  nodes: EditorNode[];
-  edges: EditorEdge[];
-  canvas?: { width: number; height: number; zoom: number };
 };
 
 type DragState = {
@@ -112,6 +68,14 @@ type ConnectingState = {
 type EdgeDragPayload = {
   nodeId: string;
   portKey: string;
+};
+
+type NodeLocation = {
+  nodeId: string;
+  stateName: string;
+  nodeName: string;
+  contextStack: EditorContext[];
+  ancestorBlockIds: string[];
 };
 
 // NODE_TYPES는 skillset에서 동적으로 생성됩니다
@@ -157,6 +121,30 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
     colorClass: "border-rose-200 bg-rose-100 text-rose-700",
     paramFields: [],
     outputs: []
+  },
+  "flow_control.parallel": {
+    label: "Parallel",
+    category: "flow_control",
+    iconText: "PA",
+    colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
+    paramFields: [],
+    outputs: [{ key: "next", label: "Next" }],
+    block: {
+      type: "parallel",
+      editLabel: "Edit branches"
+    }
+  },
+  "flow_control.repeat": {
+    label: "Repeat",
+    category: "flow_control",
+    iconText: "RP",
+    colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
+    paramFields: [{ key: "count", label: "Count", placeholder: "3" }],
+    outputs: [{ key: "next", label: "Next" }],
+    block: {
+      type: "repeat",
+      editLabel: "Edit body"
+    }
   },
   "event.webhook": {
     label: "Webhook",
@@ -252,6 +240,57 @@ const ZOOM_LIMITS = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function createEmptyGraph(
+  canvasBase: { width: number; height: number } = CANVAS_DEFAULT,
+  zoom = 1
+): EditorGraph {
+  return {
+    version: "v1",
+    nodes: [],
+    edges: [],
+    canvas: {
+      width: canvasBase.width,
+      height: canvasBase.height,
+      zoom
+    }
+  };
+}
+
+function isParallelNode(node: EditorNode) {
+  return node.kind === "flow_control.parallel";
+}
+
+function isRepeatNode(node: EditorNode) {
+  return node.kind === "flow_control.repeat";
+}
+
+function normalizeGraph(graph: EditorGraph): EditorGraph {
+  const normalizedCanvas = graph.canvas ?? {
+    width: CANVAS_DEFAULT.width,
+    height: CANVAS_DEFAULT.height,
+    zoom: 1
+  };
+  const nodes = graph.nodes.map((node) => {
+    if (isRepeatNode(node)) {
+      const body = node.body ? normalizeGraph(node.body) : createEmptyGraph();
+      return { ...node, body };
+    }
+    if (isParallelNode(node)) {
+      const branches = (node.branches ?? []).map((branch) => normalizeGraph(branch));
+      while (branches.length < 2) {
+        branches.push(createEmptyGraph());
+      }
+      return { ...node, branches };
+    }
+    return node;
+  });
+  return {
+    ...graph,
+    canvas: normalizedCanvas,
+    nodes
+  };
 }
 
 function getExpandedContentHeight(
@@ -411,10 +450,42 @@ function isValidEditorNode(
   return true;
 }
 
-function parseEditorView(
+function hydrateEditorNode(node: EditorNode, nodeTypes: NodeKind[]) {
+  if (node.kind === "flow_control.repeat") {
+    const rawBody = (node as EditorNode & { body?: Record<string, unknown> }).body;
+    const parsedBody = rawBody && isRecord(rawBody)
+      ? parseEditorGraph(rawBody, nodeTypes)
+      : null;
+    return {
+      ...node,
+      body: parsedBody ?? createEmptyGraph()
+    };
+  }
+  if (node.kind === "flow_control.parallel") {
+    const rawBranches = (node as EditorNode & { branches?: unknown }).branches;
+    const branches = Array.isArray(rawBranches)
+      ? rawBranches.map((branch) => {
+          if (!isRecord(branch)) {
+            return createEmptyGraph();
+          }
+          return parseEditorGraph(branch, nodeTypes) ?? createEmptyGraph();
+        })
+      : [];
+    while (branches.length < 2) {
+      branches.push(createEmptyGraph());
+    }
+    return {
+      ...node,
+      branches
+    };
+  }
+  return node;
+}
+
+function parseEditorGraph(
   viewJson: Record<string, unknown>,
   nodeTypes: NodeKind[]
-): EditorViewJson | null {
+): EditorGraph | null {
   const rawNodes = viewJson.nodes;
   const rawEdges = viewJson.edges;
   if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
@@ -433,11 +504,65 @@ function parseEditorView(
         zoom: typeof rawCanvas.zoom === "number" ? rawCanvas.zoom : 1
       }
     : undefined;
-  return {
+  const hydratedNodes = (rawNodes as EditorNode[]).map((node) =>
+    hydrateEditorNode(node, nodeTypes)
+  );
+  return normalizeGraph({
     version: "v1",
-    nodes: rawNodes as EditorNode[],
+    nodes: hydratedNodes,
     edges: rawEdges as EditorEdge[],
     canvas
+  });
+}
+
+function getGraphAtPath(root: EditorGraph, path: GraphPathSegment[]) {
+  let current = root;
+  for (const segment of path) {
+    const node = current.nodes.find((item) => item.id === segment.nodeId);
+    if (!node) return createEmptyGraph();
+    if (segment.kind === "repeatBody") {
+      current = node.body ?? createEmptyGraph();
+    } else {
+      const branches = node.branches ?? [];
+      current = branches[segment.branchIndex] ?? createEmptyGraph();
+    }
+  }
+  return current;
+}
+
+function updateGraphAtPath(
+  root: EditorGraph,
+  path: GraphPathSegment[],
+  updater: (graph: EditorGraph) => EditorGraph
+): EditorGraph {
+  if (path.length === 0) {
+    return normalizeGraph(updater(root));
+  }
+  const [segment, ...rest] = path;
+  return {
+    ...root,
+    nodes: root.nodes.map((node) => {
+      if (node.id !== segment.nodeId) return node;
+      if (segment.kind === "repeatBody") {
+        const body = node.body ?? createEmptyGraph();
+        const updatedBody = updateGraphAtPath(body, rest, updater);
+        return { ...node, body: updatedBody };
+      }
+      const branches = node.branches ? [...node.branches] : [];
+      while (branches.length < 2) {
+        branches.push(createEmptyGraph());
+      }
+      while (branches.length <= segment.branchIndex) {
+        branches.push(createEmptyGraph());
+      }
+      const updatedBranch = updateGraphAtPath(
+        branches[segment.branchIndex],
+        rest,
+        updater
+      );
+      branches[segment.branchIndex] = updatedBranch;
+      return { ...node, branches };
+    })
   };
 }
 
@@ -469,22 +594,82 @@ function buildStateNameMap(nodes: EditorNode[]) {
   return nameMap;
 }
 
-function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
-  if (nodes.length === 0) {
+function collectNodeLocations(
+  graph: EditorGraph,
+  contextStack: EditorContext[],
+  ancestorBlockIds: string[]
+): NodeLocation[] {
+  const locations: NodeLocation[] = [];
+  const stateNameMap = buildStateNameMap(graph.nodes);
+  graph.nodes.forEach((node) => {
+    const stateName = stateNameMap.get(node.id) ?? node.id;
+    locations.push({
+      nodeId: node.id,
+      nodeName: node.name,
+      stateName,
+      contextStack,
+      ancestorBlockIds
+    });
+    if (isRepeatNode(node)) {
+      const repeatContext = createRepeatContext(node.id, node.name);
+      const bodyGraph = node.body ?? createEmptyGraph();
+      locations.push(
+        ...collectNodeLocations(
+          bodyGraph,
+          [...contextStack, repeatContext],
+          [...ancestorBlockIds, node.id]
+        )
+      );
+    }
+    if (isParallelNode(node)) {
+      const parallelContext = createParallelContext(node.id, node.name);
+      const branches = node.branches ?? [];
+      branches.forEach((branch, index) => {
+        const branchContext = createBranchContext(node.id, index);
+        locations.push(
+          ...collectNodeLocations(
+            branch,
+            [...contextStack, parallelContext, branchContext],
+            [...ancestorBlockIds, node.id]
+          )
+        );
+      });
+    }
+  });
+  return locations;
+}
+
+function buildDslFromGraph(graph: EditorGraph): Record<string, unknown> {
+  if (graph.nodes.length === 0) {
     return {};
   }
-  const stateNameMap = buildStateNameMap(nodes);
+  const stateNameMap = buildStateNameMap(graph.nodes);
   const edgesByFrom = new Map<string, EditorEdge[]>();
-  edges.forEach((edge) => {
+  graph.edges.forEach((edge) => {
     if (!stateNameMap.has(edge.from) || !stateNameMap.has(edge.to)) return;
     const list = edgesByFrom.get(edge.from) ?? [];
     list.push(edge);
     edgesByFrom.set(edge.from, list);
   });
   const startNode =
-    nodes.find((node) => node.kind === "flow_control.input") ?? nodes[0];
+    graph.nodes.find((node) => node.kind === "flow_control.input") ?? graph.nodes[0];
   const states: Record<string, Record<string, unknown>> = {};
-  nodes.forEach((node) => {
+
+  const buildSubgraph = (subgraph: EditorGraph) => {
+    if (subgraph.nodes.length === 0) {
+      return { StartAt: "", States: {} };
+    }
+    const dsl = buildDslFromGraph(subgraph) as {
+      StartAt?: string;
+      States?: Record<string, unknown>;
+    };
+    return {
+      StartAt: dsl.StartAt ?? "",
+      States: dsl.States ?? {}
+    };
+  };
+
+  graph.nodes.forEach((node) => {
     const stateName = stateNameMap.get(node.id);
     if (!stateName) return;
     const outgoing = edgesByFrom.get(node.id) ?? [];
@@ -521,11 +706,37 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
           expression: expression.expression
         }));
       }
+    } else if (isParallelNode(node)) {
+      const branches = (node.branches ?? []).map((branch) => buildSubgraph(branch));
+      state = {
+        Type: "Parallel",
+        Branches: branches
+      };
+      const next = getNext("next");
+      if (next) {
+        state.Next = next;
+      } else {
+        state.End = true;
+      }
+    } else if (isRepeatNode(node)) {
+      const body = buildSubgraph(node.body ?? createEmptyGraph());
+      const rawCount = Number.parseInt(node.params.count ?? "", 10);
+      const count = Number.isFinite(rawCount) && rawCount > 0 ? rawCount : 1;
+      state = {
+        Type: "Repeat",
+        Count: count,
+        Body: body
+      };
+      const next = getNext("next");
+      if (next) {
+        state.Next = next;
+      } else {
+        state.End = true;
+      }
     } else {
       const next = getNext("next");
-      // skill 노드인 경우 skill 이름 추출
-      const skillName = node.kind.startsWith("skill.") 
-        ? node.kind.replace("skill.", "") 
+      const skillName = node.kind.startsWith("skill.")
+        ? node.kind.replace("skill.", "")
         : node.kind;
       state = {
         Type: node.kind === "flow_control.input" ? "Pass" : "Skill",
@@ -545,24 +756,6 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
     Comment: "Generated from editor",
     StartAt: stateNameMap.get(startNode.id),
     States: states
-  };
-}
-
-function buildViewJson(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  canvasBase: { width: number; height: number },
-  zoom: number
-): EditorViewJson {
-  return {
-    version: "v1",
-    nodes,
-    edges,
-    canvas: {
-      width: canvasBase.width,
-      height: canvasBase.height,
-      zoom
-    }
   };
 }
 
@@ -604,7 +797,11 @@ function NodeCard({
   onInputDragOver,
   onInputDrop,
   nodeTypeConfig,
-  skillset
+  skillset,
+  blockLabel,
+  onOpenSubEditor,
+  hasError,
+  hasNestedError
 }: {
   node: EditorNode;
   config: NodeTypeConfig;
@@ -638,6 +835,10 @@ function NodeCard({
   onInputDrop: (event: DragEvent<HTMLButtonElement>) => void;
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
   skillset?: import("@/domain/types").Skillset;
+  blockLabel?: string;
+  onOpenSubEditor?: () => void;
+  hasError?: boolean;
+  hasNestedError?: boolean;
 }) {
   const nodeHeight = getNodeHeight(node, nodeTypeConfig);
   const outputOffsets = getPortOffsets(nodeHeight, outputs.length);
@@ -701,6 +902,19 @@ function NodeCard({
         height: nodeHeight
       }}
       onClick={onSelect}
+      onDoubleClick={(event) => {
+        if (!onOpenSubEditor || !blockLabel) return;
+        const target = event.target as HTMLElement;
+        if (
+          target.closest("input") ||
+          target.closest("button") ||
+          target.closest("[data-no-drag]")
+        ) {
+          return;
+        }
+        event.stopPropagation();
+        onOpenSubEditor();
+      }}
       title={tooltipContent}
     >
       {/* 왼쪽 타입 인디케이터 바 */}
@@ -866,7 +1080,26 @@ function NodeCard({
             >
               {nodeTypeLabel}
             </span>
+            {(hasError || hasNestedError) && (
+              <span className="inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                Invalid
+              </span>
+            )}
           </div>
+
+          {blockLabel && onOpenSubEditor && (
+            <button
+              type="button"
+              data-no-drag
+              className="cursor-pointer inline-flex items-center rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenSubEditor();
+              }}
+            >
+              {blockLabel}
+            </button>
+          )}
 
         </div>
         <button
@@ -1155,15 +1388,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<ConnectingState>(null);
   const [selectedCategory, setSelectedCategory] = useState<NodeCategory>("skill");
-  const [zoom, setZoom] = useState(1);
-  const [canvasBase, setCanvasBase] = useState(() => {
-    // 초기값은 CANVAS_DEFAULT로 설정, 마운트 후 뷰포트 크기로 업데이트
-    return CANVAS_DEFAULT;
-  });
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [draftOverride, setDraftOverride] = useState<WorkflowDraft | null>(null);
-  const [nodes, setNodes] = useState<EditorNode[]>([]);
-  const [edges, setEdges] = useState<EditorEdge[]>([]);
+  const [editorGraph, setEditorGraph] = useState<EditorGraph>(() => createEmptyGraph());
+  const [editorContextStack, setEditorContextStack] = useState<EditorContext[]>(() => [
+    createRootContext("Untitled")
+  ]);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [isEditingWorkflowName, setIsEditingWorkflowName] = useState(false);
   const [workflowName, setWorkflowName] = useState<string>("");
@@ -1220,6 +1450,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       "flow_control.input",
       "flow_control.condition",
       "flow_control.output",
+      "flow_control.parallel",
+      "flow_control.repeat",
       "event.webhook"
     ];
     const skillTypes: NodeKind[] = skillsetsResponse?.skillsets.map(
@@ -1229,6 +1461,92 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [skillsetsResponse]);
 
   const activeDraft = draftOverride ?? draft;
+  const graphRef = useMemo(
+    () => buildGraphRef(editorContextStack),
+    [editorContextStack]
+  );
+  const activeGraph = useMemo(
+    () => getGraphAtPath(editorGraph, graphRef.path),
+    [editorGraph, graphRef.path]
+  );
+  const nodes = activeGraph.nodes;
+  const edges = activeGraph.edges;
+  const activeCanvas = activeGraph.canvas ?? {
+    width: CANVAS_DEFAULT.width,
+    height: CANVAS_DEFAULT.height,
+    zoom: 1
+  };
+  const canvasBase = {
+    width: activeCanvas.width,
+    height: activeCanvas.height
+  };
+  const zoom = activeCanvas.zoom;
+  const editorScope = useMemo(
+    () => getEditorScope(editorContextStack),
+    [editorContextStack]
+  );
+  const allowedNodeKinds = useMemo(
+    () => getAllowedNodeKinds(editorContextStack, nodeTypes, nodeTypeConfig),
+    [editorContextStack, nodeTypes, nodeTypeConfig]
+  );
+  const isPaletteEnabled = editorScope !== "parallelOverview";
+  const isParallelOverview = editorScope === "parallelOverview";
+  const focusModeLabel = useMemo(
+    () => getFocusModeLabel(editorContextStack),
+    [editorContextStack]
+  );
+  const isFocusMode = Boolean(focusModeLabel);
+  const parallelContext = editorContextStack[editorContextStack.length - 1];
+  const parallelNode =
+    isParallelOverview && parallelContext?.kind === "parallel"
+      ? nodes.find((node) => node.id === parallelContext.nodeId)
+      : null;
+  const parallelBranches = parallelNode?.branches ?? [];
+
+  const updateActiveGraph = useCallback(
+    (updater: (graph: EditorGraph) => EditorGraph) => {
+      setEditorGraph((prev) => updateGraphAtPath(prev, graphRef.path, updater));
+    },
+    [graphRef.path]
+  );
+
+  const updateActiveNodes = useCallback(
+    (updater: (nodes: EditorNode[]) => EditorNode[]) => {
+      updateActiveGraph((graph) => {
+        const nextNodes = updater(graph.nodes);
+        return { ...graph, nodes: nextNodes };
+      });
+    },
+    [updateActiveGraph]
+  );
+
+  const updateActiveEdges = useCallback(
+    (updater: (edges: EditorEdge[]) => EditorEdge[]) => {
+      updateActiveGraph((graph) => {
+        const nextEdges = updater(graph.edges);
+        return { ...graph, edges: nextEdges };
+      });
+    },
+    [updateActiveGraph]
+  );
+
+  const updateActiveCanvas = useCallback(
+    (updater: (canvas: { width: number; height: number; zoom: number }) => {
+      width: number;
+      height: number;
+      zoom: number;
+    }) => {
+      updateActiveGraph((graph) => {
+        const currentCanvas = graph.canvas ?? {
+          width: CANVAS_DEFAULT.width,
+          height: CANVAS_DEFAULT.height,
+          zoom: 1
+        };
+        return { ...graph, canvas: updater(currentCanvas) };
+      });
+    },
+    [updateActiveGraph]
+  );
   
   // 현재 workflow의 이름 가져오기
   useEffect(() => {
@@ -1240,6 +1558,25 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       }
     }
   }, [workflows, workflowId]);
+
+  useEffect(() => {
+    setEditorContextStack((prev) => {
+      if (prev.length === 0) {
+        return [createRootContext(workflowName || "Untitled")];
+      }
+      const updated = [...prev];
+      if (updated[0].kind !== "root") {
+        updated.unshift(createRootContext(workflowName || "Untitled"));
+        return updated;
+      }
+      const nextRoot = createRootContext(workflowName || "Untitled");
+      if (updated[0].label === nextRoot.label) {
+        return prev;
+      }
+      updated[0] = nextRoot;
+      return updated;
+    });
+  }, [workflowName]);
 
   const getViewportCanvasSize = useCallback(() => {
     if (!containerRef.current) return CANVAS_DEFAULT;
@@ -1258,65 +1595,36 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
 
     if (!draftToApply) {
-      setNodes([]);
-      setEdges([]);
-      setCanvasBase(getSize());
-      setZoom(1);
+      setEditorGraph(createEmptyGraph(getSize(), 1));
+      setEditorContextStack([createRootContext(workflowName || "Untitled")]);
       setHasUnsavedChanges(false);
       return;
     }
-    const parsed = parseEditorView(draftToApply.view_json, nodeTypes);
+    const parsed = parseEditorGraph(draftToApply.view_json, nodeTypes);
     if (!parsed) {
-      setNodes([]);
-      setEdges([]);
-      setCanvasBase(getSize());
-      setZoom(1);
+      setEditorGraph(createEmptyGraph(getSize(), 1));
+      setEditorContextStack([createRootContext(workflowName || "Untitled")]);
       setHasUnsavedChanges(false);
       return;
     }
-    setNodes(parsed.nodes);
-    setEdges(parsed.edges);
-    if (parsed.canvas) {
-      const viewportSize = getViewportCanvasSize();
-      setCanvasBase({
-        width: Math.max(viewportSize.width, parsed.canvas.width),
-        height: Math.max(viewportSize.height, parsed.canvas.height)
-      });
-      setZoom(
-        clamp(parsed.canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
-      );
-    } else {
-      setCanvasBase(getSize());
-      setZoom(1);
-    }
-    nextNodeIndex.current = getNextIndexFromIds(
-      parsed.nodes.map((node) => node.id),
-      "node"
-    );
-    nextEdgeIndex.current = getNextIndexFromIds(
-      parsed.edges.map((edge) => edge.id),
-      "edge"
-    );
-    const conditionIds = parsed.nodes.flatMap(
-      (node) => node.conditionExpressions ?? []
-    );
-    nextConditionIndex.current = getNextIndexFromIds(
-      conditionIds.map((expression) => expression.id),
-      "condition"
-    );
-    const variableRowIds = parsed.nodes.flatMap(
-      (node) => node.variableRows ?? []
-    );
-    nextVariableRowIndex.current = getNextIndexFromIds(
-      variableRowIds.map((row) => row.id),
-      "var"
-    );
-    setSelectedNode(null);
-    setSelectedEdgeId(null);
-    setConnectingFrom(null);
-    setEditingNodeId(null);
+    const viewportSize = getViewportCanvasSize();
+    const canvas = parsed.canvas ?? {
+      width: CANVAS_DEFAULT.width,
+      height: CANVAS_DEFAULT.height,
+      zoom: 1
+    };
+    const normalized = normalizeGraph({
+      ...parsed,
+      canvas: {
+        width: Math.max(viewportSize.width, canvas.width),
+        height: Math.max(viewportSize.height, canvas.height),
+        zoom: clamp(canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
+      }
+    });
+    setEditorGraph(normalized);
+    setEditorContextStack([createRootContext(workflowName || "Untitled")]);
     setHasUnsavedChanges(false);
-  }, [nodeTypes, getViewportCanvasSize]);
+  }, [nodeTypes, getViewportCanvasSize, workflowName]);
 
   useEffect(() => {
     if (!activeDraft) return;
@@ -1330,14 +1638,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
     const updateCanvasSize = () => {
       const viewportSize = getViewportCanvasSize();
-      setCanvasBase((prev) => {
-        // 저장된 크기나 현재 크기가 뷰포트보다 작으면 뷰포트 크기로 확장
-        // 하지만 저장된 크기가 더 크면 유지 (노드들이 밖으로 나가지 않도록)
+      updateActiveCanvas((prev) => {
         const newWidth = Math.max(viewportSize.width, prev.width);
         const newHeight = Math.max(viewportSize.height, prev.height);
-        // 크기가 실제로 변경된 경우에만 업데이트
         if (newWidth !== prev.width || newHeight !== prev.height) {
-          return { width: newWidth, height: newHeight };
+          return { ...prev, width: newWidth, height: newHeight };
         }
         return prev;
       });
@@ -1358,13 +1663,102 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       clearTimeout(timeoutId);
       resizeObserver.disconnect();
     };
-  }, [getViewportCanvasSize]);
+  }, [getViewportCanvasSize, updateActiveCanvas]);
+
+  useEffect(() => {
+    setSelectedNode(null);
+    setSelectedEdgeId(null);
+    setConnectingFrom(null);
+    setEditingNodeId(null);
+  }, [editorContextStack]);
+
+  useEffect(() => {
+    nextNodeIndex.current = getNextIndexFromIds(
+      nodes.map((node) => node.id),
+      "node"
+    );
+    nextEdgeIndex.current = getNextIndexFromIds(
+      edges.map((edge) => edge.id),
+      "edge"
+    );
+    const conditionIds = nodes.flatMap((node) => node.conditionExpressions ?? []);
+    nextConditionIndex.current = getNextIndexFromIds(
+      conditionIds.map((expression) => expression.id),
+      "condition"
+    );
+    const variableRowIds = nodes.flatMap((node) => node.variableRows ?? []);
+    nextVariableRowIndex.current = getNextIndexFromIds(
+      variableRowIds.map((row) => row.id),
+      "var"
+    );
+  }, [edges, nodes]);
 
   const { data: validationErrors = [] } = useQuery({
     queryKey: ["workflow-validation", workflowId],
     queryFn: () => workflowsApi.validateDraft(workflowId),
     enabled: Boolean(draft)
   });
+
+  const rootContext = useMemo(
+    () => createRootContext(workflowName || "Untitled"),
+    [workflowName]
+  );
+
+  const nodeLocations = useMemo(
+    () => collectNodeLocations(editorGraph, [rootContext], []),
+    [editorGraph, rootContext]
+  );
+
+  const locationsByStateName = useMemo(() => {
+    const map = new Map<string, NodeLocation[]>();
+    nodeLocations.forEach((location) => {
+      const list = map.get(location.stateName) ?? [];
+      list.push(location);
+      map.set(location.stateName, list);
+    });
+    return map;
+  }, [nodeLocations]);
+
+  const validationMeta = useMemo(() => {
+    const errorNodeIds = new Set<string>();
+    const nestedBlockIds = new Set<string>();
+    const entries = validationErrors.map((error) => {
+      const matches =
+        error.nodeId && locationsByStateName.get(error.nodeId)
+          ? locationsByStateName.get(error.nodeId)
+          : undefined;
+      const location = matches?.[0];
+      if (location) {
+        errorNodeIds.add(location.nodeId);
+        location.ancestorBlockIds.forEach((id) => nestedBlockIds.add(id));
+      }
+      const pathSegments = location
+        ? [
+            ...location.contextStack.slice(1).map((context) => context.label),
+            location.nodeName
+          ].filter((segment) => segment.length > 0)
+        : [];
+      const pathLabel = pathSegments.length > 0 ? pathSegments.join("/") : null;
+      return { error, location, pathLabel };
+    });
+    return {
+      entries,
+      errorNodeIds,
+      nestedBlockIds
+    };
+  }, [locationsByStateName, validationErrors]);
+
+  const handleSelectValidationEntry = useCallback(
+    (entry: { location?: NodeLocation | null }) => {
+      if (!entry.location) return;
+      setEditorContextStack(entry.location.contextStack);
+      setSelectedNode(entry.location.nodeId);
+      setSelectedEdgeId(null);
+      setConnectingFrom(null);
+      setEditingNodeId(null);
+    },
+    []
+  );
 
   const saveMutation = useMutation({
     mutationFn: ({
@@ -1395,7 +1789,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [nodes]);
 
   const nodeTypesByCategory = useMemo(() => {
-    return nodeTypes.reduce(
+    return allowedNodeKinds.reduce(
       (acc, kind) => {
         const config = nodeTypeConfig[kind];
         if (config) {
@@ -1409,7 +1803,25 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         event: []
       } as Record<NodeCategory, NodeKind[]>
     );
-  }, [nodeTypes, nodeTypeConfig]);
+  }, [allowedNodeKinds, nodeTypeConfig]);
+
+  const visibleCategories = useMemo(
+    () => NODE_CATEGORIES.filter((category) => nodeTypesByCategory[category.id].length > 0),
+    [nodeTypesByCategory]
+  );
+
+  useEffect(() => {
+    if (visibleCategories.length === 0) return;
+    if (!visibleCategories.some((category) => category.id === selectedCategory)) {
+      setSelectedCategory(visibleCategories[0].id);
+    }
+  }, [selectedCategory, visibleCategories]);
+
+  useEffect(() => {
+    if (editorScope === "parallelOverview") {
+      setShowPalette(false);
+    }
+  }, [editorScope]);
 
   const incomingEdges = useMemo(() => {
     const map = new Map<string, EditorEdge>();
@@ -1471,7 +1883,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         dragState.height
       );
 
-      setNodes((prev) =>
+      updateActiveNodes((prev) =>
         prev.map((item) =>
           item.id === dragState.nodeId
             ? {
@@ -1495,7 +1907,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       window.removeEventListener("pointerup", handlePointerUp);
       document.body.style.userSelect = previousUserSelect;
     };
-  }, [canvasBase.height, canvasBase.width, dragState, getCanvasPoint]);
+  }, [canvasBase.height, canvasBase.width, dragState, getCanvasPoint, updateActiveNodes]);
 
   const buildDefaultParams = useCallback((kind: NodeKind) => {
     const config = nodeTypeConfig[kind];
@@ -1532,6 +1944,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const createNode = useCallback(
     (kind: NodeKind, position?: { x: number; y: number }) => {
+      if (!allowedNodeKinds.includes(kind)) {
+        return;
+      }
       if (kind === "flow_control.input") {
         const existingInput = nodes.find(
           (node) => node.kind === "flow_control.input"
@@ -1556,7 +1971,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const id = `node-${index}`;
       const config = nodeTypeConfig[kind];
       const name = config ? `${config.label} ${index}` : `${kind} ${index}`;
-      setNodes((prev) => [
+      const blockType = config?.block?.type;
+      const blockDefaults =
+        blockType === "repeat"
+          ? { body: createEmptyGraph() }
+          : blockType === "parallel"
+            ? { branches: [createEmptyGraph(), createEmptyGraph()] }
+            : {};
+      updateActiveNodes((prev) => [
         ...prev,
         {
           id,
@@ -1569,28 +1991,31 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             kind === "flow_control.condition"
               ? [createConditionExpression(null)]
               : undefined,
-          // input / output 노드는 초기 생성 시 파라미터 row 0개
           variableRows:
             kind === "flow_control.input" || kind === "flow_control.output"
               ? []
-              : undefined
+              : undefined,
+          ...blockDefaults
         }
       ]);
       setSelectedNode(id);
       setSelectedEdgeId(null);
     },
     [
+      allowedNodeKinds,
       buildDefaultParams,
       canvasBase,
       createConditionExpression,
       getViewportCenter,
-      nodes
+      nodes,
+      nodeTypeConfig,
+      updateActiveNodes
     ]
   );
 
   const handleSave = async () => {
-    const view_json = buildViewJson(nodes, edges, canvasBase, zoom);
-    const dsl_json = buildDslJson(nodes, edges);
+    const view_json = editorGraph;
+    const dsl_json = buildDslFromGraph(editorGraph);
     const updatedAt = new Date().toISOString();
 
     if (isNewWorkflow) {
@@ -1636,8 +2061,73 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     publishMutation.mutate();
   };
 
+  const handleEnterRepeatBody = useCallback(
+    (nodeId: string) => {
+      const targetNode = nodes.find((node) => node.id === nodeId);
+      if (!targetNode) return;
+      updateActiveNodes((prev) =>
+        prev.map((node) => {
+          if (node.id !== nodeId || !isRepeatNode(node)) return node;
+          if (node.body) return node;
+          return { ...node, body: createEmptyGraph() };
+        })
+      );
+      setEditorContextStack((prev) =>
+        pushRepeatContext(prev, nodeId, targetNode.name)
+      );
+    },
+    [nodes, updateActiveNodes]
+  );
+
+  const handleEnterParallelBranches = useCallback(
+    (nodeId: string, branchIndex = 0) => {
+      const targetNode = nodes.find((node) => node.id === nodeId);
+      if (!targetNode) return;
+      updateActiveNodes((prev) =>
+        prev.map((node) => {
+          if (node.id !== nodeId || !isParallelNode(node)) return node;
+          const branches = node.branches ? [...node.branches] : [];
+          while (branches.length < 2) {
+            branches.push(createEmptyGraph());
+          }
+          return { ...node, branches };
+        })
+      );
+      setEditorContextStack((prev) =>
+        pushParallelBranchContext(prev, nodeId, targetNode.name, branchIndex)
+      );
+    },
+    [nodes, updateActiveNodes]
+  );
+
+  const handleSelectParallelBranch = useCallback(
+    (nodeId: string, branchIndex: number) => {
+      const targetNode = nodes.find((node) => node.id === nodeId);
+      if (!targetNode) return;
+      setEditorContextStack((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.kind === "branch" && last.nodeId === nodeId) {
+          return [...prev.slice(0, -1), createBranchContext(nodeId, branchIndex)];
+        }
+        if (last?.kind === "parallel" && last.nodeId === nodeId) {
+          return [...prev, createBranchContext(nodeId, branchIndex)];
+        }
+        return pushParallelBranchContext(prev, nodeId, targetNode.name, branchIndex);
+      });
+    },
+    [nodes]
+  );
+
+  const handleBackContext = useCallback(() => {
+    setEditorContextStack((prev) => popContext(prev));
+  }, []);
+
+  const handleBreadcrumbSelect = useCallback((index: number) => {
+    setEditorContextStack((prev) => navigateToContextIndex(prev, index));
+  }, []);
+
   const handleToggleExpand = (nodeId: string) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) => {
         if (node.id !== nodeId) return node;
         const nextExpanded = !node.isExpanded;
@@ -1658,7 +2148,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleParamChange = (nodeId: string, key: string, value: string) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) =>
         node.id === nodeId
           ? (() => {
@@ -1675,7 +2165,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     expressionId: string,
     value: string
   ) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) => {
         if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
         const expressions = node.conditionExpressions ?? [
@@ -1696,7 +2186,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     nodeId: string,
     operator: ConditionOperator
   ) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) => {
         if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
         const baseExpressions = normalizeConditionExpressions(
@@ -1725,7 +2215,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleRemoveConditionExpression = (nodeId: string, expressionId: string) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) => {
         if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
         const remaining = (node.conditionExpressions ?? []).filter(
@@ -1756,7 +2246,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     field: "name" | "value",
     value: string
   ) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) => {
         if (
           node.id !== nodeId ||
@@ -1774,7 +2264,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleAddVariableRow = (nodeId: string, valueType: VariableValueType) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) => {
         if (
           node.id !== nodeId ||
@@ -1810,7 +2300,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleRemoveVariableRow = (nodeId: string, rowId: string) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) => {
         if (
           node.id !== nodeId ||
@@ -1838,7 +2328,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleNameChange = (nodeId: string, value: string) => {
-    setNodes((prev) =>
+    updateActiveNodes((prev) =>
       prev.map((node) =>
         node.id === nodeId
           ? (() => {
@@ -1864,8 +2354,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const connectedEdgeIds = edges
       .filter((edge) => edge.from === nodeId || edge.to === nodeId)
       .map((edge) => edge.id);
-    setNodes((prev) => prev.filter((node) => node.id !== nodeId));
-    setEdges((prev) =>
+    updateActiveNodes((prev) => prev.filter((node) => node.id !== nodeId));
+    updateActiveEdges((prev) =>
       prev.filter((edge) => edge.from !== nodeId && edge.to !== nodeId)
     );
     setSelectedNode((prev) => (prev === nodeId ? null : prev));
@@ -1880,7 +2370,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleDeleteEdge = (edgeId: string) => {
-    setEdges((prev) => prev.filter((edge) => edge.id !== edgeId));
+    updateActiveEdges((prev) => prev.filter((edge) => edge.id !== edgeId));
     setSelectedEdgeId((prev) => (prev === edgeId ? null : prev));
     setHasUnsavedChanges(true);
   };
@@ -1987,12 +2477,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         });
       });
 
-    setCanvasBase((prev) => ({
+    updateActiveCanvas((prev) => ({
+      ...prev,
       width: Math.max(prev.width, requiredWidth),
       height: Math.max(prev.height, requiredHeight)
     }));
 
-    setNodes((prev) => {
+    updateActiveNodes((prev) => {
       const next = prev.map((node) =>
         nextPositions.has(node.id)
           ? { ...node, position: nextPositions.get(node.id)! }
@@ -2015,7 +2506,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       if (incomingEdges.has(toNodeId)) return;
       if (outgoingEdges.has(`${fromNodeId}:${fromPort}`)) return;
 
-      setEdges((prev) => [
+      updateActiveEdges((prev) => [
         ...prev,
         {
           id: `edge-${nextEdgeIndex.current++}`,
@@ -2027,7 +2518,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setSelectedEdgeId(null);
       setHasUnsavedChanges(true);
     },
-    [incomingEdges, nodeMap, outgoingEdges]
+    [incomingEdges, nodeMap, outgoingEdges, updateActiveEdges, nodeTypeConfig]
   );
 
   const handleStartConnect = (nodeId: string, portKey: string) => {
@@ -2105,7 +2596,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     event.preventDefault();
     const rawKind = event.dataTransfer.getData("application/x-node-kind");
     if (!rawKind) return;
-    if (!nodeTypes.includes(rawKind as NodeKind)) return;
+    if (!allowedNodeKinds.includes(rawKind as NodeKind)) return;
     const point = getCanvasPoint(event.clientX, event.clientY);
     if (!point) return;
 
@@ -2260,6 +2751,33 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             )}
             <StatusBadge status="DRAFT" />
           </div>
+          <div className="mt-2 flex items-center gap-2">
+            {editorContextStack.length > 1 && (
+              <button
+                type="button"
+                onClick={handleBackContext}
+                className="cursor-pointer inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                title="Back"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                  className="h-3 w-3"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M10.5 19.5 3 12l7.5-7.5M3 12h18"
+                  />
+                </svg>
+                Back
+              </button>
+            )}
+            <Breadcrumbs contexts={editorContextStack} onSelect={handleBreadcrumbSelect} />
+          </div>
           {activeDraft && (
             <p className="text-xs text-slate-500">
               Draft mode · Publish creates an immutable version · Last updated{" "}
@@ -2283,71 +2801,92 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         </div>
       </div>
 
-      <div className="relative">
+      <div className="relative isolate rounded-xl bg-slate-50">
         <button
           type="button"
-          onClick={() => setShowPalette((prev) => !prev)}
-          className="cursor-pointer absolute left-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg"
+          disabled={!isPaletteEnabled}
+          onClick={() => {
+            if (!isPaletteEnabled) return;
+            setShowPalette((prev) => !prev);
+          }}
+          className={cn(
+            "absolute left-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-full shadow-lg",
+            isPaletteEnabled
+              ? "cursor-pointer bg-slate-900 text-white"
+              : "cursor-not-allowed bg-slate-300 text-white"
+          )}
         >
           +
         </button>
-        {showPalette && (
-          <div className="absolute left-16 top-4 z-10 flex rounded-lg border border-slate-200 bg-white shadow-lg">
+        {showPalette && isPaletteEnabled && (
+          <div className="absolute left-16 top-4 z-30 flex rounded-lg border border-slate-200 bg-white shadow-lg">
             <div className="w-32 border-r border-slate-200 p-3">
               <p className="text-[10px] font-semibold text-slate-500">Category</p>
               <div className="mt-2 space-y-1">
-                {NODE_CATEGORIES.map((category) => (
-                  <button
-                    key={category.id}
-                    type="button"
-                    onClick={() => setSelectedCategory(category.id)}
-                    className={cn(
-                      "cursor-pointer w-full rounded-md px-2 py-1 text-left text-xs",
-                      selectedCategory === category.id
-                        ? "bg-slate-900 text-white"
-                        : "text-slate-600 hover:bg-slate-100"
-                    )}
-                  >
-                    {category.label}
-                  </button>
-                ))}
+                {visibleCategories.length > 0 ? (
+                  visibleCategories.map((category) => (
+                    <button
+                      key={category.id}
+                      type="button"
+                      onClick={() => setSelectedCategory(category.id)}
+                      className={cn(
+                        "cursor-pointer w-full rounded-md px-2 py-1 text-left text-xs",
+                        selectedCategory === category.id
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      {category.label}
+                    </button>
+                  ))
+                ) : (
+                  <p className="text-[10px] text-slate-400">No categories</p>
+                )}
               </div>
             </div>
             <div className="w-72 p-3">
               <p className="text-xs font-semibold text-slate-700">
-                {NODE_CATEGORY_LABELS[selectedCategory]}
+                {visibleCategories.length > 0
+                  ? NODE_CATEGORY_LABELS[selectedCategory]
+                  : "No nodes available"}
               </p>
               <div className="mt-3 space-y-2">
-                {nodeTypesByCategory[selectedCategory].map((kind) => {
-                  const config = nodeTypeConfig[kind];
-                  return (
-                    <button
-                      key={kind}
-                      type="button"
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData("application/x-node-kind", kind);
-                        event.dataTransfer.effectAllowed = "copy";
-                      }}
-                      onClick={() => createNode(kind)}
-                      className="cursor-pointer flex w-full items-center gap-3 rounded-md border border-slate-200 px-2 py-2 text-left text-xs text-slate-700 hover:border-slate-300"
-                    >
-                      <div
-                        className={cn(
-                          "flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold",
-                          config.colorClass
-                        )}
+                {visibleCategories.length > 0 ? (
+                  nodeTypesByCategory[selectedCategory].map((kind) => {
+                    const config = nodeTypeConfig[kind];
+                    return (
+                      <button
+                        key={kind}
+                        type="button"
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData("application/x-node-kind", kind);
+                          event.dataTransfer.effectAllowed = "copy";
+                        }}
+                        onClick={() => createNode(kind)}
+                        className="cursor-pointer flex w-full items-center gap-3 rounded-md border border-slate-200 px-2 py-2 text-left text-xs text-slate-700 hover:border-slate-300"
                       >
-                        {config.iconText}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-semibold">{config.label}</p>
-                        <p className="text-[10px] text-slate-500">{kind}</p>
-                      </div>
-                      <span className="text-[10px] text-slate-400">Drag</span>
-                    </button>
-                  );
-                })}
+                        <div
+                          className={cn(
+                            "flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold",
+                            config.colorClass
+                          )}
+                        >
+                          {config.iconText}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-xs font-semibold">{config.label}</p>
+                          <p className="text-[10px] text-slate-500">{kind}</p>
+                        </div>
+                        <span className="text-[10px] text-slate-400">Drag</span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-[10px] text-slate-500">
+                    이 컨텍스트에서 추가 가능한 노드가 없습니다.
+                  </div>
+                )}
               </div>
               <p className="mt-3 text-[10px] text-slate-400">
                 Drag onto the canvas or click to add at center.
@@ -2356,291 +2895,352 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           </div>
         )}
 
-        <Card className="border-dashed min-w-0">
-          <div
-            ref={containerRef}
-            className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50"
-          >
-            <div
-              ref={scrollRef}
-              className="h-full w-full min-w-0 min-h-0 overflow-x-auto overflow-y-auto"
-            >
-              <div
-                className="relative min-w-full min-h-full"
-                style={{
-                  width: canvasBase.width * zoom,
-                  height: canvasBase.height * zoom
-                }}
-              >
-                <div
-                  ref={canvasRef}
-                  className="absolute inset-0"
-                  style={{
-                    width: canvasBase.width,
-                    height: canvasBase.height,
-                    transform: `scale(${zoom})`,
-                    transformOrigin: "top left"
-                  }}
-                  onDragOver={handleCanvasDragOver}
-                  onDrop={handleCanvasDrop}
-                  onClick={handleCanvasClick}
-                >
-                  <svg
-                    className="absolute inset-0"
-                    width={canvasBase.width}
-                    height={canvasBase.height}
-                    viewBox={`0 0 ${canvasBase.width} ${canvasBase.height}`}
-                    preserveAspectRatio="xMinYMin meet"
-                  >
-                    <defs>
-                      <marker
-                        id="arrow"
-                        markerWidth="10"
-                        markerHeight="10"
-                        refX="8"
-                        refY="5"
-                        orient="auto"
-                        markerUnits="strokeWidth"
+        <FocusModeEditor isActive={isFocusMode}>
+          {isFocusMode && focusModeLabel && (
+            <SubflowBanner label={focusModeLabel} onBack={handleBackContext} />
+          )}
+          <Card className="border-dashed min-w-0 bg-slate-50">
+            {isParallelOverview ? (
+              <div className="flex h-[560px] w-full items-center justify-center rounded-md bg-slate-50">
+                <div className="max-w-md space-y-4 text-center">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Select a branch to edit
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Parallel branches share the same focus editor.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {parallelBranches.map((_, index) => (
+                      <button
+                        key={`branch-${index}`}
+                        type="button"
+                        className="cursor-pointer rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:border-slate-300 hover:text-slate-900"
+                        onClick={() => {
+                          if (parallelContext?.kind === "parallel") {
+                            handleSelectParallelBranch(parallelContext.nodeId, index);
+                          }
+                        }}
                       >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
-                      </marker>
-                      <marker
-                        id="arrow-true"
-                        markerWidth="10"
-                        markerHeight="10"
-                        refX="8"
-                        refY="5"
-                        orient="auto"
-                        markerUnits="strokeWidth"
-                      >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
-                      </marker>
-                      <marker
-                        id="arrow-false"
-                        markerWidth="10"
-                        markerHeight="10"
-                        refX="8"
-                        refY="5"
-                        orient="auto"
-                        markerUnits="strokeWidth"
-                      >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" />
-                      </marker>
-                    </defs>
-                    {edgesToRender.map((edge) => {
-                      const fromNode = nodeMap.get(edge.from);
-                      const toNode = nodeMap.get(edge.to);
-                      if (!fromNode || !toNode) return null;
-                      const fromConfig = nodeTypeConfig[fromNode.kind];
-                      if (!fromConfig) return null;
-                      const outputs = fromConfig.outputs;
-                      const outputIndex = outputs.findIndex(
-                        (output) => output.key === edge.fromPort
-                      );
-                      if (outputIndex < 0) return null;
-                      const outputOffsets = getPortOffsets(
-                        getNodeHeight(fromNode, nodeTypeConfig),
-                        outputs.length
-                      );
-                      const start = {
-                        x: fromNode.position.x + NODE_METRICS.width,
-                        y: fromNode.position.y + outputOffsets[outputIndex]
-                      };
-                      const end = {
-                        x: toNode.position.x,
-                        y: toNode.position.y + getNodeHeight(toNode, nodeTypeConfig) / 2
-                      };
-                      const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
-                      const controlX1 =
-                        start.x + (end.x >= start.x ? curve : -curve);
-                      const controlX2 =
-                        end.x + (end.x >= start.x ? -curve : curve);
-                      const path = `M ${start.x} ${start.y} C ${controlX1} ${start.y}, ${controlX2} ${end.y}, ${end.x} ${end.y}`;
-                      const isConditionNode = fromNode.kind === "flow_control.condition";
-                      const isTrueEdge = edge.fromPort === "true";
-                      const isFalseEdge = edge.fromPort === "false";
-                      let strokeColor = selectedEdgeId === edge.id ? "#0f172a" : "#94a3b8";
-                      let markerId = "arrow";
-                      
-                      if (isConditionNode && isTrueEdge) {
-                        strokeColor = selectedEdgeId === edge.id ? "#059669" : "#10b981";
-                        markerId = "arrow-true";
-                      } else if (isConditionNode && isFalseEdge) {
-                        strokeColor = selectedEdgeId === edge.id ? "#dc2626" : "#ef4444";
-                        markerId = "arrow-false";
-                      }
-                      
-                      return (
-                        <path
-                          key={edge.id}
-                          d={path}
-                          stroke={strokeColor}
-                          strokeWidth={selectedEdgeId === edge.id ? "2.5" : "2"}
-                          fill="none"
-                          markerEnd={`url(#${markerId})`}
-                          className="cursor-pointer"
-                          style={{ pointerEvents: "stroke" }}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSelectedEdgeId(edge.id);
-                            setSelectedNode(null);
-                            setEditingNodeId(null);
-                          }}
-                        />
-                      );
-                    })}
-                  </svg>
-
-                  {nodes.map((node) => {
-                    const config = nodeTypeConfig[node.kind];
-                    if (!config) return null;
-                    const outputStates = config.outputs.map((output) => ({
-                      key: output.key,
-                      label: output.label,
-                      isConnected: outgoingEdges.has(`${node.id}:${output.key}`),
-                      isActive:
-                        connectingFrom?.nodeId === node.id &&
-                        connectingFrom.portKey === output.key
-                    }));
-                    const skillset = node.kind.startsWith("skill.")
-                      ? skillsetMap.get(node.kind)
-                      : undefined;
-                    return (
-                      <div
-                        key={node.id}
-                        className="absolute"
-                        style={{ left: node.position.x, top: node.position.y }}
-                      >
-                        <NodeCard
-                          node={node}
-                          config={config}
-                          isSelected={selectedNode === node.id}
-                          inputConnected={incomingEdges.has(node.id)}
-                          outputs={outputStates}
-                          nodeTypeConfig={nodeTypeConfig}
-                          skillset={skillset}
-                          onSelect={() => {
-                            setSelectedNode(node.id);
-                            setSelectedEdgeId(null);
-                            setEditingNodeId((prev) => (prev === node.id ? prev : null));
-                          }}
-                          onToggleExpand={() => handleToggleExpand(node.id)}
-                          onDragStart={(event) => {
-                            const point = getCanvasPoint(
-                              event.clientX,
-                              event.clientY
-                            );
-                            if (!point) return;
-                            const offsetX = point.x - node.position.x;
-                            const offsetY = point.y - node.position.y;
-                            setSelectedNode(node.id);
-                            setSelectedEdgeId(null);
-                            setEditingNodeId(null);
-                            setConnectingFrom(null);
-                            setDragState({
-                              nodeId: node.id,
-                              offsetX,
-                              offsetY,
-                              height: getNodeHeight(node, nodeTypeConfig)
-                            });
-                          }}
-                          onStartConnect={(portKey) =>
-                            handleStartConnect(node.id, portKey)
-                          }
-                          onCompleteConnect={() => handleCompleteConnect(node.id)}
-                          onParamChange={(key, value) =>
-                            handleParamChange(node.id, key, value)
-                          }
-                          onConditionExpressionChange={(expressionId, value) =>
-                            handleConditionExpressionChange(
-                              node.id,
-                              expressionId,
-                              value
-                            )
-                          }
-                          onAddConditionExpression={(operator) =>
-                            handleAddConditionExpression(node.id, operator)
-                          }
-                          onRemoveConditionExpression={(expressionId) =>
-                            handleRemoveConditionExpression(node.id, expressionId)
-                          }
-                          onVariableRowChange={(rowId, field, value) =>
-                            handleVariableRowChange(node.id, rowId, field, value)
-                          }
-                          onAddVariableRow={(valueType) =>
-                            handleAddVariableRow(node.id, valueType)
-                          }
-                          onRemoveVariableRow={(rowId) =>
-                            handleRemoveVariableRow(node.id, rowId)
-                          }
-                          onNameChange={(value) => handleNameChange(node.id, value)}
-                          isEditingName={editingNodeId === node.id}
-                          onStartEditName={() => handleStartEditName(node.id)}
-                          onFinishEditName={handleFinishEditName}
-                          onOutputDragStart={(event, portKey) =>
-                            handleOutputDragStart(event, node.id, portKey)
-                          }
-                          onOutputDragEnd={handleOutputDragEnd}
-                          onInputDragOver={handleInputDragOver}
-                          onInputDrop={(event) => handleInputDrop(event, node.id)}
-                        />
-                      </div>
-                    );
-                  })}
-
-                  {nodes.length === 0 && (
-                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-sm text-slate-400">
-                      <p>Drag a node here or click in the palette.</p>
-                      <p className="text-xs">
-                        Use output ports to connect nodes with arrows.
-                      </p>
-                    </div>
-                  )}
-
-                  {connectingFrom && (
-                    <div className="absolute bottom-4 left-4 rounded-full bg-slate-900 px-3 py-1 text-[10px] text-white shadow">
-                      Connecting: {connectingLabel ?? "Output"} -&gt; select target input.
-                    </div>
-                  )}
+                        Branch {index + 1}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
-              <button
-                type="button"
-                className="cursor-pointer rounded px-1 text-slate-600 hover:text-slate-900"
-                onClick={() =>
-                  setZoom((prev) =>
-                    clamp(prev - ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
-                  )
-                }
+            ) : (
+              <div
+                ref={containerRef}
+                className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50"
               >
-                -
-              </button>
-              <span className="min-w-[36px] text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                type="button"
-                className="cursor-pointer rounded px-1 text-slate-600 hover:text-slate-900"
-                onClick={() =>
-                  setZoom((prev) =>
-                    clamp(prev + ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
-                  )
-                }
-              >
-                +
-              </button>
-              <button
-                type="button"
-                className="cursor-pointer rounded px-1 text-slate-500 hover:text-slate-900"
-                onClick={() => setZoom(1)}
-              >
-                Reset
-              </button>
-            </div>
-          </div>
-        </Card>
+                {isFocusMode && focusModeLabel && (
+                  <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-sm backdrop-blur">
+                    Editing: {focusModeLabel}
+                  </div>
+                )}
+                <div
+                  ref={scrollRef}
+                  className="h-full w-full min-w-0 min-h-0 overflow-x-auto overflow-y-auto"
+                >
+                  <div
+                    className="relative min-w-full min-h-full"
+                    style={{
+                      width: canvasBase.width * zoom,
+                      height: canvasBase.height * zoom
+                    }}
+                  >
+                    <div
+                      ref={canvasRef}
+                      className="absolute inset-0"
+                      style={{
+                        width: canvasBase.width,
+                        height: canvasBase.height,
+                        transform: `scale(${zoom})`,
+                        transformOrigin: "top left"
+                      }}
+                      onDragOver={handleCanvasDragOver}
+                      onDrop={handleCanvasDrop}
+                      onClick={handleCanvasClick}
+                    >
+                      <svg
+                        className="absolute inset-0"
+                        width={canvasBase.width}
+                        height={canvasBase.height}
+                        viewBox={`0 0 ${canvasBase.width} ${canvasBase.height}`}
+                        preserveAspectRatio="xMinYMin meet"
+                      >
+                        <defs>
+                          <marker
+                            id="arrow"
+                            markerWidth="10"
+                            markerHeight="10"
+                            refX="8"
+                            refY="5"
+                            orient="auto"
+                            markerUnits="strokeWidth"
+                          >
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+                          </marker>
+                          <marker
+                            id="arrow-true"
+                            markerWidth="10"
+                            markerHeight="10"
+                            refX="8"
+                            refY="5"
+                            orient="auto"
+                            markerUnits="strokeWidth"
+                          >
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
+                          </marker>
+                          <marker
+                            id="arrow-false"
+                            markerWidth="10"
+                            markerHeight="10"
+                            refX="8"
+                            refY="5"
+                            orient="auto"
+                            markerUnits="strokeWidth"
+                          >
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" />
+                          </marker>
+                        </defs>
+                        {edgesToRender.map((edge) => {
+                          const fromNode = nodeMap.get(edge.from);
+                          const toNode = nodeMap.get(edge.to);
+                          if (!fromNode || !toNode) return null;
+                          const fromConfig = nodeTypeConfig[fromNode.kind];
+                          if (!fromConfig) return null;
+                          const outputs = fromConfig.outputs;
+                          const outputIndex = outputs.findIndex(
+                            (output) => output.key === edge.fromPort
+                          );
+                          if (outputIndex < 0) return null;
+                          const outputOffsets = getPortOffsets(
+                            getNodeHeight(fromNode, nodeTypeConfig),
+                            outputs.length
+                          );
+                          const start = {
+                            x: fromNode.position.x + NODE_METRICS.width,
+                            y: fromNode.position.y + outputOffsets[outputIndex]
+                          };
+                          const end = {
+                            x: toNode.position.x,
+                            y: toNode.position.y + getNodeHeight(toNode, nodeTypeConfig) / 2
+                          };
+                          const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
+                          const controlX1 =
+                            start.x + (end.x >= start.x ? curve : -curve);
+                          const controlX2 =
+                            end.x + (end.x >= start.x ? -curve : curve);
+                          const path = `M ${start.x} ${start.y} C ${controlX1} ${start.y}, ${controlX2} ${end.y}, ${end.x} ${end.y}`;
+                          const isConditionNode = fromNode.kind === "flow_control.condition";
+                          const isTrueEdge = edge.fromPort === "true";
+                          const isFalseEdge = edge.fromPort === "false";
+                          let strokeColor = selectedEdgeId === edge.id ? "#0f172a" : "#94a3b8";
+                          let markerId = "arrow";
+                          
+                          if (isConditionNode && isTrueEdge) {
+                            strokeColor = selectedEdgeId === edge.id ? "#059669" : "#10b981";
+                            markerId = "arrow-true";
+                          } else if (isConditionNode && isFalseEdge) {
+                            strokeColor = selectedEdgeId === edge.id ? "#dc2626" : "#ef4444";
+                            markerId = "arrow-false";
+                          }
+                          
+                          return (
+                            <path
+                              key={edge.id}
+                              d={path}
+                              stroke={strokeColor}
+                              strokeWidth={selectedEdgeId === edge.id ? "2.5" : "2"}
+                              fill="none"
+                              markerEnd={`url(#${markerId})`}
+                              className="cursor-pointer"
+                              style={{ pointerEvents: "stroke" }}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setSelectedEdgeId(edge.id);
+                                setSelectedNode(null);
+                                setEditingNodeId(null);
+                              }}
+                            />
+                          );
+                        })}
+                      </svg>
+
+                      {nodes.map((node) => {
+                        const config = nodeTypeConfig[node.kind];
+                        if (!config) return null;
+                        const outputStates = config.outputs.map((output) => ({
+                          key: output.key,
+                          label: output.label,
+                          isConnected: outgoingEdges.has(`${node.id}:${output.key}`),
+                          isActive:
+                            connectingFrom?.nodeId === node.id &&
+                            connectingFrom.portKey === output.key
+                        }));
+                        const skillset = node.kind.startsWith("skill.")
+                          ? skillsetMap.get(node.kind)
+                          : undefined;
+                        const blockLabel = config.block?.editLabel;
+                        const onOpenSubEditor =
+                          config.block?.type === "repeat"
+                            ? () => handleEnterRepeatBody(node.id)
+                            : config.block?.type === "parallel"
+                              ? () => handleEnterParallelBranches(node.id)
+                              : undefined;
+                        const hasError = validationMeta.errorNodeIds.has(node.id);
+                        const hasNestedError = validationMeta.nestedBlockIds.has(node.id);
+                        return (
+                          <div
+                            key={node.id}
+                            className="absolute"
+                            style={{ left: node.position.x, top: node.position.y }}
+                          >
+                            <NodeCard
+                              node={node}
+                              config={config}
+                              isSelected={selectedNode === node.id}
+                              inputConnected={incomingEdges.has(node.id)}
+                              outputs={outputStates}
+                              nodeTypeConfig={nodeTypeConfig}
+                              skillset={skillset}
+                              onSelect={() => {
+                                setSelectedNode(node.id);
+                                setSelectedEdgeId(null);
+                                setEditingNodeId((prev) => (prev === node.id ? prev : null));
+                              }}
+                              onToggleExpand={() => handleToggleExpand(node.id)}
+                              onDragStart={(event) => {
+                                const point = getCanvasPoint(
+                                  event.clientX,
+                                  event.clientY
+                                );
+                                if (!point) return;
+                                const offsetX = point.x - node.position.x;
+                                const offsetY = point.y - node.position.y;
+                                setSelectedNode(node.id);
+                                setSelectedEdgeId(null);
+                                setEditingNodeId(null);
+                                setConnectingFrom(null);
+                                setDragState({
+                                  nodeId: node.id,
+                                  offsetX,
+                                  offsetY,
+                                  height: getNodeHeight(node, nodeTypeConfig)
+                                });
+                              }}
+                              onStartConnect={(portKey) =>
+                                handleStartConnect(node.id, portKey)
+                              }
+                              onCompleteConnect={() => handleCompleteConnect(node.id)}
+                              onParamChange={(key, value) =>
+                                handleParamChange(node.id, key, value)
+                              }
+                              onConditionExpressionChange={(expressionId, value) =>
+                                handleConditionExpressionChange(
+                                  node.id,
+                                  expressionId,
+                                  value
+                                )
+                              }
+                              onAddConditionExpression={(operator) =>
+                                handleAddConditionExpression(node.id, operator)
+                              }
+                              onRemoveConditionExpression={(expressionId) =>
+                                handleRemoveConditionExpression(node.id, expressionId)
+                              }
+                              onVariableRowChange={(rowId, field, value) =>
+                                handleVariableRowChange(node.id, rowId, field, value)
+                              }
+                              onAddVariableRow={(valueType) =>
+                                handleAddVariableRow(node.id, valueType)
+                              }
+                              onRemoveVariableRow={(rowId) =>
+                                handleRemoveVariableRow(node.id, rowId)
+                              }
+                              onNameChange={(value) => handleNameChange(node.id, value)}
+                              isEditingName={editingNodeId === node.id}
+                              onStartEditName={() => handleStartEditName(node.id)}
+                              onFinishEditName={handleFinishEditName}
+                              onOutputDragStart={(event, portKey) =>
+                                handleOutputDragStart(event, node.id, portKey)
+                              }
+                              onOutputDragEnd={handleOutputDragEnd}
+                              onInputDragOver={handleInputDragOver}
+                              onInputDrop={(event) => handleInputDrop(event, node.id)}
+                              blockLabel={blockLabel}
+                              onOpenSubEditor={onOpenSubEditor}
+                              hasError={hasError}
+                              hasNestedError={hasNestedError}
+                            />
+                          </div>
+                        );
+                      })}
+
+                      {nodes.length === 0 && (
+                        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-sm text-slate-400">
+                          <p>Drag a node here or click in the palette.</p>
+                          <p className="text-xs">
+                            Use output ports to connect nodes with arrows.
+                          </p>
+                        </div>
+                      )}
+
+                      {connectingFrom && (
+                        <div className="absolute bottom-4 left-4 rounded-full bg-slate-900 px-3 py-1 text-[10px] text-white shadow">
+                          Connecting: {connectingLabel ?? "Output"} -&gt; select target input.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded px-1 text-slate-600 hover:text-slate-900"
+                    onClick={() =>
+                      updateActiveCanvas((prev) => ({
+                        ...prev,
+                        zoom: clamp(prev.zoom - ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
+                      }))
+                    }
+                  >
+                    -
+                  </button>
+                  <span className="min-w-[36px] text-center">
+                    {Math.round(zoom * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded px-1 text-slate-600 hover:text-slate-900"
+                    onClick={() =>
+                      updateActiveCanvas((prev) => ({
+                        ...prev,
+                        zoom: clamp(prev.zoom + ZOOM_LIMITS.step, ZOOM_LIMITS.min, ZOOM_LIMITS.max)
+                      }))
+                    }
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded px-1 text-slate-500 hover:text-slate-900"
+                    onClick={() =>
+                      updateActiveCanvas((prev) => ({
+                        ...prev,
+                        zoom: 1
+                      }))
+                    }
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            )}
+          </Card>
+        </FocusModeEditor>
       </div>
 
       {hasErrors && (
@@ -2656,15 +3256,20 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             <div className="mt-3 w-72 rounded-lg border border-red-200 bg-white p-3 text-xs text-slate-700 shadow-lg">
               <p className="font-semibold text-red-600">Errors</p>
               <ul className="mt-2 space-y-2">
-                {validationErrors.map((error: ValidationError, index) => (
-                  <li key={`${error.id}-${index}`}>
+                {validationMeta.entries.map((entry, index) => (
+                  <li key={`${entry.error.id}-${index}`} className="space-y-1">
                     <button
                       type="button"
-                      onClick={() => setSelectedNode(error.nodeId ?? null)}
+                      onClick={() => handleSelectValidationEntry(entry)}
                       className="cursor-pointer text-left text-slate-700 hover:text-slate-900"
                     >
-                      {error.message}
+                      {entry.error.message}
                     </button>
+                    {entry.pathLabel && (
+                      <p className="text-[10px] text-slate-400">
+                        {entry.pathLabel}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
