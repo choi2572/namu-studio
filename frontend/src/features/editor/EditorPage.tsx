@@ -2801,7 +2801,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         </div>
       </div>
 
-      <div className="relative isolate">
+      <div className="relative isolate rounded-xl bg-slate-50">
         <button
           type="button"
           disabled={!isPaletteEnabled}

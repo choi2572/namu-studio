@@ -7,7 +7,7 @@ type SubflowBannerProps = {
 
 export function SubflowBanner({ label, onBack }: SubflowBannerProps) {
   return (
-    <div className="sticky top-0 z-20 mb-3 ml-16 mr-4 flex items-center gap-3 rounded-xl border border-slate-900/80 bg-slate-900/90 px-4 py-3 text-base font-semibold text-white shadow-sm backdrop-blur">
+    <div className="sticky top-0 z-20 mb-3 mt-16 mx-4 flex items-center gap-3 rounded-xl border border-slate-900/80 bg-slate-900/90 px-4 py-3 text-base font-semibold text-white shadow-sm backdrop-blur">
       <button
         type="button"
         onClick={onBack}

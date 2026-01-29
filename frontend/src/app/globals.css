@@ -20,7 +20,7 @@ body {
 }
 
 .focus-mode-overlay {
-  @apply pointer-events-none absolute inset-0 rounded-xl bg-slate-900/10;
+  @apply pointer-events-none absolute inset-0 rounded-xl bg-slate-900/5;
 }
 
 .focus-mode-frame {
