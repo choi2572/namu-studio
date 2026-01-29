@@ -2794,7 +2794,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         </div>
       </div>
 
-      <div className="relative">
+      <div className="relative isolate">
         <button
           type="button"
           disabled={!isPaletteEnabled}
@@ -2803,7 +2803,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             setShowPalette((prev) => !prev);
           }}
           className={cn(
-            "absolute left-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full shadow-lg",
+            "absolute left-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-full shadow-lg",
             isPaletteEnabled
               ? "cursor-pointer bg-slate-900 text-white"
               : "cursor-not-allowed bg-slate-300 text-white"
@@ -2812,7 +2812,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           +
         </button>
         {showPalette && isPaletteEnabled && (
-          <div className="absolute left-16 top-4 z-10 flex rounded-lg border border-slate-200 bg-white shadow-lg">
+          <div className="absolute left-16 top-4 z-30 flex rounded-lg border border-slate-200 bg-white shadow-lg">
             <div className="w-32 border-r border-slate-200 p-3">
               <p className="text-[10px] font-semibold text-slate-500">Category</p>
               <div className="mt-2 space-y-1">
