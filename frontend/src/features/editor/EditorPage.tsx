@@ -2899,7 +2899,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           {isFocusMode && focusModeLabel && (
             <SubflowBanner label={focusModeLabel} onBack={handleBackContext} />
           )}
-          <Card className="border-dashed min-w-0">
+          <Card className="border-dashed min-w-0 bg-slate-50">
             {isParallelOverview ? (
               <div className="flex h-[560px] w-full items-center justify-center rounded-md bg-slate-50">
                 <div className="max-w-md space-y-4 text-center">
