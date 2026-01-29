@@ -11,7 +11,7 @@ type BreadcrumbsProps = {
 
 export function Breadcrumbs({ contexts, onSelect }: BreadcrumbsProps) {
   return (
-    <nav className="flex flex-wrap items-center gap-1 text-sm font-semibold text-slate-600">
+    <nav className="flex flex-wrap items-center gap-1 text-base font-semibold text-slate-600">
       {contexts.map((context, index) => {
         const isLast = index === contexts.length - 1;
         return (
@@ -21,7 +21,7 @@ export function Breadcrumbs({ contexts, onSelect }: BreadcrumbsProps) {
               onClick={() => onSelect(index)}
               disabled={isLast}
               className={cn(
-                "cursor-pointer rounded-md px-2 py-1 transition-colors",
+                "cursor-pointer rounded-md px-2 py-1 transition-colors hover:underline",
                 isLast
                   ? "text-slate-900"
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"

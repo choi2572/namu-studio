@@ -2935,7 +2935,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50"
               >
                 {isFocusMode && focusModeLabel && (
-                  <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-full border border-indigo-200 bg-white/90 px-3 py-1 text-[11px] font-semibold text-indigo-700 shadow-sm backdrop-blur">
+                  <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-sm backdrop-blur">
                     Editing: {focusModeLabel}
                   </div>
                 )}
