@@ -1487,7 +1487,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     () => getAllowedNodeKinds(editorContextStack, nodeTypes, nodeTypeConfig),
     [editorContextStack, nodeTypes, nodeTypeConfig]
   );
-  const isPaletteEnabled = editorScope !== "parallelOverview" && allowedNodeKinds.length > 0;
+  const isPaletteEnabled = editorScope !== "parallelOverview";
   const isParallelOverview = editorScope === "parallelOverview";
   const parallelContext = editorContextStack[editorContextStack.length - 1];
   const parallelNode =
@@ -1811,10 +1811,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [selectedCategory, visibleCategories]);
 
   useEffect(() => {
-    if (editorScope === "parallelOverview" || allowedNodeKinds.length === 0) {
+    if (editorScope === "parallelOverview") {
       setShowPalette(false);
     }
-  }, [allowedNodeKinds.length, editorScope]);
+  }, [editorScope]);
 
   const incomingEdges = useMemo(() => {
     const map = new Map<string, EditorEdge>();
@@ -2816,58 +2816,70 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             <div className="w-32 border-r border-slate-200 p-3">
               <p className="text-[10px] font-semibold text-slate-500">Category</p>
               <div className="mt-2 space-y-1">
-                {visibleCategories.map((category) => (
-                  <button
-                    key={category.id}
-                    type="button"
-                    onClick={() => setSelectedCategory(category.id)}
-                    className={cn(
-                      "cursor-pointer w-full rounded-md px-2 py-1 text-left text-xs",
-                      selectedCategory === category.id
-                        ? "bg-slate-900 text-white"
-                        : "text-slate-600 hover:bg-slate-100"
-                    )}
-                  >
-                    {category.label}
-                  </button>
-                ))}
+                {visibleCategories.length > 0 ? (
+                  visibleCategories.map((category) => (
+                    <button
+                      key={category.id}
+                      type="button"
+                      onClick={() => setSelectedCategory(category.id)}
+                      className={cn(
+                        "cursor-pointer w-full rounded-md px-2 py-1 text-left text-xs",
+                        selectedCategory === category.id
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      {category.label}
+                    </button>
+                  ))
+                ) : (
+                  <p className="text-[10px] text-slate-400">No categories</p>
+                )}
               </div>
             </div>
             <div className="w-72 p-3">
               <p className="text-xs font-semibold text-slate-700">
-                {NODE_CATEGORY_LABELS[selectedCategory]}
+                {visibleCategories.length > 0
+                  ? NODE_CATEGORY_LABELS[selectedCategory]
+                  : "No nodes available"}
               </p>
               <div className="mt-3 space-y-2">
-                {nodeTypesByCategory[selectedCategory].map((kind) => {
-                  const config = nodeTypeConfig[kind];
-                  return (
-                    <button
-                      key={kind}
-                      type="button"
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData("application/x-node-kind", kind);
-                        event.dataTransfer.effectAllowed = "copy";
-                      }}
-                      onClick={() => createNode(kind)}
-                      className="cursor-pointer flex w-full items-center gap-3 rounded-md border border-slate-200 px-2 py-2 text-left text-xs text-slate-700 hover:border-slate-300"
-                    >
-                      <div
-                        className={cn(
-                          "flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold",
-                          config.colorClass
-                        )}
+                {visibleCategories.length > 0 ? (
+                  nodeTypesByCategory[selectedCategory].map((kind) => {
+                    const config = nodeTypeConfig[kind];
+                    return (
+                      <button
+                        key={kind}
+                        type="button"
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData("application/x-node-kind", kind);
+                          event.dataTransfer.effectAllowed = "copy";
+                        }}
+                        onClick={() => createNode(kind)}
+                        className="cursor-pointer flex w-full items-center gap-3 rounded-md border border-slate-200 px-2 py-2 text-left text-xs text-slate-700 hover:border-slate-300"
                       >
-                        {config.iconText}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-semibold">{config.label}</p>
-                        <p className="text-[10px] text-slate-500">{kind}</p>
-                      </div>
-                      <span className="text-[10px] text-slate-400">Drag</span>
-                    </button>
-                  );
-                })}
+                        <div
+                          className={cn(
+                            "flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold",
+                            config.colorClass
+                          )}
+                        >
+                          {config.iconText}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-xs font-semibold">{config.label}</p>
+                          <p className="text-[10px] text-slate-500">{kind}</p>
+                        </div>
+                        <span className="text-[10px] text-slate-400">Drag</span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-[10px] text-slate-500">
+                    이 컨텍스트에서 추가 가능한 노드가 없습니다.
+                  </div>
+                )}
               </div>
               <p className="mt-3 text-[10px] text-slate-400">
                 Drag onto the canvas or click to add at center.
