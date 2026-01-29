@@ -2493,7 +2493,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         x: targetNode.position.x + NODE_METRICS.width / 2,
         y: targetNode.position.y + nodeHeight / 2
       };
-      const containerNodes = allNodes.filter(isContainerNode);
+      const containerNodes = allNodes.filter(
+        (node) => isContainerNode(node) && node.isExpanded
+      );
       for (const containerNode of containerNodes) {
         const layout = getContainerFrameLayout(containerNode, nodeTypeConfig);
         if (!layout) continue;
