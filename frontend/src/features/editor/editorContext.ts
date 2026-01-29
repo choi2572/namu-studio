@@ -38,6 +38,15 @@ export function formatBranchLabel(index: number) {
   return `Branch:${index + 1}`;
 }
 
+function normalizeLabel(label: string) {
+  return label.replace(":", " ");
+}
+
+export function formatContextLabel(context: EditorContext) {
+  if (context.kind === "root") return context.label;
+  return normalizeLabel(context.label);
+}
+
 export function createRootContext(name: string): EditorContext {
   return { kind: "root", label: formatWorkflowLabel(name) };
 }
@@ -144,4 +153,9 @@ export function getAllowedNodeKinds(
     });
   }
   return nodeTypes;
+}
+
+export function getFocusModeLabel(stack: EditorContext[]): string | null {
+  if (stack.length <= 1) return null;
+  return stack.slice(1).map(formatContextLabel).join(" / ");
 }
