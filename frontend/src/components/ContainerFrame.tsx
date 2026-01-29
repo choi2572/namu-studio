@@ -76,7 +76,7 @@ export function ContainerFrame({
       {dividerPositions.map((offset) => (
         <div
           key={`divider-${offset}`}
-          className="absolute top-0 bottom-0 w-px bg-slate-200"
+          className="absolute top-0 bottom-0 w-[2px] bg-slate-400/70"
           style={{ left: offset, top: headerHeight }}
         />
       ))}

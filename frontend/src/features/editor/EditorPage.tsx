@@ -1135,17 +1135,25 @@ function layoutNodesInRegion(
   nodes: EditorNode[],
   edges: EditorEdge[],
   region: ContainerFrameRegion,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
+  direction: "vertical" | "horizontal"
 ) {
   const positions = new Map<string, { x: number; y: number }>();
   const ordered = getTopologicalOrder(nodes, edges);
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   let yCursor = region.bounds.y + CONTAINER_LAYOUT.padding;
-  const x = region.bounds.x + CONTAINER_LAYOUT.padding;
+  let xCursor = region.bounds.x + CONTAINER_LAYOUT.padding;
+  const anchorY = yCursor;
+  const anchorX = xCursor;
   ordered.forEach((id) => {
     const node = nodeMap.get(id);
     if (!node) return;
-    positions.set(id, { x, y: yCursor });
+    if (direction === "horizontal") {
+      positions.set(id, { x: xCursor, y: anchorY });
+      xCursor += NODE_METRICS.width + CONTAINER_LAYOUT.columnGap;
+      return;
+    }
+    positions.set(id, { x: anchorX, y: yCursor });
     yCursor += getNodeHeight(node, nodeTypeConfig) + CONTAINER_LAYOUT.rowGap;
   });
   return positions;
@@ -1176,13 +1184,22 @@ function expandContainerFrameForNodes(
           branchCount * CONTAINER_FRAME_DEFAULTS.branchWidth
         )
       : CONTAINER_FRAME_DEFAULTS.width;
-  const requiredHeight =
+  let requiredWidth = baseWidth;
+  let requiredHeight =
     CONTAINER_FRAME_METRICS.headerHeight +
     CONTAINER_FRAME_METRICS.padding * 2 +
     maxNodes * (NODE_METRICS.collapsedHeight + CONTAINER_LAYOUT.rowGap) -
     CONTAINER_LAYOUT.rowGap;
+  if (containerType === "parallel") {
+    const perBranchWidth =
+      CONTAINER_FRAME_METRICS.padding * 2 +
+      maxNodes * (NODE_METRICS.width + CONTAINER_LAYOUT.columnGap) -
+      CONTAINER_LAYOUT.columnGap;
+    requiredWidth = perBranchWidth * branchCount + CONTAINER_FRAME_METRICS.padding * 2;
+    requiredHeight = Math.max(requiredHeight, CONTAINER_FRAME_METRICS.minHeight);
+  }
   const nextFrame: ContainerFrameData = {
-    width: Math.max(baseWidth, CONTAINER_FRAME_METRICS.minWidth),
+    width: Math.max(requiredWidth, CONTAINER_FRAME_METRICS.minWidth),
     height: Math.max(requiredHeight, CONTAINER_FRAME_METRICS.minHeight),
     ...(containerType === "parallel" ? { branchCount } : {})
   };
@@ -1234,7 +1251,13 @@ function applyImportedLayout(
       const bodyEdges = edges.filter(
         (edge) => bodyNodeIds.has(edge.from) && bodyNodeIds.has(edge.to)
       );
-      const positions = layoutNodesInRegion(bodyNodes, bodyEdges, layout.regions[0], nodeTypeConfig);
+      const positions = layoutNodesInRegion(
+        bodyNodes,
+        bodyEdges,
+        layout.regions[0],
+        nodeTypeConfig,
+        "vertical"
+      );
       nextNodes = nextNodes.map((node) =>
         positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node
       );
@@ -1250,7 +1273,13 @@ function applyImportedLayout(
       const branchEdges = edges.filter(
         (edge) => branchNodeIds.has(edge.from) && branchNodeIds.has(edge.to)
       );
-      const positions = layoutNodesInRegion(branchNodes, branchEdges, region, nodeTypeConfig);
+      const positions = layoutNodesInRegion(
+        branchNodes,
+        branchEdges,
+        region,
+        nodeTypeConfig,
+        "horizontal"
+      );
       nextNodes = nextNodes.map((node) =>
         positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node
       );
@@ -2289,6 +2318,19 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
   }, [getViewportCanvasSize]);
 
+  useEffect(() => {
+    if (nodes.length === 0) return;
+    const required = getCanvasSizeForNodes(nodes, nodeTypeConfig);
+    setCanvasBase((prev) => {
+      const nextWidth = Math.max(prev.width, required.width);
+      const nextHeight = Math.max(prev.height, required.height);
+      if (nextWidth === prev.width && nextHeight === prev.height) {
+        return prev;
+      }
+      return { width: nextWidth, height: nextHeight };
+    });
+  }, [nodes, nodeTypeConfig]);
+
   const { data: validationErrors = [] } = useQuery({
     queryKey: ["workflow-validation", workflowId],
     queryFn: () => workflowsApi.validateDraft(workflowId),
@@ -2583,50 +2625,83 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
       const nextX = point.x - dragState.offsetX;
       const nextY = point.y - dragState.offsetY;
-      const { minX, minY, maxX, maxY } = getCanvasBounds(
-        canvasBase,
-        dragState.height
-      );
 
-    setNodes((prev) => {
-      const target = prev.find((node) => node.id === dragState.nodeId);
-      if (!target) return prev;
-      const nextPosition = {
-        x: clamp(nextX, minX, maxX),
-        y: clamp(nextY, minY, maxY)
-      };
-      const delta = {
-        x: nextPosition.x - target.position.x,
-        y: nextPosition.y - target.position.y
-      };
-      if (delta.x === 0 && delta.y === 0) return prev;
-      if (isContainerNode(target)) {
-        return prev.map((node) => {
-          if (node.id === target.id) {
-            return { ...node, position: nextPosition };
+      setNodes((prev) => {
+        const target = prev.find((node) => node.id === dragState.nodeId);
+        if (!target) return prev;
+        const candidatePosition = { x: nextX, y: nextY };
+        let requiredWidth = Math.max(
+          canvasBase.width,
+          candidatePosition.x + NODE_METRICS.width + CANVAS_PADDING.x
+        );
+        let requiredHeight = Math.max(
+          canvasBase.height,
+          candidatePosition.y + dragState.height + CANVAS_PADDING.y
+        );
+        if (isContainerNode(target)) {
+          const layout = getContainerFrameLayout(
+            { ...target, position: candidatePosition },
+            nodeTypeConfig
+          );
+          if (layout) {
+            requiredWidth = Math.max(
+              requiredWidth,
+              layout.frame.x + layout.frame.width + CANVAS_PADDING.x
+            );
+            requiredHeight = Math.max(
+              requiredHeight,
+              layout.frame.y + layout.frame.height + CANVAS_PADDING.y
+            );
           }
-          if (node.containerId === target.id) {
-            return {
-              ...node,
-              position: {
-                x: node.position.x + delta.x,
-                y: node.position.y + delta.y
-              }
-            };
-          }
-          return node;
-        });
-      }
-      return prev.map((node) =>
-        node.id === target.id ? { ...node, position: nextPosition } : node
-      );
-    });
+        }
+
+        if (requiredWidth > canvasBase.width || requiredHeight > canvasBase.height) {
+          setCanvasBase((base) => ({
+            width: Math.max(base.width, requiredWidth),
+            height: Math.max(base.height, requiredHeight)
+          }));
+        }
+
+        const { minX, minY, maxX, maxY } = getCanvasBounds(
+          { width: requiredWidth, height: requiredHeight },
+          dragState.height
+        );
+        const nextPosition = {
+          x: clamp(candidatePosition.x, minX, maxX),
+          y: clamp(candidatePosition.y, minY, maxY)
+        };
+        const delta = {
+          x: nextPosition.x - target.position.x,
+          y: nextPosition.y - target.position.y
+        };
+        if (delta.x === 0 && delta.y === 0) return prev;
+        if (isContainerNode(target)) {
+          return prev.map((node) => {
+            if (node.id === target.id) {
+              return { ...node, position: nextPosition };
+            }
+            if (node.containerId === target.id) {
+              return {
+                ...node,
+                position: {
+                  x: node.position.x + delta.x,
+                  y: node.position.y + delta.y
+                }
+              };
+            }
+            return node;
+          });
+        }
+        return prev.map((node) =>
+          node.id === target.id ? { ...node, position: nextPosition } : node
+        );
+      });
     };
 
-  const handlePointerUp = () => {
-    setDragState(null);
-    finalizeNodeDrag(dragState.nodeId);
-  };
+    const handlePointerUp = () => {
+      setDragState(null);
+      finalizeNodeDrag(dragState.nodeId);
+    };
 
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
@@ -2635,7 +2710,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       window.removeEventListener("pointerup", handlePointerUp);
       document.body.style.userSelect = previousUserSelect;
     };
-  }, [canvasBase.height, canvasBase.width, dragState, finalizeNodeDrag, getCanvasPoint]);
+  }, [
+    canvasBase.height,
+    canvasBase.width,
+    dragState,
+    finalizeNodeDrag,
+    getCanvasPoint,
+    nodeTypeConfig
+  ]);
 
   useEffect(() => {
     if (!resizeState) return;
@@ -2654,14 +2736,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         if (!layout) return prev;
         const frameX = layout.frame.x;
         const frameY = layout.frame.y;
-        const maxWidth = Math.max(
-          CONTAINER_FRAME_METRICS.minWidth,
-          canvasBase.width - frameX - CANVAS_PADDING.x
-        );
-        const maxHeight = Math.max(
-          CONTAINER_FRAME_METRICS.minHeight,
-          canvasBase.height - frameY - CANVAS_PADDING.y
-        );
         let nextWidth = resizeState.startWidth;
         let nextHeight = resizeState.startHeight;
         if (resizeState.handle === "e" || resizeState.handle === "se") {
@@ -2670,12 +2744,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         if (resizeState.handle === "s" || resizeState.handle === "se") {
           nextHeight += deltaY;
         }
-        nextWidth = clamp(nextWidth, CONTAINER_FRAME_METRICS.minWidth, maxWidth);
-        nextHeight = clamp(
-          nextHeight,
-          CONTAINER_FRAME_METRICS.minHeight,
-          maxHeight
-        );
+        nextWidth = Math.max(nextWidth, CONTAINER_FRAME_METRICS.minWidth);
+        nextHeight = Math.max(nextHeight, CONTAINER_FRAME_METRICS.minHeight);
+        const requiredWidth = frameX + nextWidth + CANVAS_PADDING.x;
+        const requiredHeight = frameY + nextHeight + CANVAS_PADDING.y;
+        if (requiredWidth > canvasBase.width || requiredHeight > canvasBase.height) {
+          setCanvasBase((base) => ({
+            width: Math.max(base.width, requiredWidth),
+            height: Math.max(base.height, requiredHeight)
+          }));
+        }
         const containerType = getContainerType(target.kind);
         if (!containerType) return prev;
         const branchCount = getContainerBranchCount(target);
@@ -3742,8 +3820,23 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   onDrop={handleCanvasDrop}
                   onClick={handleCanvasClick}
                 >
+                  {containerFramesToRender.map((frame) => (
+                    <ContainerFrame
+                      key={frame.node.id}
+                      id={frame.node.id}
+                      label={frame.label}
+                      position={{ x: frame.frame.x, y: frame.frame.y }}
+                      size={{ width: frame.frame.width, height: frame.frame.height }}
+                      headerHeight={frame.headerHeight}
+                      regions={frame.regions}
+                      highlight={frame.highlight}
+                      onResizeStart={(handle, event) =>
+                        handleContainerResizeStart(frame.node.id, handle, event)
+                      }
+                    />
+                  ))}
                   <svg
-                    className="absolute inset-0"
+                    className="absolute inset-0 pointer-events-none"
                     width={canvasBase.width}
                     height={canvasBase.height}
                     viewBox={`0 0 ${canvasBase.width} ${canvasBase.height}`}
@@ -3847,22 +3940,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       );
                     })}
                   </svg>
-
-                  {containerFramesToRender.map((frame) => (
-                    <ContainerFrame
-                      key={frame.node.id}
-                      id={frame.node.id}
-                      label={frame.label}
-                      position={{ x: frame.frame.x, y: frame.frame.y }}
-                      size={{ width: frame.frame.width, height: frame.frame.height }}
-                      headerHeight={frame.headerHeight}
-                      regions={frame.regions}
-                      highlight={frame.highlight}
-                      onResizeStart={(handle, event) =>
-                        handleContainerResizeStart(frame.node.id, handle, event)
-                      }
-                    />
-                  ))}
 
                   {visibleNodes.map((node) => {
                     const config = nodeTypeConfig[node.kind];
