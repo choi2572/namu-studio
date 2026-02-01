@@ -11,8 +11,10 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { NodeStateSnapshot } from "@/api/interfaces";
 import { NodeStatus, RunEvent, RunStatus } from "@/domain/types";
 import { formatDuration } from "@/lib/format";
+import { pathIdToApiStateName } from "@/lib/ids";
 import { isRunTerminal } from "@/domain/types";
 import { SIMULATED_EVENTS_BY_RUN } from "@/features/monitor/simulatedEvents";
+import { buildMonitorGraph } from "@/features/monitor/monitorGraph";
 import { DagView } from "@/features/monitor/DagView";
 import { TimelineTable } from "@/features/monitor/TimelineTable";
 
@@ -65,18 +67,33 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   });
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
+  const debugStateName = useMemo(
+    () => (selectedNode ? pathIdToApiStateName(selectedNode) : ""),
+    [selectedNode]
+  );
+
   const { data: nodeDebug } = useQuery({
-    queryKey: ["node-debug", runId, selectedNode],
-    queryFn: () => runsApi.getNodeDebug(runId, selectedNode ?? ""),
-    enabled: Boolean(selectedNode)
+    queryKey: ["node-debug", runId, debugStateName],
+    queryFn: () => runsApi.getNodeDebug(runId, debugStateName),
+    enabled: Boolean(selectedNode && debugStateName)
   });
 
-  // Workflow draft 가져오기 (DSL에서 엣지 정보 추출용)
+  // Workflow draft 가져오기 (DSL에서 엣지 정보 추출용 + Monitor graph)
   const { data: workflowDraft } = useQuery({
     queryKey: ["workflow-draft", snapshot?.run.workflowId],
     queryFn: () => workflowsApi.getDraft(snapshot!.run.workflowId),
     enabled: Boolean(snapshot?.run.workflowId)
   });
+
+  const monitorGraph = useMemo(
+    () => buildMonitorGraph(workflowDraft?.dsl_json),
+    [workflowDraft?.dsl_json]
+  );
+
+  const stateNameToPathId = useMemo(
+    () => monitorGraph?.stateNameToPathId ?? new Map<string, string>(),
+    [monitorGraph]
+  );
 
   useEffect(() => {
     if (!snapshot) return;
@@ -160,10 +177,21 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const showCancel = runStatus === RunStatus.RUNNING && !isReplayMode;
   const showReplay = isTerminal || isReplayMode;
 
-  const selectedNodeState = useMemo(
-    () => nodeStates.find((node) => node.stateName === selectedNode),
-    [nodeStates, selectedNode]
-  );
+  const selectedNodeState = useMemo(() => {
+    if (!selectedNode) return null;
+    if (monitorGraph) {
+      const node = monitorGraph.nodes.find((n) => n.pathId === selectedNode);
+      if (!node) return null;
+      const snap = nodeStates.find((n) => n.stateName === node.apiStateName);
+      return {
+        stateName: node.apiStateName,
+        nodeName: node.nodeName,
+        status: snap?.status ?? NodeStatus.WAITING,
+        durationMs: snap?.durationMs ?? null
+      } as NodeStateSnapshot;
+    }
+    return allNodes.find((n) => n.stateName === selectedNode) ?? null;
+  }, [selectedNode, monitorGraph, nodeStates, allNodes]);
 
   // DSL에서 엣지 정보 추출
   const edges = useMemo(() => {
@@ -337,6 +365,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               edges={edges}
               runStatus={runStatus}
               viewJson={workflowDraft?.view_json}
+              monitorGraph={monitorGraph ?? undefined}
             />
           </div>
         </Card>
@@ -442,7 +471,9 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             <TimelineTable
               events={events}
               selectedNode={selectedNode}
-              onSelectNode={setSelectedNode}
+              onSelectNode={(stateName) =>
+                setSelectedNode(stateNameToPathId.get(stateName) ?? stateName)
+              }
               nodeStates={allNodes.map((n) => ({
                 stateName: n.stateName,
                 nodeName: n.nodeName
