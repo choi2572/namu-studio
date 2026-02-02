@@ -77,11 +77,6 @@ type VariableRow = {
   valueType: VariableValueType;
 };
 
-type NodeInputPort = {
-  key: string;
-  label: string;
-};
-
 type NodeTypeConfig = {
   label: string;
   category: NodeCategory;
@@ -89,8 +84,6 @@ type NodeTypeConfig = {
   colorClass: string;
   paramFields: NodeParamField[];
   outputs: NodeOutputPort[];
-  /** 입력 포트 목록. 비어 있거나 없으면 해당 노드는 입력 없음. 2개 이상이면 다중 입력 지원 */
-  inputs?: NodeInputPort[];
   inputEnabled?: boolean;
 };
 
@@ -114,8 +107,6 @@ type EditorEdge = {
   from: string;
   fromPort: string;
   to: string;
-  /** 입력 포트 키. 없으면 "input_0" (하위 호환) */
-  toPort?: string;
 };
 
 type EditorViewJson = {
@@ -184,10 +175,6 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
     outputs: [
       { key: "true", label: "True" },
       { key: "false", label: "False" }
-    ],
-    inputs: [
-      { key: "input_0", label: "In 1" },
-      { key: "input_1", label: "In 2" }
     ]
   },
   "flow_control.output": {
@@ -206,11 +193,7 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
     paramFields: [
       { key: "count", label: "Repeat Count", placeholder: "3" }
     ],
-    outputs: [{ key: "next", label: "Next" }],
-    inputs: [
-      { key: "input_0", label: "In 1" },
-      { key: "input_1", label: "In 2" }
-    ]
+    outputs: [{ key: "next", label: "Next" }]
   },
   "flow_control.parallel": {
     label: "Parallel",
@@ -218,11 +201,7 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
     iconText: "PA",
     colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
     paramFields: [],
-    outputs: [{ key: "next", label: "Next" }],
-    inputs: [
-      { key: "input_0", label: "In 1" },
-      { key: "input_1", label: "In 2" }
-    ]
+    outputs: [{ key: "next", label: "Next" }]
   },
   "event.webhook": {
     label: "Webhook",
@@ -233,11 +212,7 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
       { key: "url", label: "URL", placeholder: "https://hooks.example" },
       { key: "method", label: "Method", placeholder: "POST" }
     ],
-    outputs: [{ key: "next", label: "Next" }],
-    inputs: [
-      { key: "input_0", label: "In 1" },
-      { key: "input_1", label: "In 2" }
-    ]
+    outputs: [{ key: "next", label: "Next" }]
   }
 };
 
@@ -271,19 +246,13 @@ function createNodeTypeConfigFromSkillset(skillset: import("@/domain/types").Ski
   // Skill 노드는 transition 표현이므로 next 포트 하나만 사용
   const outputs: NodeOutputPort[] = [{ key: "next", label: "Next" }];
   
-  const inputs: NodeInputPort[] = [
-    { key: "input_0", label: "In 1" },
-    { key: "input_1", label: "In 2" }
-  ];
-
   return {
     label: skillName.replace(/([A-Z])/g, " $1").trim(),
     category: "skill",
     iconText,
     colorClass: colorClasses[colorIndex],
     paramFields,
-    outputs,
-    inputs
+    outputs
   };
 }
 
@@ -526,11 +495,6 @@ function getPortOffsets(nodeHeight: number, count: number) {
   return Array.from({ length: count }, (_, index) => gap * (index + 1));
 }
 
-/** 입력값이 $로 시작하면 변수 참조로 인식 (예: $.foo, $variable) */
-function looksLikeVariable(value: string): boolean {
-  return value.trim().startsWith("$");
-}
-
 function getCanvasBounds(
   canvasBase: { width: number; height: number },
   nodeHeight: number
@@ -551,13 +515,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isValidEditorEdge(value: unknown): value is EditorEdge {
   if (!isRecord(value)) return false;
-  const toPort = (value as EditorEdge).toPort;
   return (
     typeof value.id === "string" &&
     typeof value.from === "string" &&
     typeof value.fromPort === "string" &&
-    typeof value.to === "string" &&
-    (toPort === undefined || typeof toPort === "string")
+    typeof value.to === "string"
   );
 }
 
@@ -1476,8 +1438,7 @@ function parseDslToEditor(
             id: `edge-${edgeIndex++}`,
             from: fromId,
             fromPort: "true",
-            to: trueTarget,
-            toPort: "input_0"
+            to: trueTarget
           });
         }
         if (falseTarget) {
@@ -1485,8 +1446,7 @@ function parseDslToEditor(
             id: `edge-${edgeIndex++}`,
             from: fromId,
             fromPort: "false",
-            to: falseTarget,
-            toPort: "input_0"
+            to: falseTarget
           });
         }
       } else if (typeof state.Next === "string" && idByState.has(state.Next)) {
@@ -1494,8 +1454,7 @@ function parseDslToEditor(
           id: `edge-${edgeIndex++}`,
           from: fromId,
           fromPort: "next",
-          to: idByState.get(state.Next) as string,
-          toPort: "input_0"
+          to: idByState.get(state.Next) as string
         });
       }
     });
@@ -1550,7 +1509,7 @@ function NodeCard({
   node,
   config,
   isSelected,
-  inputs,
+  inputConnected,
   outputs,
   onSelect,
   onToggleExpand,
@@ -1579,11 +1538,7 @@ function NodeCard({
   node: EditorNode;
   config: NodeTypeConfig;
   isSelected: boolean;
-  inputs: Array<{
-    key: string;
-    label: string;
-    connected: boolean;
-  }>;
+  inputConnected: boolean;
   outputs: Array<{
     key: string;
     label: string;
@@ -1594,7 +1549,7 @@ function NodeCard({
   onToggleExpand: () => void;
   onDragStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onStartConnect: (portKey: string) => void;
-  onCompleteConnect: (portKey: string) => void;
+  onCompleteConnect: () => void;
   onParamChange: (key: string, value: string) => void;
   onConditionExpressionChange: (expressionId: string, value: string) => void;
   onAddConditionExpression: (operator: ConditionOperator) => void;
@@ -1609,13 +1564,12 @@ function NodeCard({
   onOutputDragStart: (event: DragEvent<HTMLButtonElement>, portKey: string) => void;
   onOutputDragEnd: () => void;
   onInputDragOver: (event: DragEvent<HTMLButtonElement>) => void;
-  onInputDrop: (event: DragEvent<HTMLButtonElement>, portKey: string) => void;
+  onInputDrop: (event: DragEvent<HTMLButtonElement>) => void;
   warningLabel?: string | null;
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
   skillset?: import("@/domain/types").Skillset;
 }) {
   const nodeHeight = getNodeHeight(node, nodeTypeConfig);
-  const inputOffsets = getPortOffsets(nodeHeight, inputs.length);
   const outputOffsets = getPortOffsets(nodeHeight, outputs.length);
   const conditionExpressions =
     node.kind === "flow_control.condition" ? node.conditionExpressions ?? [] : [];
@@ -1686,41 +1640,36 @@ function NodeCard({
           nodeTypeColors.indicator
         )}
       />
-      {inputs.map((input, index) => (
-        <div
-          key={input.key}
-          className="absolute left-0 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center z-10"
-          style={{ top: inputOffsets[index], transform: "translate(-50%, -50%)" }}
+      {config.inputEnabled !== false && (
+        <button
+          type="button"
+          className={cn(
+            "cursor-pointer absolute left-0 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
+            inputConnected ? "border-slate-400" : "border-slate-200"
+          )}
+          style={{ top: nodeHeight / 2 }}
+          title={inputConnected ? "Input connected" : "Input"}
+          onDragOver={(event) => {
+            event.stopPropagation();
+            onInputDragOver(event);
+          }}
+          onDrop={(event) => {
+            event.stopPropagation();
+            onInputDrop(event);
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onCompleteConnect();
+          }}
         >
-          <button
-            type="button"
+          <span
             className={cn(
-              "cursor-pointer flex h-4 w-4 items-center justify-center rounded-full border bg-white shadow-sm",
-              input.connected ? "border-slate-400" : "border-slate-200"
+              "h-2 w-2 rounded-full",
+              inputConnected ? "bg-slate-600" : "bg-slate-400"
             )}
-            title={input.connected ? `${input.label} connected` : input.label}
-            onDragOver={(event) => {
-              event.stopPropagation();
-              onInputDragOver(event);
-            }}
-            onDrop={(event) => {
-              event.stopPropagation();
-              onInputDrop(event, input.key);
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              onCompleteConnect(input.key);
-            }}
-          >
-            <span
-              className={cn(
-                "h-2 w-2 rounded-full",
-                input.connected ? "bg-slate-600" : "bg-slate-400"
-              )}
-            />
-          </button>
-        </div>
-      ))}
+          />
+        </button>
+      )}
 
       {outputs.map((output, index) => {
         // Output port 툴팁 내용 생성
@@ -1956,21 +1905,8 @@ function NodeCard({
                       onConditionExpressionChange(expression.id, combined);
                     }}
                     placeholder="value"
-                    className={cn(
-                      "flex-1 min-w-0 rounded-md border px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1",
-                      looksLikeVariable(valuePart)
-                        ? "border-cyan-300 bg-cyan-50/50 focus:border-cyan-400 focus:ring-cyan-300"
-                        : "border-slate-200 focus:border-slate-400 focus:ring-slate-300"
-                    )}
+                    className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                   />
-                  {looksLikeVariable(valuePart) && (
-                    <span
-                      className="flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium bg-cyan-100 text-cyan-700 border border-cyan-200"
-                      title="변수 참조 ($로 시작)"
-                    >
-                      $ 변수
-                    </span>
-                  )}
                   {index > 0 && (
                     <button
                       type="button"
@@ -2043,29 +1979,14 @@ function NodeCard({
                   placeholder="variable"
                   className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                 />
-                <div className="flex flex-1 items-center gap-1.5 min-w-0">
-                  <input
-                    value={row.value}
-                    onChange={(event) =>
-                      onVariableRowChange?.(row.id, "value", event.target.value)
-                    }
-                    placeholder={row.valueType}
-                    className={cn(
-                      "flex-1 min-w-0 rounded-md border px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1",
-                      looksLikeVariable(row.value)
-                        ? "border-cyan-300 bg-cyan-50/50 focus:border-cyan-400 focus:ring-cyan-300"
-                        : "border-slate-200 focus:border-slate-400 focus:ring-slate-300"
-                    )}
-                  />
-                  {looksLikeVariable(row.value) && (
-                    <span
-                      className="flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium bg-cyan-100 text-cyan-700 border border-cyan-200"
-                      title="변수 참조 ($로 시작)"
-                    >
-                      $ 변수
-                    </span>
-                  )}
-                </div>
+                <input
+                  value={row.value}
+                  onChange={(event) =>
+                    onVariableRowChange?.(row.id, "value", event.target.value)
+                  }
+                  placeholder={row.valueType}
+                  className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                />
                 {node.variableRows && node.variableRows.length > 0 && (
                   <button
                     type="button"
@@ -2142,36 +2063,17 @@ function NodeCard({
         node.kind !== "flow_control.output" &&
         config.paramFields.length > 0 && (
           <div className="mt-3 space-y-2 text-xs text-slate-600">
-            {config.paramFields.map((field) => {
-              const value = node.params[field.key] ?? "";
-              const isVariable = looksLikeVariable(value);
-              return (
-                <label key={field.key} className="block">
-                  <span className="text-[10px] text-slate-500">{field.label}</span>
-                  <div className="mt-1 flex items-center gap-2 min-w-0">
-                    <input
-                      value={value}
-                      onChange={(event) => onParamChange(field.key, event.target.value)}
-                      placeholder={field.placeholder}
-                      className={cn(
-                        "flex-1 min-w-0 rounded-md border px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-1",
-                        isVariable
-                          ? "border-cyan-300 bg-cyan-50/50 focus:border-cyan-400 focus:ring-cyan-300"
-                          : "border-slate-200 focus:border-slate-400 focus:ring-slate-300"
-                      )}
-                    />
-                    {isVariable && (
-                      <span
-                        className="flex-shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium bg-cyan-100 text-cyan-700 border border-cyan-200"
-                        title="변수 참조 ($로 시작)"
-                      >
-                        $ 변수
-                      </span>
-                    )}
-                  </div>
-                </label>
-              );
-            })}
+            {config.paramFields.map((field) => (
+              <label key={field.key} className="block">
+                <span className="text-[10px] text-slate-500">{field.label}</span>
+                <input
+                  value={node.params[field.key] ?? ""}
+                  onChange={(event) => onParamChange(field.key, event.target.value)}
+                  placeholder={field.placeholder}
+                  className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                />
+              </label>
+            ))}
           </div>
         )}
     </div>
@@ -2582,12 +2484,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [nodeTypes, nodeTypeConfig]);
 
   const incomingEdges = useMemo(() => {
-    const map = new Map<string, EditorEdge>();
-    validEdges.forEach((edge) => {
-      const key = `${edge.to}:${edge.toPort ?? "input_0"}`;
-      map.set(key, edge);
-    });
-    return map;
+    const set = new Set<string>();
+    validEdges.forEach((edge) => set.add(edge.to));
+    return set;
   }, [validEdges]);
 
   const outgoingEdges = useMemo(() => {
@@ -3502,17 +3401,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   );
 
   const connectNodes = useCallback(
-    (fromNodeId: string, fromPort: string, toNodeId: string, toPort: string = "input_0") => {
+    (fromNodeId: string, fromPort: string, toNodeId: string) => {
       if (fromNodeId === toNodeId) return;
       const fromNode = nodeMap.get(fromNodeId);
       const toNode = nodeMap.get(toNodeId);
       if (!fromNode || !toNode) return;
       const toConfig = nodeTypeConfig[toNode.kind];
-      const toInputs = toConfig?.inputs ?? (toConfig?.inputEnabled !== false ? [{ key: "input_0", label: "In 1" }, { key: "input_1", label: "In 2" }] : []);
-      if (toInputs.length === 0) return;
-      if (!toInputs.some((p) => p.key === toPort)) return;
-      const incomingKey = `${toNodeId}:${toPort}`;
-      if (incomingEdges.has(incomingKey)) return;
+      if (toConfig?.inputEnabled === false) return;
       if (outgoingEdges.has(`${fromNodeId}:${fromPort}`)) return;
       if (!isEdgeAllowed(fromNode, toNode)) {
         showEdgeError("Edges cannot cross container boundaries.");
@@ -3525,14 +3420,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           id: `edge-${nextEdgeIndex.current++}`,
           from: fromNodeId,
           fromPort,
-          to: toNodeId,
-          toPort
+          to: toNodeId
         }
       ]);
       setSelectedEdgeId(null);
       setHasUnsavedChanges(true);
     },
-    [incomingEdges, isEdgeAllowed, nodeMap, nodeTypeConfig, outgoingEdges, showEdgeError]
+    [isEdgeAllowed, nodeMap, nodeTypeConfig, outgoingEdges, showEdgeError]
   );
 
   const handleStartConnect = (nodeId: string, portKey: string) => {
@@ -3550,17 +3444,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setSelectedEdgeId(null);
   };
 
-  const handleCompleteConnect = (nodeId: string, toPort: string = "input_0") => {
+  const handleCompleteConnect = (nodeId: string) => {
     if (!connectingFrom || connectingFrom.nodeId === nodeId) {
       setConnectingFrom(null);
       return;
     }
-    const incomingKey = `${nodeId}:${toPort}`;
-    if (incomingEdges.has(incomingKey)) {
-      setConnectingFrom(null);
-      return;
-    }
-    connectNodes(connectingFrom.nodeId, connectingFrom.portKey, nodeId, toPort);
+    connectNodes(connectingFrom.nodeId, connectingFrom.portKey, nodeId);
     setConnectingFrom(null);
   };
 
@@ -3588,14 +3477,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     event.dataTransfer.dropEffect = "link";
   };
 
-  const handleInputDrop = (event: DragEvent<HTMLButtonElement>, nodeId: string, toPort: string = "input_0") => {
+  const handleInputDrop = (event: DragEvent<HTMLButtonElement>, nodeId: string) => {
     event.preventDefault();
     const raw = event.dataTransfer.getData("application/x-edge-from");
     if (!raw) return;
     try {
       const payload = JSON.parse(raw) as EdgeDragPayload;
       if (!payload.nodeId || !payload.portKey) return;
-      connectNodes(payload.nodeId, payload.portKey, nodeId, toPort);
+      connectNodes(payload.nodeId, payload.portKey, nodeId);
     } catch {
       return;
     }
@@ -3943,19 +3832,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   {visibleNodes.map((node) => {
                     const config = nodeTypeConfig[node.kind];
                     if (!config) return null;
-                    const nodeInputs =
-                      config.inputs ??
-                      (config.inputEnabled !== false
-                        ? [
-                            { key: "input_0", label: "In 1" },
-                            { key: "input_1", label: "In 2" }
-                          ]
-                        : []);
-                    const inputStates = nodeInputs.map((port) => ({
-                      key: port.key,
-                      label: port.label,
-                      connected: incomingEdges.has(`${node.id}:${port.key}`)
-                    }));
                     const outputStates = config.outputs.map((output) => ({
                       key: output.key,
                       label: output.label,
@@ -3977,7 +3853,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           node={node}
                           config={config}
                           isSelected={selectedNode === node.id}
-                          inputs={inputStates}
+                          inputConnected={incomingEdges.has(node.id)}
                           outputs={outputStates}
                           nodeTypeConfig={nodeTypeConfig}
                           skillset={skillset}
@@ -4010,9 +3886,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onStartConnect={(portKey) =>
                             handleStartConnect(node.id, portKey)
                           }
-                          onCompleteConnect={(portKey) =>
-                            handleCompleteConnect(node.id, portKey)
-                          }
+                          onCompleteConnect={() => handleCompleteConnect(node.id)}
                           onParamChange={(key, value) =>
                             handleParamChange(node.id, key, value)
                           }
@@ -4047,9 +3921,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           }
                           onOutputDragEnd={handleOutputDragEnd}
                           onInputDragOver={handleInputDragOver}
-                          onInputDrop={(event, portKey) =>
-                            handleInputDrop(event, node.id, portKey)
-                          }
+                          onInputDrop={(event) => handleInputDrop(event, node.id)}
                         />
                       </div>
                     );
@@ -4102,29 +3974,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       const toNode = nodeMap.get(edge.to);
                       if (!fromNode || !toNode) return null;
                       const fromConfig = nodeTypeConfig[fromNode.kind];
-                      const toConfig = nodeTypeConfig[toNode.kind];
                       if (!fromConfig) return null;
                       const outputs = fromConfig.outputs;
                       const outputIndex = outputs.findIndex(
                         (output) => output.key === edge.fromPort
                       );
                       if (outputIndex < 0) return null;
-                      const toInputs =
-                        toConfig?.inputs ??
-                        (toConfig?.inputEnabled !== false
-                          ? [
-                              { key: "input_0", label: "In 1" },
-                              { key: "input_1", label: "In 2" }
-                            ]
-                          : []);
-                      const toPortKey = edge.toPort ?? "input_0";
-                      const toInputIndex = toInputs.findIndex((p) => p.key === toPortKey);
                       const toNodeHeight = getNodeHeight(toNode, nodeTypeConfig);
-                      const toInputOffsets = getPortOffsets(toNodeHeight, toInputs.length);
-                      const toPortY =
-                        toInputIndex >= 0
-                          ? toNode.position.y + toInputOffsets[toInputIndex]
-                          : toNode.position.y + toNodeHeight / 2;
                       const outputOffsets = getPortOffsets(
                         getNodeHeight(fromNode, nodeTypeConfig),
                         outputs.length
@@ -4135,7 +3991,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       };
                       const end = {
                         x: toNode.position.x - 12,
-                        y: toPortY
+                        y: toNode.position.y + toNodeHeight / 2
                       };
                       const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
                       const controlX1 =
