@@ -53,7 +53,8 @@ export function buildStateNameMap(nodes: EditorNode[]): Map<string, string> {
 
 /**
  * Get all upstream node ids reachable from currentNodeId by following edges backward.
- * No scope filter: repeat/parallel inside can use variables from outer (already executed) nodes.
+ * If current node is inside a container (repeat/parallel), the container has no incoming edge
+ * from outside in the flat edges list, so we explicitly add the container and traverse from it.
  */
 function getAllUpstreamNodeIds(
   currentNodeId: string,
@@ -61,7 +62,8 @@ function getAllUpstreamNodeIds(
   edges: EditorEdge[]
 ): Set<string> {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  if (!nodeMap.has(currentNodeId)) return new Set();
+  const current = nodeMap.get(currentNodeId);
+  if (!current) return new Set();
 
   const incomingByTo = new Map<string, EditorEdge[]>();
   edges.forEach((edge) => {
@@ -82,13 +84,18 @@ function getAllUpstreamNodeIds(
     });
   };
   visit(currentNodeId);
+  // Inside repeat/parallel there is no edge from container to first body node in the flat list
+  if (current.containerId && !upstream.has(current.containerId)) {
+    upstream.add(current.containerId);
+    visit(current.containerId);
+  }
   return upstream;
 }
 
 /**
  * Returns list of variable suggestions available for the given node (already executed = all upstream).
  * - Workflow Inputs: $.Inputs.<name> from the Input node's variableRows (if upstream)
- * - Upstream node outputs: $.node_name.var_name (short) and $.node_name.output.var_name (full)
+ * - Upstream nodes: $.node_name.var_name for params and output keys (no .next, no input_node.output)
  * Repeat/Parallel inside can use variables from outer (upstream) nodes.
  */
 export function getAvailableVariables(
@@ -102,7 +109,7 @@ export function getAvailableVariables(
   const upstreamIds = getAllUpstreamNodeIds(currentNodeId, nodes, edges);
   const suggestions: VariableSuggestion[] = [];
 
-  // 1) $.Inputs.<name> from Input node's variableRows
+  // 1) $.Inputs.<name> from Input node's variableRows (no input_node.output)
   const inputNode = nodes.find((n) => n.kind === "flow_control.input");
   if (inputNode && upstreamIds.has(inputNode.id)) {
     const rows = inputNode.variableRows ?? [];
@@ -118,7 +125,7 @@ export function getAvailableVariables(
     });
   }
 
-  // 2) $.node_name.var_name and $.node_name.output.var_name for each upstream node
+  // 2) $.node_name.var_name for each upstream node: params + output keys (no .next, no input .output)
   upstreamIds.forEach((fromId) => {
     const fromNode = nodeMap.get(fromId);
     if (!fromNode) return;
@@ -126,12 +133,21 @@ export function getAvailableVariables(
     if (!stateName) return;
 
     if (fromNode.kind === "flow_control.input") {
-      suggestions.push({
-        path: `$.${stateName}.output`,
-        type: "object",
-        label: `Output: ${fromNode.name}`
-      });
+      // Only $.Inputs.xxx above; do not suggest input_node.output
       return;
+    }
+
+    // Params: $.node_name.param_key (parameters are accessible)
+    if (fromNode.params && typeof fromNode.params === "object") {
+      Object.keys(fromNode.params).forEach((key) => {
+        if (/^[A-Za-z0-9_]+$/.test(key)) {
+          suggestions.push({
+            path: `$.${stateName}.${key}`,
+            type: "any",
+            label: `${stateName}.${key} (param)`
+          });
+        }
+      });
     }
 
     if (fromNode.kind.startsWith("skill.")) {
@@ -149,17 +165,6 @@ export function getAvailableVariables(
             label: `${stateName}.output.${key} (${info.type})`
           });
         });
-      } else {
-        suggestions.push({
-          path: `$.${stateName}.next`,
-          type: "any",
-          label: `Output: ${stateName}`
-        });
-        suggestions.push({
-          path: `$.${stateName}.output.next`,
-          type: "any",
-          label: `Output: ${stateName}`
-        });
       }
       return;
     }
@@ -170,20 +175,17 @@ export function getAvailableVariables(
       fromNode.kind === "flow_control.parallel" ||
       fromNode.kind === "event.webhook"
     ) {
-      suggestions.push({
-        path: `$.${stateName}.next`,
-        type: "any",
-        label: `Output: ${stateName}`
-      });
-      suggestions.push({
-        path: `$.${stateName}.output.next`,
-        type: "any",
-        label: `Output: ${stateName}`
-      });
+      // No .next suggestions
     }
   });
 
-  return suggestions;
+  // Dedupe by path (e.g. param key and output key can be same)
+  const seen = new Set<string>();
+  return suggestions.filter((s) => {
+    if (seen.has(s.path)) return false;
+    seen.add(s.path);
+    return true;
+  });
 }
 
 /**
