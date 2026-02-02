@@ -22,6 +22,10 @@ import { VariableInput } from "@/components/VariableInput";
 import { ValidationError, WorkflowDraft } from "@/domain/types";
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format";
+import {
+  computeStartEndForScope,
+  type ScopeGraph
+} from "@/lib/startEndDetection";
 import { getAvailableVariables } from "@/lib/variableReferences";
 
 type EditorPageProps = {
@@ -1616,6 +1620,7 @@ function NodeCard({
   onInputDragOver,
   onInputDrop,
   warningLabel,
+  startEndBadge,
   nodeTypeConfig,
   skillset,
   nodes,
@@ -1658,6 +1663,12 @@ function NodeCard({
   onInputDragOver: (event: DragEvent<HTMLButtonElement>) => void;
   onInputDrop: (event: DragEvent<HTMLButtonElement>) => void;
   warningLabel?: string | null;
+  startEndBadge?: {
+    showStart: boolean;
+    showEnd: boolean;
+    isRootScope: boolean;
+    startError?: string;
+  } | null;
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
   skillset?: import("@/domain/types").Skillset;
   nodes: EditorNode[];
@@ -1747,6 +1758,39 @@ function NodeCard({
           nodeTypeColors.indicator
         )}
       />
+      {/* Start/End badges: top-left, pill style; visible when zoomed out */}
+      {startEndBadge && (startEndBadge.showStart || startEndBadge.showEnd || startEndBadge.startError) && (
+        <div className="absolute left-2 top-2 z-30 flex flex-col gap-1 pointer-events-none">
+          {startEndBadge.startError ? (
+            <span
+              className="inline-flex items-center rounded-full border border-amber-400 bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 shadow-sm"
+              title={startEndBadge.startError}
+            >
+              ⚠ START
+            </span>
+          ) : startEndBadge.showStart ? (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold shadow-sm",
+                startEndBadge.isRootScope
+                  ? "border-emerald-500 bg-emerald-100 text-emerald-800"
+                  : "border-teal-400 bg-teal-50 text-teal-800"
+              )}
+              title={startEndBadge.isRootScope ? "Workflow start" : "Scope start"}
+            >
+              ▶ START
+            </span>
+          ) : null}
+          {startEndBadge.showEnd && (
+            <span
+              className="inline-flex items-center rounded-full border border-slate-400 bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-700 shadow-sm"
+              title="Scope end"
+            >
+              ⏹ END
+            </span>
+          )}
+        </div>
+      )}
       {config.inputEnabled !== false && (
         <button
           type="button"
@@ -2543,9 +2587,143 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     return warnings;
   }, [containerEmptyBranches, nodes]);
 
+  const { startEndValidationErrors, startEndBadges } = useMemo(() => {
+    const containerTypeById = getContainerTypeById(nodes);
+    const containerIds = new Set(nodes.filter(isContainerNode).map((n) => n.id));
+    const topLevelNodes = nodes.filter(
+      (n) => !n.containerId || !containerIds.has(n.containerId)
+    );
+    const topLevelNodeIds = new Set(topLevelNodes.map((n) => n.id));
+    const validEdgesLocal = edges.filter((edge) => {
+      const fromNode = nodes.find((n) => n.id === edge.from);
+      const toNode = nodes.find((n) => n.id === edge.to);
+      if (!fromNode || !toNode) return false;
+      const fromKey = getNodeContainerKey(fromNode, containerTypeById);
+      const toKey = getNodeContainerKey(toNode, containerTypeById);
+      if (!fromKey && !toKey) return true;
+      return fromKey !== null && fromKey === toKey;
+    });
+
+    const scopes: Array<{
+      scopeKey: string;
+      nodeIds: string[];
+      edges: Array<{ from: string; to: string }>;
+      isRoot: boolean;
+      containerId?: string;
+    }> = [];
+
+    scopes.push({
+      scopeKey: "root",
+      nodeIds: topLevelNodes.map((n) => n.id),
+      edges: validEdgesLocal
+        .filter((e) => topLevelNodeIds.has(e.from) && topLevelNodeIds.has(e.to))
+        .map((e) => ({ from: e.from, to: e.to })),
+      isRoot: true
+    });
+
+    nodes.forEach((node) => {
+      if (!isContainerNode(node)) return;
+      const containerType = getContainerType(node.kind);
+      if (!containerType) return;
+      if (containerType === "repeat") {
+        const bodyNodes = nodes.filter((n) => n.containerId === node.id);
+        const bodyIds = new Set(bodyNodes.map((n) => n.id));
+        scopes.push({
+          scopeKey: `${node.id}:body`,
+          nodeIds: bodyNodes.map((n) => n.id),
+          edges: validEdgesLocal
+            .filter((e) => bodyIds.has(e.from) && bodyIds.has(e.to))
+            .map((e) => ({ from: e.from, to: e.to })),
+          isRoot: false,
+          containerId: node.id
+        });
+        return;
+      }
+      const branchCount = getContainerBranchCount(node);
+      for (let index = 0; index < branchCount; index += 1) {
+        const branchNodes = nodes.filter(
+          (n) =>
+            n.containerId === node.id && (n.branchIndex ?? 0) === index
+        );
+        const branchIds = new Set(branchNodes.map((n) => n.id));
+        scopes.push({
+          scopeKey: `${node.id}:branch:${index}`,
+          nodeIds: branchNodes.map((n) => n.id),
+          edges: validEdgesLocal
+            .filter((e) => branchIds.has(e.from) && branchIds.has(e.to))
+            .map((e) => ({ from: e.from, to: e.to })),
+          isRoot: false,
+          containerId: node.id
+        });
+      }
+    });
+
+    const validationErrorsList: ValidationError[] = [];
+    const badges = new Map<
+      string,
+      {
+        showStart: boolean;
+        showEnd: boolean;
+        isRootScope: boolean;
+        startError?: string;
+      }
+    >();
+
+    const expandedContainerIds = new Set(
+      nodes.filter((n) => isContainerNode(n) && n.isExpanded).map((n) => n.id)
+    );
+
+    scopes.forEach((scope) => {
+      const graph: ScopeGraph = {
+        nodeIds: scope.nodeIds,
+        edges: scope.edges
+      };
+      const result = computeStartEndForScope(graph);
+      const showBadges = scope.isRoot || (scope.containerId != null && expandedContainerIds.has(scope.containerId));
+
+      if (result.startError) {
+        const scopeLabel = scope.isRoot
+          ? "Root workflow"
+          : scope.scopeKey.includes(":body")
+            ? `Repeat body (${scope.containerId})`
+            : `Parallel branch (${scope.containerId})`;
+        validationErrorsList.push({
+          id: `start-end-${scope.scopeKey}`,
+          message: `${scopeLabel}: ${result.startError}`,
+          nodeId: scope.containerId ?? undefined
+        });
+      }
+
+      const startCandidateSet = new Set(result.startCandidateIds ?? []);
+
+      scope.nodeIds.forEach((nodeId) => {
+        const isStart = result.startNodeId === nodeId;
+        const isStartCandidateWithError =
+          showBadges && result.startError && startCandidateSet.has(nodeId);
+        const isEnd = result.endNodeIds.includes(nodeId);
+        const existing = badges.get(nodeId);
+        badges.set(nodeId, {
+          showStart:
+            (existing?.showStart ?? false) ||
+            (showBadges && (isStart || isStartCandidateWithError)),
+          showEnd: (existing?.showEnd ?? false) || (showBadges && isEnd),
+          isRootScope: existing?.isRootScope ?? scope.isRoot,
+          startError:
+            existing?.startError ??
+            (isStartCandidateWithError ? result.startError : undefined)
+        });
+      });
+    });
+
+    return {
+      startEndValidationErrors: validationErrorsList,
+      startEndBadges: badges
+    };
+  }, [nodes, edges]);
+
   const allValidationErrors = useMemo(
-    () => [...validationErrors, ...containerWarnings],
-    [containerWarnings, validationErrors]
+    () => [...validationErrors, ...containerWarnings, ...startEndValidationErrors],
+    [containerWarnings, validationErrors, startEndValidationErrors]
   );
 
   const hasErrors = allValidationErrors.length > 0;
@@ -3978,6 +4156,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           stateNameMap={stateNameMap}
                           skillsetMap={skillsetMap}
                           warningLabel={containerWarningLabels.get(node.id) ?? null}
+                          startEndBadge={startEndBadges.get(node.id) ?? null}
                           onSelect={() => {
                             setSelectedNode(node.id);
                             setSelectedEdgeId(null);
