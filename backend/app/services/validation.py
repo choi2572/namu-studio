@@ -101,9 +101,9 @@ def validate_workflow_dsl(dsl_json: Dict[str, Any]) -> List[ValidationError]:
                 error_code="MUTUALLY_EXCLUSIVE"
             ))
         
-        # Terminal nodes must have End=true or Next (Condition/Parallel use If.Then/Else or Branches)
+        # Terminal nodes must have End=true or Next (Condition/Parallel/Choice use If.Then/Else, Branches, or Choices)
         if not has_next and not has_end:
-            if state_type not in ("Condition", "Parallel"):
+            if state_type not in ("Condition", "Parallel", "Choice"):
                 errors.append(ValidationError(
                     id=f"missing_terminal_{state_name}",
                     message=f"State '{state_name}' must have either Next or End",
@@ -380,6 +380,14 @@ def has_cycle(states: Dict[str, Any], start_at: str) -> bool:
             if else_node and dfs(else_node):
                 return True
         
+        # Check Choice branches (Choices[].Next)
+        if state_type == "Choice":
+            for choice in state_def.get("Choices", []):
+                if isinstance(choice, dict):
+                    next_node = choice.get("Next")
+                    if next_node and dfs(next_node):
+                        return True
+        
         # Check Parallel branches (all branches must be checked)
         if state_type == "Parallel":
             branches = state_def.get("Branches", [])
@@ -460,6 +468,14 @@ def is_reachable(states: Dict[str, Any], start: str, target: str) -> bool:
             else_node = state_def.get("Else")
             if else_node and dfs(else_node):
                 return True
+        
+        # Check Choice branches (Choices[].Next)
+        if state_type == "Choice":
+            for choice in state_def.get("Choices", []):
+                if isinstance(choice, dict):
+                    next_node = choice.get("Next")
+                    if next_node and dfs(next_node):
+                        return True
         
         # Check Parallel branches
         if state_type == "Parallel":
