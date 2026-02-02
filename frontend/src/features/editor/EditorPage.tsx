@@ -2515,6 +2515,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         router.replace(`/editor/${saved.workflowId}`);
       }
       setHasUnsavedChanges(false);
+      // 테스트용: 저장된 DSL JSON 확인
+      const dslString = JSON.stringify(saved.dsl_json ?? {}, null, 2);
+      console.log("[Save] DSL JSON:", dslString);
+      navigator.clipboard?.writeText(dslString).catch(() => {});
     }
   });
 

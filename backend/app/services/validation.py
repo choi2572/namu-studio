@@ -101,14 +101,15 @@ def validate_workflow_dsl(dsl_json: Dict[str, Any]) -> List[ValidationError]:
                 error_code="MUTUALLY_EXCLUSIVE"
             ))
         
-        # Terminal nodes must have End=true or no Next
+        # Terminal nodes must have End=true or Next (Condition/Parallel use If.Then/Else or Branches)
         if not has_next and not has_end:
-            errors.append(ValidationError(
-                id=f"missing_terminal_{state_name}",
-                message=f"State '{state_name}' must have either Next or End",
-                nodeId=state_name,
-                error_code="MISSING_TERMINAL"
-            ))
+            if state_type not in ("Condition", "Parallel"):
+                errors.append(ValidationError(
+                    id=f"missing_terminal_{state_name}",
+                    message=f"State '{state_name}' must have either Next or End",
+                    nodeId=state_name,
+                    error_code="MISSING_TERMINAL"
+                ))
         
         # Validate Next references
         if has_next:
