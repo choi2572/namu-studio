@@ -988,9 +988,36 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
     stateNameMap,
     containerPayloads
   );
+  const inputNode = topLevelNodes.find((n) => n.kind === "flow_control.input");
+  const inputsRecord: Record<string, { Type: string; Value: number | boolean | string }> = {};
+  inputNode?.variableRows?.forEach(({ name, value, valueType }) => {
+    if (!name.trim()) return;
+    const Type = valueType;
+    let Value: number | boolean | string;
+    switch (valueType) {
+      case "int": {
+        const n = Number.parseInt(value, 10);
+        Value = Number.isFinite(n) ? n : 0;
+        break;
+      }
+      case "double": {
+        const n = Number.parseFloat(value);
+        Value = Number.isFinite(n) ? n : 0;
+        break;
+      }
+      case "bool":
+        Value = value === "true" || value === "1";
+        break;
+      default:
+        Value = value;
+    }
+    inputsRecord[name.trim()] = { Type, Value };
+  });
+  const hasInputs = Object.keys(inputsRecord).length > 0;
   return {
     Comment: "Generated from editor",
     StartAt: startNode ? stateNameMap.get(startNode.id) : undefined,
+    ...(hasInputs ? { Inputs: inputsRecord } : {}),
     States: states
   };
 }
@@ -1435,6 +1462,42 @@ function parseDslToEditor(
   const states = (dslJson as { States?: Record<string, DslState> }).States;
   if (!states || !isRecord(states)) return null;
 
+  const rawInputs = (dslJson as { Inputs?: Record<string, { Type?: unknown; Value?: unknown }> }).Inputs;
+  let varRowIndex = 1;
+  const inputVariableRows: VariableRow[] = isRecord(rawInputs)
+    ? Object.entries(rawInputs)
+        .filter(([name]) => typeof name === "string" && name.trim() !== "")
+        .map(([name, entry]) => {
+          const item = isRecord(entry) ? entry : {};
+          const rawType = item.Type;
+          const valueType: VariableValueType =
+            rawType === "int" || rawType === "integer"
+              ? "int"
+              : rawType === "bool"
+                ? "bool"
+                : rawType === "double"
+                  ? "double"
+                  : rawType === "string"
+                    ? "string"
+                    : "string";
+          const rawValue = item.Value;
+          const value =
+            typeof rawValue === "string"
+              ? rawValue
+              : typeof rawValue === "number"
+                ? String(rawValue)
+                : typeof rawValue === "boolean"
+                  ? rawValue ? "true" : "false"
+                  : "";
+          return {
+            id: `var-${varRowIndex++}`,
+            name: name.trim(),
+            value,
+            valueType
+          };
+        })
+    : [];
+
   let nodeIndex = 1;
   let edgeIndex = 1;
   let conditionIndex = 1;
@@ -1510,7 +1573,11 @@ function parseDslToEditor(
         params,
         conditionExpressions,
         variableRows:
-          kind === "flow_control.input" || kind === "flow_control.output" ? [] : undefined,
+          kind === "flow_control.input"
+            ? inputVariableRows
+            : kind === "flow_control.output"
+              ? []
+              : undefined,
         containerId: context?.containerId ?? null,
         containerType: context?.containerType ?? null,
         branchIndex:
