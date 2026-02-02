@@ -1758,39 +1758,6 @@ function NodeCard({
           nodeTypeColors.indicator
         )}
       />
-      {/* Start/End badges: top-left, pill style; visible when zoomed out */}
-      {startEndBadge && (startEndBadge.showStart || startEndBadge.showEnd || startEndBadge.startError) && (
-        <div className="absolute left-2 top-2 z-30 flex flex-col gap-1 pointer-events-none">
-          {startEndBadge.startError ? (
-            <span
-              className="inline-flex items-center rounded-full border border-amber-400 bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 shadow-sm"
-              title={startEndBadge.startError}
-            >
-              ⚠ START
-            </span>
-          ) : startEndBadge.showStart ? (
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold shadow-sm",
-                startEndBadge.isRootScope
-                  ? "border-emerald-500 bg-emerald-100 text-emerald-800"
-                  : "border-teal-400 bg-teal-50 text-teal-800"
-              )}
-              title={startEndBadge.isRootScope ? "Workflow start" : "Scope start"}
-            >
-              ▶ START
-            </span>
-          ) : null}
-          {startEndBadge.showEnd && (
-            <span
-              className="inline-flex items-center rounded-full border border-slate-400 bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-700 shadow-sm"
-              title="Scope end"
-            >
-              ⏹ END
-            </span>
-          )}
-        </div>
-      )}
       {config.inputEnabled !== false && (
         <button
           type="button"
@@ -1904,7 +1871,40 @@ function NodeCard({
         }}
       >
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-1.5 mb-1 min-w-0">
+            {/* Start/End icons before node name: START → END → name */}
+            {startEndBadge && (startEndBadge.showStart || startEndBadge.showEnd || startEndBadge.startError) && (
+              <span className="flex items-center gap-1 flex-shrink-0 pointer-events-none">
+                {startEndBadge.startError ? (
+                  <span
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-400 bg-amber-100 text-amber-700"
+                    title={startEndBadge.startError}
+                  >
+                    <span className="text-xs">⚠</span>
+                  </span>
+                ) : startEndBadge.showStart ? (
+                  <span
+                    className={cn(
+                      "inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px]",
+                      startEndBadge.isRootScope
+                        ? "border-emerald-500 bg-emerald-100 text-emerald-700"
+                        : "border-teal-400 bg-teal-50 text-teal-700"
+                    )}
+                    title={startEndBadge.isRootScope ? "Workflow start" : "Scope start"}
+                  >
+                    ▶
+                  </span>
+                ) : null}
+                {startEndBadge.showEnd && (
+                  <span
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-400 bg-red-50 text-red-600"
+                    title="Scope end"
+                  >
+                    <span className="text-[10px]">⏹</span>
+                  </span>
+                )}
+              </span>
+            )}
             {isEditingName ? (
               <input
                 value={node.name}
@@ -1917,13 +1917,13 @@ function NodeCard({
                   }
                 }}
                 autoFocus
-                className="w-full rounded border border-slate-200 bg-white text-sm font-semibold text-slate-800 focus:border-slate-300 focus:outline-none"
+                className="flex-1 min-w-0 rounded border border-slate-200 bg-white text-sm font-semibold text-slate-800 focus:border-slate-300 focus:outline-none"
               />
             ) : (
               <button
                 type="button"
                 data-no-drag
-                className="cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700"
+                className="cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700 flex-1 min-w-0"
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   onStartEditName();
