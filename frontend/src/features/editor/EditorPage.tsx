@@ -1325,27 +1325,32 @@ function expandContainerFrameForNodes(
     ).length;
   });
   const maxNodes = Math.max(1, ...branchCounts);
-  const baseWidth =
-    containerType === "parallel"
-      ? Math.max(
-          CONTAINER_FRAME_DEFAULTS.width,
-          branchCount * CONTAINER_FRAME_DEFAULTS.branchWidth
-        )
-      : CONTAINER_FRAME_DEFAULTS.width;
-  let requiredWidth = baseWidth;
+  let requiredWidth = CONTAINER_FRAME_DEFAULTS.width;
   let requiredHeight =
     CONTAINER_FRAME_METRICS.headerHeight +
     CONTAINER_FRAME_METRICS.padding * 2 +
     maxNodes * (NODE_METRICS.collapsedHeight + CONTAINER_LAYOUT.rowGap) -
     CONTAINER_LAYOUT.rowGap;
+
   if (containerType === "parallel") {
+    // Parallel: 브랜치는 세로 스택, 각 브랜치 안에서 노드들은 가로로 배치.
+    // - 가로(width): 어떤 브랜치든 가장 많은 노드 수 기준으로 계산
+    // - 세로(height): 브랜치 수 * 노드 높이 (+ 브랜치 간 rowGap)
     const perBranchWidth =
       CONTAINER_FRAME_METRICS.padding * 2 +
       maxNodes * (NODE_METRICS.width + CONTAINER_LAYOUT.columnGap) -
       CONTAINER_LAYOUT.columnGap;
-    requiredWidth = perBranchWidth * branchCount + CONTAINER_FRAME_METRICS.padding * 2;
-    requiredHeight = Math.max(requiredHeight, CONTAINER_FRAME_METRICS.minHeight);
+    requiredWidth = Math.max(CONTAINER_FRAME_DEFAULTS.width, perBranchWidth);
+
+    const baseHeightForBranches =
+      branchCount * NODE_METRICS.collapsedHeight +
+      Math.max(0, branchCount - 1) * CONTAINER_LAYOUT.rowGap;
+    requiredHeight =
+      CONTAINER_FRAME_METRICS.headerHeight +
+      CONTAINER_FRAME_METRICS.padding * 2 +
+      baseHeightForBranches;
   }
+
   const nextFrame: ContainerFrameData = {
     width: Math.max(requiredWidth, CONTAINER_FRAME_METRICS.minWidth),
     height: Math.max(requiredHeight, CONTAINER_FRAME_METRICS.minHeight),
