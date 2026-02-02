@@ -18,9 +18,11 @@ import {
   type ResizeHandle
 } from "@/components/ContainerFrame";
 import { StatusBadge } from "@/components/StatusBadge";
+import { VariableInput } from "@/components/VariableInput";
 import { ValidationError, WorkflowDraft } from "@/domain/types";
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format";
+import { getAvailableVariables } from "@/lib/variableReferences";
 
 type EditorPageProps = {
   workflowId: string;
@@ -1533,7 +1535,11 @@ function NodeCard({
   onInputDrop,
   warningLabel,
   nodeTypeConfig,
-  skillset
+  skillset,
+  nodes,
+  edges,
+  stateNameMap,
+  skillsetMap
 }: {
   node: EditorNode;
   config: NodeTypeConfig;
@@ -1568,8 +1574,23 @@ function NodeCard({
   warningLabel?: string | null;
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
   skillset?: import("@/domain/types").Skillset;
+  nodes: EditorNode[];
+  edges: EditorEdge[];
+  stateNameMap: Map<string, string>;
+  skillsetMap: Map<string, import("@/domain/types").Skillset>;
 }) {
   const nodeHeight = getNodeHeight(node, nodeTypeConfig);
+  const availableVariables = useMemo(
+    () =>
+      getAvailableVariables(
+        node.id,
+        nodes,
+        edges,
+        stateNameMap,
+        (kind) => skillsetMap.get(kind)?.outputs
+      ),
+    [node.id, nodes, edges, stateNameMap, skillsetMap]
+  );
   const outputOffsets = getPortOffsets(nodeHeight, outputs.length);
   const conditionExpressions =
     node.kind === "flow_control.condition" ? node.conditionExpressions ?? [] : [];
@@ -2066,12 +2087,19 @@ function NodeCard({
             {config.paramFields.map((field) => (
               <label key={field.key} className="block">
                 <span className="text-[10px] text-slate-500">{field.label}</span>
-                <input
-                  value={node.params[field.key] ?? ""}
-                  onChange={(event) => onParamChange(field.key, event.target.value)}
-                  placeholder={field.placeholder}
-                  className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                />
+                <div className="mt-1" data-no-drag>
+                  <VariableInput
+                    value={node.params[field.key] ?? ""}
+                    onChange={(value) => onParamChange(field.key, value)}
+                    placeholder={
+                      field.placeholder
+                        ? `${field.placeholder} or type $ for variable`
+                        : undefined
+                    }
+                    suggestions={availableVariables}
+                    className="mt-1"
+                  />
+                </div>
               </label>
             ))}
           </div>
@@ -2151,6 +2179,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     });
     return map;
   }, [skillsetsResponse]);
+
+  // 노드 id → DSL state name (변수 참조 자동완성용)
+  const stateNameMap = useMemo(() => buildStateNameMap(nodes), [nodes]);
 
   // 노드 타입 목록 생성
   const nodeTypes = useMemo(() => {
@@ -3857,6 +3888,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           outputs={outputStates}
                           nodeTypeConfig={nodeTypeConfig}
                           skillset={skillset}
+                          nodes={nodes}
+                          edges={edges}
+                          stateNameMap={stateNameMap}
+                          skillsetMap={skillsetMap}
                           warningLabel={containerWarningLabels.get(node.id) ?? null}
                           onSelect={() => {
                             setSelectedNode(node.id);
