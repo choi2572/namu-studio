@@ -1877,30 +1877,36 @@ function NodeCard({
               <span className="flex items-center gap-1 flex-shrink-0 pointer-events-none">
                 {startEndBadge.startError ? (
                   <span
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-400 bg-amber-100 text-amber-700"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-400 bg-amber-100 text-amber-700 [&>svg]:w-3 [&>svg]:h-3"
                     title={startEndBadge.startError}
                   >
-                    <span className="text-xs">⚠</span>
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <path d="M12 2L1 21h22L12 2zm0 3.99L19.5 19h-15L12 6l.01-.01zM11 16h2v2h-2v-2zm0-6h2v4h-2v-4z" />
+                    </svg>
                   </span>
                 ) : startEndBadge.showStart ? (
                   <span
                     className={cn(
-                      "inline-flex h-5 w-5 items-center justify-center rounded-full border text-[10px]",
+                      "inline-flex h-5 w-5 items-center justify-center rounded-full border [&>svg]:w-3 [&>svg]:h-3",
                       startEndBadge.isRootScope
                         ? "border-emerald-500 bg-emerald-100 text-emerald-700"
                         : "border-teal-400 bg-teal-50 text-teal-700"
                     )}
                     title={startEndBadge.isRootScope ? "Workflow start" : "Scope start"}
                   >
-                    ▶
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <path d="M8 5v14l11-7L8 5z" />
+                    </svg>
                   </span>
                 ) : null}
                 {startEndBadge.showEnd && (
                   <span
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-400 bg-red-50 text-red-600"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-400 bg-red-50 text-red-600 [&>svg]:w-3 [&>svg]:h-3"
                     title="Scope end"
                   >
-                    <span className="text-[10px]">⏹</span>
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <path d="M6 6h12v12H6z" />
+                    </svg>
                   </span>
                 )}
               </span>
