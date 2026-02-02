@@ -1885,6 +1885,11 @@ function NodeCard({
     ? `${skillset.name} (${skillset.version})\nType: ${node.kind}\n\n${skillset.description}`
     : node.kind;
 
+  const showStartRibbon =
+    startEndBadge?.showStart && !startEndBadge?.startError;
+  const showEndRibbon = Boolean(startEndBadge?.showEnd);
+  const hasRibbon = showStartRibbon || showEndRibbon;
+
   return (
     <div
       className={cn(
@@ -1899,6 +1904,19 @@ function NodeCard({
       onClick={onSelect}
       title={tooltipContent}
     >
+      {/* Start/End 헤더 리본: 줌 아웃에서도 한눈에 구분 */}
+      {hasRibbon && (
+        <div
+          className={cn(
+            "absolute left-0 right-0 top-0 z-10 flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
+            showStartRibbon && "bg-emerald-600",
+            showEndRibbon && !showStartRibbon && "bg-slate-500"
+          )}
+          aria-hidden
+        >
+          {showStartRibbon ? "▶ START" : "⏹ END"}
+        </div>
+      )}
       {/* 왼쪽 타입 인디케이터 바 */}
       <div
         className={cn(
@@ -2003,7 +2021,10 @@ function NodeCard({
       })}
 
       <div
-        className="flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing pl-1"
+        className={cn(
+          "flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing pl-1",
+          hasRibbon && "pt-6"
+        )}
         onPointerDown={(event) => {
           const target = event.target as HTMLElement;
           if (
@@ -3986,6 +4007,17 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     });
   }, [nodeMap, nodeTypeConfig, validEdges, visibleNodeIds]);
 
+  /** Start 노드에서 나가는 첫 번째 엣지 ID (시각적 강조용) */
+  const firstOutgoingEdgeIdsFromStart = useMemo(() => {
+    const set = new Set<string>();
+    for (const [nodeId, badge] of startEndBadges) {
+      if (!badge.showStart || badge.startError) continue;
+      const firstEdge = edgesToRender.find((e) => e.from === nodeId);
+      if (firstEdge) set.add(firstEdge.id);
+    }
+    return set;
+  }, [edgesToRender, startEndBadges]);
+
   const containerFramesToRender = useMemo(() => {
     return nodes
       .filter((node) => isContainerNode(node) && node.isExpanded)
@@ -4464,23 +4496,30 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       const isConditionNode = fromNode.kind === "flow_control.condition";
                       const isTrueEdge = edge.fromPort === "true";
                       const isFalseEdge = edge.fromPort === "false";
+                      const isFirstOutgoingFromStart =
+                        firstOutgoingEdgeIdsFromStart.has(edge.id);
                       let strokeColor = selectedEdgeId === edge.id ? "#0f172a" : "#94a3b8";
                       let markerId = "arrow";
-                      
-                      if (isConditionNode && isTrueEdge) {
+                      let strokeWidth = selectedEdgeId === edge.id ? "2.5" : "2";
+
+                      if (isFirstOutgoingFromStart) {
+                        strokeColor = selectedEdgeId === edge.id ? "#047857" : "#059669";
+                        markerId = "arrow-true";
+                        strokeWidth = selectedEdgeId === edge.id ? "3" : "2.5";
+                      } else if (isConditionNode && isTrueEdge) {
                         strokeColor = selectedEdgeId === edge.id ? "#059669" : "#10b981";
                         markerId = "arrow-true";
                       } else if (isConditionNode && isFalseEdge) {
                         strokeColor = selectedEdgeId === edge.id ? "#dc2626" : "#ef4444";
                         markerId = "arrow-false";
                       }
-                      
+
                       return (
                         <path
                           key={edge.id}
                           d={path}
                           stroke={strokeColor}
-                          strokeWidth={selectedEdgeId === edge.id ? "2.5" : "2"}
+                          strokeWidth={strokeWidth}
                           fill="none"
                           markerEnd={`url(#${markerId})`}
                           className="cursor-pointer"
@@ -4517,6 +4556,17 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   )}
                 </div>
               </div>
+            </div>
+            {/* Start/End 범례: 에디터 코너에 항상 표시 (줌과 별도) */}
+            <div
+              className="pointer-events-none absolute left-4 top-4 z-20 rounded border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[10px] text-slate-600 shadow-sm"
+              aria-hidden
+            >
+              <span className="font-medium text-emerald-700">▶ START</span>
+              <span className="text-slate-500"> = entry point</span>
+              <span className="mx-1.5 text-slate-300">·</span>
+              <span className="font-medium text-slate-600">⏹ END</span>
+              <span className="text-slate-500"> = terminal</span>
             </div>
             <div className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
               <button
