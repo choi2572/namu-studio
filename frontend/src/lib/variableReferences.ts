@@ -29,27 +29,6 @@ export type EditorEdge = {
 
 export type SkillsetOutputs = Record<string, { type: string; description?: string }>;
 
-function getContainerKey(
-  node: EditorNode,
-  containerTypeById: Map<string, string>
-): string | null {
-  const containerId = node.containerId;
-  if (!containerId) return null;
-  const containerType = node.containerType ?? containerTypeById.get(containerId);
-  if (!containerType) return null;
-  if (containerType === "parallel") {
-    const branchIndex = node.branchIndex ?? 0;
-    return `${containerId}:branch:${branchIndex}`;
-  }
-  return `${containerId}:body`;
-}
-
-function getContainerTypeFromKind(kind: string): string | null {
-  if (kind === "flow_control.repeat") return "repeat";
-  if (kind === "flow_control.parallel") return "parallel";
-  return null;
-}
-
 /**
  * Build a map of node id -> DSL state name (used in $.StateName).
  */
@@ -73,33 +52,20 @@ export function buildStateNameMap(nodes: EditorNode[]): Map<string, string> {
 }
 
 /**
- * Get all upstream node ids reachable from currentNodeId by following edges backward,
- * within the same scope (same container or both top-level).
+ * Get all upstream node ids reachable from currentNodeId by following edges backward.
+ * No scope filter: repeat/parallel inside can use variables from outer (already executed) nodes.
  */
-function getUpstreamNodeIdsInScope(
+function getAllUpstreamNodeIds(
   currentNodeId: string,
   nodes: EditorNode[],
   edges: EditorEdge[]
 ): Set<string> {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const current = nodeMap.get(currentNodeId);
-  if (!current) return new Set();
-
-  const containerTypeById = new Map<string, string>();
-  nodes.forEach((node) => {
-    const type = getContainerTypeFromKind(node.kind);
-    if (type) containerTypeById.set(node.id, type);
-  });
-
-  const currentKey = getContainerKey(current, containerTypeById);
-  const inSameScope = (node: EditorNode) =>
-    getContainerKey(node, containerTypeById) === currentKey;
+  if (!nodeMap.has(currentNodeId)) return new Set();
 
   const incomingByTo = new Map<string, EditorEdge[]>();
   edges.forEach((edge) => {
-    const fromNode = nodeMap.get(edge.from);
-    const toNode = nodeMap.get(edge.to);
-    if (!fromNode || !toNode || !inSameScope(fromNode) || !inSameScope(toNode)) return;
+    if (!nodeMap.has(edge.from) || !nodeMap.has(edge.to)) return;
     const list = incomingByTo.get(edge.to) ?? [];
     list.push(edge);
     incomingByTo.set(edge.to, list);
@@ -120,10 +86,10 @@ function getUpstreamNodeIdsInScope(
 }
 
 /**
- * Returns list of variable suggestions available for the given node:
+ * Returns list of variable suggestions available for the given node (already executed = all upstream).
  * - Workflow Inputs: $.Inputs.<name> from the Input node's variableRows (if upstream)
- * - Upstream node outputs: $.StateName.output.<key> for each upstream node
- * Respects Repeat/Parallel scope (only same container or root).
+ * - Upstream node outputs: $.node_name.var_name (short) and $.node_name.output.var_name (full)
+ * Repeat/Parallel inside can use variables from outer (upstream) nodes.
  */
 export function getAvailableVariables(
   currentNodeId: string,
@@ -133,7 +99,7 @@ export function getAvailableVariables(
   skillsetOutputsByKind: (kind: string) => SkillsetOutputs | undefined
 ): VariableSuggestion[] {
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const upstreamIds = getUpstreamNodeIdsInScope(currentNodeId, nodes, edges);
+  const upstreamIds = getAllUpstreamNodeIds(currentNodeId, nodes, edges);
   const suggestions: VariableSuggestion[] = [];
 
   // 1) $.Inputs.<name> from Input node's variableRows
@@ -152,7 +118,7 @@ export function getAvailableVariables(
     });
   }
 
-  // 2) $.StateName.output.<key> for each upstream node
+  // 2) $.node_name.var_name and $.node_name.output.var_name for each upstream node
   upstreamIds.forEach((fromId) => {
     const fromNode = nodeMap.get(fromId);
     if (!fromNode) return;
@@ -173,12 +139,22 @@ export function getAvailableVariables(
       if (outputs && Object.keys(outputs).length > 0) {
         Object.entries(outputs).forEach(([key, info]) => {
           suggestions.push({
-            path: `$.${stateName}.output.${key}`,
+            path: `$.${stateName}.${key}`,
             type: info.type,
             label: `${stateName}.${key} (${info.type})`
           });
+          suggestions.push({
+            path: `$.${stateName}.output.${key}`,
+            type: info.type,
+            label: `${stateName}.output.${key} (${info.type})`
+          });
         });
       } else {
+        suggestions.push({
+          path: `$.${stateName}.next`,
+          type: "any",
+          label: `Output: ${stateName}`
+        });
         suggestions.push({
           path: `$.${stateName}.output.next`,
           type: "any",
@@ -194,6 +170,11 @@ export function getAvailableVariables(
       fromNode.kind === "flow_control.parallel" ||
       fromNode.kind === "event.webhook"
     ) {
+      suggestions.push({
+        path: `$.${stateName}.next`,
+        type: "any",
+        label: `Output: ${stateName}`
+      });
       suggestions.push({
         path: `$.${stateName}.output.next`,
         type: "any",

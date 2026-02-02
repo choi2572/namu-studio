@@ -60,14 +60,17 @@ type NodeOutputPort = {
 
 type ConditionOperator = "AND" | "OR";
 
-// Condition 노드의 개별 표현식
-// 내부값은 기존과 동일하게 expression 하나의 문자열로 저장하되,
-// UI에서는 variable / operator / value 세 개의 인풋으로 나누어 다룬다.
+const CONDITION_COMPARISON_OPERATORS = ["==", "!=", ">=", "<=", ">", "<"] as const;
+type ConditionComparisonOperator = (typeof CONDITION_COMPARISON_OPERATORS)[number];
+
+// Condition 노드의 개별 표현식: variable, comparisonOperator, value 각각 별도 필드
 type ConditionExpression = {
   id: string;
   // 첫 번째 표현식은 null, 두 번째부터 AND/OR
   operator: ConditionOperator | null;
-  expression: string;
+  variable: string;
+  comparisonOperator: string;
+  value: string;
 };
 
 type VariableValueType = "int" | "bool" | "double" | "string";
@@ -525,13 +528,36 @@ function isValidEditorEdge(value: unknown): value is EditorEdge {
   );
 }
 
+function parseConditionExpressionString(expr: string): {
+  variable: string;
+  comparisonOperator: string;
+  value: string;
+} {
+  const s = (expr ?? "").trim();
+  if (!s) return { variable: "", comparisonOperator: "==", value: "" };
+  // Longest first so ">=" is matched before ">"
+  for (const op of CONDITION_COMPARISON_OPERATORS) {
+    const i = s.indexOf(op);
+    if (i !== -1) {
+      return {
+        variable: s.slice(0, i).trim(),
+        comparisonOperator: op,
+        value: s.slice(i + op.length).trim()
+      };
+    }
+  }
+  return { variable: s, comparisonOperator: "==", value: "" };
+}
+
 function isValidConditionExpression(value: unknown): value is ConditionExpression {
   if (!isRecord(value)) return false;
   const operator = value.operator;
   return (
     typeof value.id === "string" &&
     (operator === null || operator === "AND" || operator === "OR") &&
-    typeof value.expression === "string"
+    typeof value.variable === "string" &&
+    typeof value.comparisonOperator === "string" &&
+    typeof value.value === "string"
   );
 }
 
@@ -627,6 +653,34 @@ function isValidEditorNode(
   return true;
 }
 
+function normalizeConditionExpressionFromView(
+  raw: Record<string, unknown>
+): ConditionExpression {
+  if (
+    typeof raw.variable === "string" &&
+    typeof raw.comparisonOperator === "string" &&
+    typeof raw.value === "string"
+  ) {
+    return {
+      id: String(raw.id),
+      operator:
+        raw.operator === "AND" || raw.operator === "OR" ? raw.operator : null,
+      variable: raw.variable,
+      comparisonOperator: raw.comparisonOperator,
+      value: raw.value
+    };
+  }
+  const parsed = parseConditionExpressionString(String(raw.expression ?? ""));
+  return {
+    id: String(raw.id),
+    operator:
+      raw.operator === "AND" || raw.operator === "OR" ? raw.operator : null,
+    variable: parsed.variable,
+    comparisonOperator: parsed.comparisonOperator,
+    value: parsed.value
+  };
+}
+
 function parseEditorView(
   viewJson: Record<string, unknown>,
   nodeTypes: NodeKind[]
@@ -634,7 +688,20 @@ function parseEditorView(
   const rawNodes = viewJson.nodes;
   const rawEdges = viewJson.edges;
   if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
-  if (!rawNodes.every((node) => isValidEditorNode(node, nodeTypes)) || !rawEdges.every(isValidEditorEdge)) {
+  const normalizedNodes = rawNodes.map((node) => {
+    if (!isRecord(node)) return node;
+    const conditionExpressions = node.conditionExpressions;
+    if (!Array.isArray(conditionExpressions)) return node;
+    return {
+      ...node,
+      conditionExpressions: conditionExpressions.map((expr) =>
+        normalizeConditionExpressionFromView(
+          isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
+        )
+      )
+    };
+  });
+  if (!normalizedNodes.every((node) => isValidEditorNode(node, nodeTypes)) || !rawEdges.every(isValidEditorEdge)) {
     return null;
   }
   const rawCanvas = isRecord(viewJson.canvas) ? viewJson.canvas : null;
@@ -651,7 +718,7 @@ function parseEditorView(
     : undefined;
   return {
     version: "v1",
-    nodes: rawNodes as EditorNode[],
+    nodes: normalizedNodes as EditorNode[],
     edges: rawEdges as EditorEdge[],
     canvas
   };
@@ -749,7 +816,9 @@ function buildStateRecords(
       if (node.conditionExpressions && node.conditionExpressions.length > 0) {
         state.Expressions = node.conditionExpressions.map((expression) => ({
           operator: expression.operator,
-          expression: expression.expression
+          expression: [expression.variable, expression.comparisonOperator, expression.value]
+            .filter(Boolean)
+            .join(" ")
         }));
       }
     } else if (node.kind === "flow_control.repeat") {
@@ -1365,18 +1434,31 @@ function parseDslToEditor(
       }
       let conditionExpressions =
         kind === "flow_control.condition" && Array.isArray(state.Expressions)
-          ? state.Expressions.map((expression) => ({
-              id: `condition-${conditionIndex++}`,
-              operator:
-                expression.operator === "AND" || expression.operator === "OR"
-                  ? expression.operator
-                  : null,
-              expression: expression.expression ?? ""
-            }))
+          ? state.Expressions.map((expression) => {
+              const parsed = parseConditionExpressionString(
+                expression.expression ?? ""
+              );
+              return {
+                id: `condition-${conditionIndex++}`,
+                operator:
+                  expression.operator === "AND" || expression.operator === "OR"
+                    ? expression.operator
+                    : null,
+                variable: parsed.variable,
+                comparisonOperator: parsed.comparisonOperator,
+                value: parsed.value
+              };
+            })
           : undefined;
       if (kind === "flow_control.condition" && (!conditionExpressions || conditionExpressions.length === 0)) {
         conditionExpressions = [
-          { id: `condition-${conditionIndex++}`, operator: null, expression: "" }
+          {
+            id: `condition-${conditionIndex++}`,
+            operator: null,
+            variable: "",
+            comparisonOperator: "==",
+            value: ""
+          }
         ];
       }
       nodes.push({
@@ -1519,7 +1601,7 @@ function NodeCard({
   onStartConnect,
   onCompleteConnect,
   onParamChange,
-  onConditionExpressionChange,
+  onConditionExpressionFieldChange,
   onAddConditionExpression,
   onRemoveConditionExpression,
   onVariableRowChange,
@@ -1557,7 +1639,11 @@ function NodeCard({
   onStartConnect: (portKey: string) => void;
   onCompleteConnect: () => void;
   onParamChange: (key: string, value: string) => void;
-  onConditionExpressionChange: (expressionId: string, value: string) => void;
+  onConditionExpressionFieldChange: (
+    expressionId: string,
+    field: "variable" | "comparisonOperator" | "value",
+    value: string
+  ) => void;
   onAddConditionExpression: (operator: ConditionOperator) => void;
   onRemoveConditionExpression: (expressionId: string) => void;
   onVariableRowChange?: (rowId: string, field: "name" | "value", value: string) => void;
@@ -1871,94 +1957,92 @@ function NodeCard({
 
       {node.isExpanded && node.kind === "flow_control.condition" && (
         <div className="mt-3 space-y-2 text-xs text-slate-600 pr-12">
-          {conditionExpressions.map((expression, index) => {
-            const parts = (expression.expression ?? "").trim().split(" ");
-            const variablePart = parts[0] ?? "";
-            const operatorPart = parts[1] ?? "";
-            const valuePart = parts.slice(2).join(" ");
+          {conditionExpressions.map((expression, index) => (
+            <div key={expression.id} className="space-y-1">
+              <span className="text-[10px] text-slate-500">Expression</span>
 
-            return (
-              <div key={expression.id} className="space-y-1">
-                <span className="text-[10px] text-slate-500">Expression</span>
-
-                {/* 1줄째: AND/OR 배지 + variable + operator */}
-                <div className="flex items-center gap-2 min-w-0">
-                  {index > 0 && (
-                    <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
-                      {expression.operator}
-                    </span>
-                  )}
-                  <input
-                    value={variablePart}
-                    onChange={(event) => {
-                      const nextVariable = event.target.value;
-                      const combined = [nextVariable, operatorPart, valuePart]
-                        .filter((item) => item && item.length > 0)
-                        .join(" ");
-                      onConditionExpressionChange(expression.id, combined);
-                    }}
-                    placeholder="variable"
-                    className="w-24 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                  />
-                  <input
-                    value={operatorPart}
-                    onChange={(event) => {
-                      const nextOperator = event.target.value;
-                      const combined = [variablePart, nextOperator, valuePart]
-                        .filter((item) => item && item.length > 0)
-                        .join(" ");
-                      onConditionExpressionChange(expression.id, combined);
-                    }}
-                    placeholder="=="
-                    className="w-16 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+              <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                {index > 0 && (
+                  <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
+                    {expression.operator}
+                  </span>
+                )}
+                <div className="flex-1 min-w-[80px]" data-no-drag>
+                  <VariableInput
+                    value={expression.variable}
+                    onChange={(value) =>
+                      onConditionExpressionFieldChange(
+                        expression.id,
+                        "variable",
+                        value
+                      )
+                    }
+                    placeholder="$.var or $"
+                    suggestions={availableVariables}
                   />
                 </div>
-
-                {/* 2줄째: value를 한 줄 전체로 표시 */}
-                <div className="flex items-center gap-2 min-w-0">
-                  <input
-                    value={valuePart}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      const combined = [variablePart, operatorPart, nextValue]
-                        .filter((item) => item && item.length > 0)
-                        .join(" ");
-                      onConditionExpressionChange(expression.id, combined);
-                    }}
-                    placeholder="value"
-                    className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                <select
+                  value={expression.comparisonOperator}
+                  onChange={(e) =>
+                    onConditionExpressionFieldChange(
+                      expression.id,
+                      "comparisonOperator",
+                      e.target.value
+                    )
+                  }
+                  className="flex-shrink-0 w-16 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                  data-no-drag
+                >
+                  {CONDITION_COMPARISON_OPERATORS.map((op) => (
+                    <option key={op} value={op}>
+                      {op}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex-1 min-w-[80px]" data-no-drag>
+                  <VariableInput
+                    value={expression.value}
+                    onChange={(value) =>
+                      onConditionExpressionFieldChange(
+                        expression.id,
+                        "value",
+                        value
+                      )
+                    }
+                    placeholder="value or $"
+                    suggestions={availableVariables}
                   />
-                  {index > 0 && (
-                    <button
-                      type="button"
-                      data-no-drag
-                      className="cursor-pointer flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveConditionExpression(expression.id);
-                      }}
-                      title="Remove expression"
+                </div>
+                {index > 0 && (
+                  <button
+                    type="button"
+                    data-no-drag
+                    className="cursor-pointer flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveConditionExpression(expression.id);
+                    }}
+                    title="Remove expression"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2.5}
+                      stroke="currentColor"
+                      className="h-3.5 w-3.5"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={2.5}
-                        stroke="currentColor"
-                        className="h-3.5 w-3.5"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M19.5 12h-15"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M19.5 12h-15"
+                      />
+                    </svg>
+                  </button>
+                )}
               </div>
-            );
-          })}
+            </div>
+          ))}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -2092,9 +2176,7 @@ function NodeCard({
                     value={node.params[field.key] ?? ""}
                     onChange={(value) => onParamChange(field.key, value)}
                     placeholder={
-                      field.placeholder
-                        ? `${field.placeholder} or type $ for variable`
-                        : undefined
+                      field.placeholder ? `${field.placeholder} or $` : undefined
                     }
                     suggestions={availableVariables}
                     className="mt-1"
@@ -2833,7 +2915,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     (operator: ConditionOperator | null): ConditionExpression => ({
       id: `condition-${nextConditionIndex.current++}`,
       operator,
-      expression: ""
+      variable: "",
+      comparisonOperator: "==",
+      value: ""
     }),
     []
   );
@@ -3044,9 +3128,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     );
   };
 
-  const handleConditionExpressionChange = (
+  const handleConditionExpressionFieldChange = (
     nodeId: string,
     expressionId: string,
+    field: "variable" | "comparisonOperator" | "value",
     value: string
   ) => {
     setNodes((prev) =>
@@ -3057,7 +3142,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         ];
         const nextExpressions = expressions.map((expression) =>
           expression.id === expressionId
-            ? { ...expression, expression: value }
+            ? { ...expression, [field]: value }
             : expression
         );
         setHasUnsavedChanges(true);
@@ -3925,10 +4010,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onParamChange={(key, value) =>
                             handleParamChange(node.id, key, value)
                           }
-                          onConditionExpressionChange={(expressionId, value) =>
-                            handleConditionExpressionChange(
+                          onConditionExpressionFieldChange={(
+                            expressionId,
+                            field,
+                            value
+                          ) =>
+                            handleConditionExpressionFieldChange(
                               node.id,
                               expressionId,
+                              field,
                               value
                             )
                           }

@@ -13,8 +13,7 @@ import {
   validateVariablePath
 } from "@/lib/variableReferences";
 
-const DEFAULT_PLACEHOLDER =
-  "Enter value or type $ to reference a variable";
+const DEFAULT_PLACEHOLDER = "Value or $";
 
 type VariableInputProps = {
   value: string;
