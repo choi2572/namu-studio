@@ -474,20 +474,24 @@ function getContainerFrameLayout(
     0,
     frameHeight - headerHeight - CONTAINER_FRAME_METRICS.padding * 2
   );
-  const regionWidth = branchCount > 0 ? bodyWidth / branchCount : bodyWidth;
-  const regions: ContainerFrameRegion[] = Array.from(
-    { length: branchCount },
-    (_, index) => ({
-      index,
-      label: getContainerBranchLabel(containerType, index),
-      bounds: {
-        x: bodyX + regionWidth * index,
-        y: bodyY,
-        width: regionWidth,
-        height: bodyHeight
-      }
-    })
-  );
+  // Repeat: 단일 body 영역, Parallel: 브랜치를 세로로 스택 배치
+  const regions: ContainerFrameRegion[] =
+    branchCount > 0
+      ? Array.from({ length: branchCount }, (_, index) => {
+          const isParallel = containerType === "parallel";
+          const regionHeight = isParallel ? bodyHeight / branchCount : bodyHeight;
+          return {
+            index,
+            label: getContainerBranchLabel(containerType, index),
+            bounds: {
+              x: bodyX,
+              y: isParallel ? bodyY + regionHeight * index : bodyY,
+              width: bodyWidth,
+              height: isParallel ? regionHeight : bodyHeight
+            }
+          };
+        })
+      : [];
   return {
     frame: { x: frameX, y: frameY, width: frameWidth, height: frameHeight },
     headerHeight,
@@ -2041,45 +2045,6 @@ function NodeCard({
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-1 min-w-0">
-            {/* Start/End icons before node name: START → END → name */}
-            {startEndBadge && (startEndBadge.showStart || startEndBadge.showEnd || startEndBadge.startError) && (
-              <span className="flex items-center gap-1 flex-shrink-0 pointer-events-none">
-                {startEndBadge.startError ? (
-                  <span
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-400 bg-amber-100 text-amber-700 [&>svg]:w-3 [&>svg]:h-3"
-                    title={startEndBadge.startError}
-                  >
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <path d="M12 2L1 21h22L12 2zm0 3.99L19.5 19h-15L12 6l.01-.01zM11 16h2v2h-2v-2zm0-6h2v4h-2v-4z" />
-                    </svg>
-                  </span>
-                ) : startEndBadge.showStart ? (
-                  <span
-                    className={cn(
-                      "inline-flex h-5 w-5 items-center justify-center rounded-full border [&>svg]:w-3 [&>svg]:h-3",
-                      startEndBadge.isRootScope
-                        ? "border-emerald-500 bg-emerald-100 text-emerald-700"
-                        : "border-teal-400 bg-teal-50 text-teal-700"
-                    )}
-                    title={startEndBadge.isRootScope ? "Workflow start" : "Scope start"}
-                  >
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <path d="M8 5v14l11-7L8 5z" />
-                    </svg>
-                  </span>
-                ) : null}
-                {startEndBadge.showEnd && (
-                  <span
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-400 bg-red-50 text-red-600 [&>svg]:w-3 [&>svg]:h-3"
-                    title="Scope end"
-                  >
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <path d="M6 6h12v12H6z" />
-                    </svg>
-                  </span>
-                )}
-              </span>
-            )}
             {isEditingName ? (
               <input
                 value={node.name}
@@ -2123,6 +2088,13 @@ function NodeCard({
               {nodeTypeLabel}
             </span>
           </div>
+
+          {/* Skill 노드: 펼쳤을 때 실제 Skill 이름도 노출 */}
+          {skillset && node.isExpanded && (
+            <div className="mb-1 text-[10px] text-slate-500 truncate" title={skillset.name}>
+              {skillset.name}
+            </div>
+          )}
 
         </div>
         {warningLabel && (
@@ -4007,17 +3979,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     });
   }, [nodeMap, nodeTypeConfig, validEdges, visibleNodeIds]);
 
-  /** Start 노드에서 나가는 첫 번째 엣지 ID (시각적 강조용) */
-  const firstOutgoingEdgeIdsFromStart = useMemo(() => {
-    const set = new Set<string>();
-    for (const [nodeId, badge] of startEndBadges) {
-      if (!badge.showStart || badge.startError) continue;
-      const firstEdge = edgesToRender.find((e) => e.from === nodeId);
-      if (firstEdge) set.add(firstEdge.id);
-    }
-    return set;
-  }, [edgesToRender, startEndBadges]);
-
   const containerFramesToRender = useMemo(() => {
     return nodes
       .filter((node) => isContainerNode(node) && node.isExpanded)
@@ -4496,17 +4457,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       const isConditionNode = fromNode.kind === "flow_control.condition";
                       const isTrueEdge = edge.fromPort === "true";
                       const isFalseEdge = edge.fromPort === "false";
-                      const isFirstOutgoingFromStart =
-                        firstOutgoingEdgeIdsFromStart.has(edge.id);
                       let strokeColor = selectedEdgeId === edge.id ? "#0f172a" : "#94a3b8";
                       let markerId = "arrow";
-                      let strokeWidth = selectedEdgeId === edge.id ? "2.5" : "2";
 
-                      if (isFirstOutgoingFromStart) {
-                        strokeColor = selectedEdgeId === edge.id ? "#047857" : "#059669";
-                        markerId = "arrow-true";
-                        strokeWidth = selectedEdgeId === edge.id ? "3" : "2.5";
-                      } else if (isConditionNode && isTrueEdge) {
+                      if (isConditionNode && isTrueEdge) {
                         strokeColor = selectedEdgeId === edge.id ? "#059669" : "#10b981";
                         markerId = "arrow-true";
                       } else if (isConditionNode && isFalseEdge) {
@@ -4519,7 +4473,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           key={edge.id}
                           d={path}
                           stroke={strokeColor}
-                          strokeWidth={strokeWidth}
+                          strokeWidth={selectedEdgeId === edge.id ? "2.5" : "2"}
                           fill="none"
                           markerEnd={`url(#${markerId})`}
                           className="cursor-pointer"
@@ -4556,17 +4510,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   )}
                 </div>
               </div>
-            </div>
-            {/* Start/End 범례: 에디터 코너에 항상 표시 (줌과 별도) */}
-            <div
-              className="pointer-events-none absolute left-4 top-4 z-20 rounded border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[10px] text-slate-600 shadow-sm"
-              aria-hidden
-            >
-              <span className="font-medium text-emerald-700">▶ START</span>
-              <span className="text-slate-500"> = entry point</span>
-              <span className="mx-1.5 text-slate-300">·</span>
-              <span className="font-medium text-slate-600">⏹ END</span>
-              <span className="text-slate-500"> = terminal</span>
             </div>
             <div className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
               <button
