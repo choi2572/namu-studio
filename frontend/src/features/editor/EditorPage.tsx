@@ -582,6 +582,27 @@ function isValidVariableRow(value: unknown): value is VariableRow {
   );
 }
 
+/** view JSON에서 온 variableRow를 정규화. 검증 실패 시 전체 parse가 DSL 폴백되지 않도록. */
+function normalizeVariableRowFromView(raw: unknown): VariableRow | null {
+  if (!isRecord(raw)) return null;
+  const id = typeof raw.id === "string" ? raw.id : "";
+  const name = typeof raw.name === "string" ? raw.name : "";
+  const value = typeof raw.value === "string" ? raw.value : "";
+  const rawType = (raw as { valueType?: unknown }).valueType;
+  const valueType: VariableValueType =
+    rawType === "int" || rawType === "integer"
+      ? "int"
+      : rawType === "bool"
+        ? "bool"
+        : rawType === "double"
+          ? "double"
+          : rawType === "string"
+            ? "string"
+            : "string";
+  if (!id) return null;
+  return { id, name, value, valueType };
+}
+
 function isValidContainerFrameData(value: unknown): value is ContainerFrameData {
   if (!isRecord(value)) return false;
   const width = value.width;
@@ -695,14 +716,29 @@ function parseEditorView(
   const normalizedNodes = rawNodes.map((node) => {
     if (!isRecord(node)) return node;
     const conditionExpressions = node.conditionExpressions;
-    if (!Array.isArray(conditionExpressions)) return node;
+    const conditionPart =
+      Array.isArray(conditionExpressions)
+        ? {
+            conditionExpressions: conditionExpressions.map((expr) =>
+              normalizeConditionExpressionFromView(
+                isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
+              )
+            )
+          }
+        : {};
+    const rawRows = (node as { variableRows?: unknown }).variableRows;
+    const variableRowsPart =
+      Array.isArray(rawRows)
+        ? {
+            variableRows: rawRows
+              .map(normalizeVariableRowFromView)
+              .filter((row): row is VariableRow => row !== null)
+          }
+        : {};
     return {
       ...node,
-      conditionExpressions: conditionExpressions.map((expr) =>
-        normalizeConditionExpressionFromView(
-          isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
-        )
-      )
+      ...conditionPart,
+      ...variableRowsPart
     };
   });
   if (!normalizedNodes.every((node) => isValidEditorNode(node, nodeTypes)) || !rawEdges.every(isValidEditorEdge)) {
