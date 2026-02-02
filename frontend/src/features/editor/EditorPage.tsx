@@ -835,32 +835,28 @@ function buildStateRecords(
     if (node.kind === "flow_control.output") {
       state = { Type: "Succeed" };
     } else if (node.kind === "flow_control.condition") {
-      const choices: Record<string, unknown>[] = [];
       const trueTarget = getNext("true");
-      if (trueTarget) {
-        choices.push({
-          Variable: "$.condition",
-          BooleanEquals: true,
-          Next: trueTarget
-        });
-      }
       const falseTarget = getNext("false");
-      if (falseTarget) {
-        choices.push({
-          Variable: "$.condition",
-          BooleanEquals: false,
-          Next: falseTarget
-        });
+      const firstExpr = node.conditionExpressions?.[0];
+      const variableRaw = firstExpr?.variable?.trim() ?? "";
+      const Variable = variableRaw.startsWith("$") ? variableRaw : `$.${variableRaw || "value"}`;
+      const Operator = firstExpr?.comparisonOperator ?? "==";
+      const rawVal = firstExpr?.value ?? "";
+      let Value: number | boolean | string;
+      if (rawVal === "true" || rawVal === "false") {
+        Value = rawVal === "true";
+      } else {
+        const n = Number(rawVal);
+        Value = Number.isFinite(n) ? n : rawVal;
       }
-      state = { Type: "Choice", Choices: choices };
-      if (node.conditionExpressions && node.conditionExpressions.length > 0) {
-        state.Expressions = node.conditionExpressions.map((expression) => ({
-          operator: expression.operator,
-          expression: [expression.variable, expression.comparisonOperator, expression.value]
-            .filter(Boolean)
-            .join(" ")
-        }));
-      }
+      state = {
+        Type: "Condition",
+        If: {
+          Condition: { Variable, Operator, Value },
+          Then: trueTarget ?? ""
+        },
+        Else: falseTarget ?? ""
+      };
     } else if (node.kind === "flow_control.repeat") {
       const payload = containerPayloads?.get(node.id);
       const next = getNext("next");
@@ -1055,6 +1051,8 @@ type DslState = {
   Parameters?: Record<string, unknown>;
   Choices?: Array<Record<string, unknown>>;
   Expressions?: Array<{ operator?: string | null; expression?: string }>;
+  If?: { Condition?: { Variable?: string; Operator?: string; Value?: unknown }; Then?: string };
+  Else?: string;
   Branches?: DslBranch[];
   Body?: DslBranch;
 };
@@ -1505,6 +1503,7 @@ function parseDslToEditor(
   const edges: EditorEdge[] = [];
 
   const createNodeKind = (state: DslState, stateName: string): NodeKind => {
+    if (state.Type === "Condition") return "flow_control.condition";
     if (state.Type === "Choice") return "flow_control.condition";
     if (state.Type === "Succeed") return "flow_control.output";
     if (state.Type === "Pass") return "flow_control.input";
@@ -1535,34 +1534,59 @@ function parseDslToEditor(
       if (kind === "flow_control.repeat" && typeof state.Count === "number") {
         params.count = `${state.Count}`;
       }
-      let conditionExpressions =
-        kind === "flow_control.condition" && Array.isArray(state.Expressions)
-          ? state.Expressions.map((expression) => {
-              const parsed = parseConditionExpressionString(
-                expression.expression ?? ""
-              );
-              return {
-                id: `condition-${conditionIndex++}`,
-                operator:
-                  expression.operator === "AND" || expression.operator === "OR"
-                    ? expression.operator
-                    : null,
-                variable: parsed.variable,
-                comparisonOperator: parsed.comparisonOperator,
-                value: parsed.value
-              };
-            })
-          : undefined;
-      if (kind === "flow_control.condition" && (!conditionExpressions || conditionExpressions.length === 0)) {
-        conditionExpressions = [
-          {
-            id: `condition-${conditionIndex++}`,
-            operator: null,
-            variable: "",
-            comparisonOperator: "==",
-            value: ""
-          }
-        ];
+      let conditionExpressions: ConditionExpression[] | undefined;
+      if (kind === "flow_control.condition") {
+        const ifCond = isRecord(state.If) && isRecord(state.If.Condition) ? state.If.Condition : null;
+        if (ifCond) {
+          const variable = typeof ifCond.Variable === "string" ? ifCond.Variable.replace(/^\$\.?/, "") : "";
+          const comparisonOperator = typeof ifCond.Operator === "string" ? ifCond.Operator : "==";
+          const rawVal = ifCond.Value;
+          const value =
+            typeof rawVal === "string"
+              ? rawVal
+              : typeof rawVal === "number"
+                ? String(rawVal)
+                : typeof rawVal === "boolean"
+                  ? rawVal ? "true" : "false"
+                  : "";
+          conditionExpressions = [
+            {
+              id: `condition-${conditionIndex++}`,
+              operator: null,
+              variable,
+              comparisonOperator,
+              value
+            }
+          ];
+        } else if (Array.isArray(state.Expressions)) {
+          conditionExpressions = state.Expressions.map((expression) => {
+            const parsed = parseConditionExpressionString(
+              (expression as { expression?: string }).expression ?? ""
+            );
+            return {
+              id: `condition-${conditionIndex++}`,
+              operator:
+                (expression as { operator?: string }).operator === "AND" ||
+                (expression as { operator?: string }).operator === "OR"
+                  ? ((expression as { operator: ConditionOperator }).operator as ConditionOperator)
+                  : null,
+              variable: parsed.variable,
+              comparisonOperator: parsed.comparisonOperator,
+              value: parsed.value
+            };
+          });
+        }
+        if (!conditionExpressions || conditionExpressions.length === 0) {
+          conditionExpressions = [
+            {
+              id: `condition-${conditionIndex++}`,
+              operator: null,
+              variable: "",
+              comparisonOperator: "==",
+              value: ""
+            }
+          ];
+        }
       }
       nodes.push({
         id,
@@ -1604,7 +1628,28 @@ function parseDslToEditor(
     Object.entries(groupStates).forEach(([stateName, state]) => {
       const fromId = idByState.get(stateName);
       if (!fromId) return;
-      if (state.Type === "Choice" && Array.isArray(state.Choices)) {
+      if (state.Type === "Condition" && isRecord(state.If)) {
+        const thenStateName = state.If.Then;
+        const elseStateName = state.Else;
+        const trueTarget = typeof thenStateName === "string" ? idByState.get(thenStateName) : undefined;
+        const falseTarget = typeof elseStateName === "string" ? idByState.get(elseStateName) : undefined;
+        if (trueTarget) {
+          edges.push({
+            id: `edge-${edgeIndex++}`,
+            from: fromId,
+            fromPort: "true",
+            to: trueTarget
+          });
+        }
+        if (falseTarget) {
+          edges.push({
+            id: `edge-${edgeIndex++}`,
+            from: fromId,
+            fromPort: "false",
+            to: falseTarget
+          });
+        }
+      } else if (state.Type === "Choice" && Array.isArray(state.Choices)) {
         const trueChoice = state.Choices.find(
           (choice) => isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === true
         );
