@@ -364,11 +364,19 @@ function getExpandedContentHeight(
   if (!config) return 0;
   const fieldCount = config.paramFields.length;
   if (fieldCount === 0) return 0;
-  return (
+  // 기본 파라미터 필드 높이
+  let height =
     NODE_METRICS.expandedTopPadding +
     fieldCount * NODE_METRICS.fieldHeight +
-    Math.max(0, fieldCount - 1) * NODE_METRICS.fieldGap
-  );
+    Math.max(0, fieldCount - 1) * NODE_METRICS.fieldGap;
+
+  // Skill 노드는 펼쳤을 때 타입 배지 아래에 Skill 이름 한 줄이 추가되므로
+  // 그만큼 여유 높이를 조금 더 준다.
+  if (node.kind.startsWith("skill.")) {
+    height += NODE_METRICS.fieldGap + 12;
+  }
+
+  return height;
 }
 
 function getNodeHeight(

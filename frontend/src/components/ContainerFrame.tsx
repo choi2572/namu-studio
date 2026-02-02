@@ -41,7 +41,7 @@ export function ContainerFrame({
   badgeLabel,
   onResizeStart
 }: ContainerFrameProps) {
-  const dividerPositions = Array.from(
+  const verticalDividerPositions = Array.from(
     new Set(
       regions
         .slice(1)
@@ -49,6 +49,22 @@ export function ContainerFrame({
         .filter((value) => value > 0)
     )
   ).sort((a, b) => a - b);
+
+  // Parallel 세로 스택 레이아웃일 때 브랜치 사이를 가르는 가로 구분선
+  const hasVerticalStack =
+    regions.length > 1 &&
+    regions.every((region) => region.bounds.x === regions[0].bounds.x);
+
+  const horizontalDividerPositions = hasVerticalStack
+    ? Array.from(
+        new Set(
+          regions
+            .slice(1)
+            .map((region) => region.bounds.y - position.y)
+            .filter((value) => value > 0)
+        )
+      ).sort((a, b) => a - b)
+    : [];
 
   return (
     <div
@@ -84,11 +100,19 @@ export function ContainerFrame({
         )}
       </div>
 
-      {dividerPositions.map((offset) => (
+      {verticalDividerPositions.map((offset) => (
         <div
-          key={`divider-${offset}`}
+          key={`v-divider-${offset}`}
           className="absolute top-0 bottom-0 w-[2px] bg-slate-400/70"
           style={{ left: offset, top: headerHeight }}
+        />
+      ))}
+
+      {horizontalDividerPositions.map((offset) => (
+        <div
+          key={`h-divider-${offset}`}
+          className="absolute left-0 right-0 h-[2px] bg-slate-400/70"
+          style={{ top: offset }}
         />
       ))}
 
