@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ContainerFrame, type ContainerFrameRegion } from "@/components/ContainerFrame";
 import type { MonitorGraph, MonitorNode, MonitorEdge, MonitorContainer } from "@/features/monitor/monitorGraph";
 import { nodePathId, NODE_PATH } from "@/lib/ids";
+import { computeStartEndForScope } from "@/lib/startEndDetection";
 
 // Editor의 상수들 재사용
 const NODE_METRICS = {
@@ -24,11 +25,11 @@ const SPACING_X = 320;
 const ROW_GAP = 60;
 const PADDING = 80;
 
-// Monitor container frame (read-only)
-const CONTAINER_HEADER_HEIGHT = 36;
-const CONTAINER_PADDING = 16;
+// Monitor container frame (read-only) — editor와 동일한 구조: 노드 아래에 프레임
+const CONTAINER_HEADER_HEIGHT = 28;
+const CONTAINER_PADDING = 12;
 const CONTAINER_ROW_GAP = 24;
-const CONTAINER_COLUMN_GAP = 24;
+const CONTAINER_NODE_OFFSET_Y = 12; // 노드 카드와 프레임 사이 간격 (editor offsetY)
 const CONTAINER_MIN_WIDTH = 280;
 const CONTAINER_MIN_HEIGHT = 120;
 const CONTAINER_BRANCH_MIN_WIDTH = 200;
@@ -163,6 +164,39 @@ export function getPathIdToPositionFromViewJson(
   return result;
 }
 
+/** Start/End 결과: pathId 기준 (모니터는 pathId 사용) */
+function computeMonitorStartEnd(graph: MonitorGraph): {
+  startPathIds: Set<string>;
+  endPathIds: Set<string>;
+} {
+  const startPathIds = new Set<string>();
+  const endPathIds = new Set<string>();
+  const topLevel = graph.nodes.filter((n) => n.containerPathId === null);
+  const topPathIds = topLevel.map((n) => n.pathId);
+  const topEdges = graph.edges.filter(
+    (e) => topPathIds.includes(e.from) && topPathIds.includes(e.to)
+  );
+  const rootResult = computeStartEndForScope(
+    { nodeIds: topPathIds, edges: topEdges.map((e) => ({ from: e.from, to: e.to })) }
+  );
+  if (rootResult.startNodeId) startPathIds.add(rootResult.startNodeId);
+  rootResult.endNodeIds.forEach((id) => endPathIds.add(id));
+
+  graph.containers.forEach((container) => {
+    const innerPathIds = container.regions.flatMap((r) => r.pathIds);
+    const innerEdges = graph.edges.filter(
+      (e) => innerPathIds.includes(e.from) && innerPathIds.includes(e.to)
+    );
+    const scopeResult = computeStartEndForScope({
+      nodeIds: innerPathIds,
+      edges: innerEdges.map((e) => ({ from: e.from, to: e.to }))
+    });
+    if (scopeResult.startNodeId) startPathIds.add(scopeResult.startNodeId);
+    scopeResult.endNodeIds.forEach((id) => endPathIds.add(id));
+  });
+  return { startPathIds, endPathIds };
+}
+
 function computeMonitorLayout(
   graph: MonitorGraph,
   statusByApiStateName: Map<string, { status: NodeStatus; durationMs: number | null }>,
@@ -171,6 +205,8 @@ function computeMonitorLayout(
   positionedNodes: PositionedMonitorNode[];
   containerFrames: ContainerFrameLayout[];
   canvasSize: { width: number; height: number };
+  startPathIds: Set<string>;
+  endPathIds: Set<string>;
 } {
   const topLevelNodes = graph.nodes.filter((n) => n.containerPathId === null);
   const topLevelEdges = graph.edges.filter((e) => {
@@ -188,13 +224,11 @@ function computeMonitorLayout(
   }));
   const dagEdges: DagEdge[] = topLevelEdges.map((e) => ({ id: e.id, from: e.from, to: e.to }));
   const autoTopPositions = computeAutoLayout(dagNodes, dagEdges);
-  // view_json 위치가 있으면 사용 (에디터 auto layout과 동일), 없으면 auto layout
   const topPositions = new Map<string, { x: number; y: number }>();
   topLevelNodes.forEach((n) => {
     const fromView = viewPositions?.get(n.pathId);
-    if (fromView) {
-      topPositions.set(n.pathId, fromView);
-    } else {
+    if (fromView) topPositions.set(n.pathId, fromView);
+    else {
       const fromAuto = autoTopPositions.get(n.pathId);
       if (fromAuto) topPositions.set(n.pathId, fromAuto);
     }
@@ -202,61 +236,64 @@ function computeMonitorLayout(
 
   const positionedNodes: PositionedMonitorNode[] = [];
   const containerFrames: ContainerFrameLayout[] = [];
+  const frameYOffset = NODE_METRICS.collapsedHeight + CONTAINER_NODE_OFFSET_Y;
 
   topLevelNodes.forEach((node) => {
     const pos = topPositions.get(node.pathId);
     if (!pos) return;
     const status = statusByApiStateName.get(node.apiStateName)?.status ?? NodeStatus.WAITING;
     const durationMs = statusByApiStateName.get(node.apiStateName)?.durationMs ?? null;
+
     if (node.isContainer && node.containerType) {
       const container = graph.containers.find((c) => c.pathId === node.pathId);
       if (!container) return;
       const innerNodes = graph.nodes.filter((n) => n.containerPathId === node.pathId);
+      const frameX = pos.x;
+      const frameY = pos.y + frameYOffset;
+      const bodyX = frameX + CONTAINER_PADDING;
+      const bodyY = frameY + CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING;
+
       if (container.type === "repeat") {
         const region = container.regions[0];
         const pathIds = region?.pathIds ?? [];
         const children = pathIds
           .map((pathId) => graph.nodes.find((n) => n.pathId === pathId))
           .filter((n): n is MonitorNode => n != null);
-        let yCursor = pos.y + CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING;
-        const regionWidth = Math.max(
-          CONTAINER_MIN_WIDTH,
-          NODE_METRICS.width + CONTAINER_PADDING * 2
+        const bodyWidth = Math.max(
+          CONTAINER_MIN_WIDTH - CONTAINER_PADDING * 2,
+          NODE_METRICS.width
         );
-        const regionHeight =
-          CONTAINER_HEADER_HEIGHT +
-          CONTAINER_PADDING * 2 +
-          children.length * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) -
-          CONTAINER_ROW_GAP;
-        const frameWidth = regionWidth;
-        const frameHeight = Math.max(CONTAINER_MIN_HEIGHT, regionHeight);
-        const bounds = {
-          x: pos.x,
-          y: pos.y,
-          width: frameWidth,
-          height: frameHeight
-        };
+        const bodyHeight =
+          children.length * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) - CONTAINER_ROW_GAP;
+        const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
+        const frameHeight =
+          CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING * 2 + Math.max(0, bodyHeight);
+
+        positionedNodes.push({
+          ...node,
+          status,
+          durationMs,
+          position: pos
+        });
         containerFrames.push({
           container,
-          position: { x: pos.x, y: pos.y },
-          size: { width: frameWidth, height: frameHeight },
+          position: { x: frameX, y: frameY },
+          size: { width: frameWidth, height: Math.max(CONTAINER_MIN_HEIGHT, frameHeight) },
           headerHeight: CONTAINER_HEADER_HEIGHT,
           regions: [
             {
               index: 0,
               label: region?.label ?? "Body",
-              bounds,
+              bounds: { x: bodyX, y: bodyY, width: bodyWidth, height: Math.max(0, bodyHeight) },
               isEmpty: children.length === 0
             }
           ]
         });
+        let yCursor = bodyY;
         children.forEach((child) => {
           const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
           const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
-          const childPos = viewPositions?.get(child.pathId) ?? {
-            x: pos.x + CONTAINER_PADDING,
-            y: yCursor
-          };
+          const childPos = viewPositions?.get(child.pathId) ?? { x: bodyX, y: yCursor };
           positionedNodes.push({
             ...child,
             status: cStatus,
@@ -267,48 +304,54 @@ function computeMonitorLayout(
         });
       } else {
         const branchCount = container.branchCount || 1;
-        const regionWidth = Math.max(
+        const bodyWidth = Math.max(
           CONTAINER_BRANCH_MIN_WIDTH,
           NODE_METRICS.width + CONTAINER_PADDING
         );
+        const regionHeights = container.regions.map((reg) => {
+          const n = reg.pathIds.length;
+          const contentHeight =
+            Math.max(1, n) * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) - CONTAINER_ROW_GAP;
+          return Math.max(CONTAINER_MIN_HEIGHT, CONTAINER_PADDING * 2 + contentHeight);
+        });
+        const totalBodyHeight = regionHeights.reduce((a, b) => a + b, 0);
+        const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
+        const frameHeight = CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING * 2 + totalBodyHeight;
+
         const regions: ContainerFrameRegion[] = container.regions.map((reg, idx) => {
-          const pathIds = reg.pathIds;
-          const children = pathIds
-            .map((pathId) => graph.nodes.find((n) => n.pathId === pathId))
-            .filter((n): n is MonitorNode => n != null);
-          const height =
-            CONTAINER_HEADER_HEIGHT +
-            CONTAINER_PADDING * 2 +
-            Math.max(1, children.length) * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) -
-            CONTAINER_ROW_GAP;
+          let regionY = bodyY;
+          for (let i = 0; i < idx; i++) regionY += regionHeights[i];
           return {
             index: idx,
             label: reg.label,
             bounds: {
-              x: pos.x + CONTAINER_PADDING + idx * (regionWidth + 2),
-              y: pos.y,
-              width: regionWidth,
-              height: Math.max(CONTAINER_MIN_HEIGHT, height)
+              x: bodyX,
+              y: regionY,
+              width: bodyWidth,
+              height: regionHeights[idx]
             },
-            isEmpty: children.length === 0
+            isEmpty: reg.pathIds.length === 0
           };
         });
-        const totalWidth =
-          CONTAINER_PADDING * 2 + branchCount * regionWidth + (branchCount - 1) * 2;
-        const maxHeight = Math.max(
-          ...regions.map((r) => r.bounds.height),
-          CONTAINER_MIN_HEIGHT
-        );
+
+        positionedNodes.push({
+          ...node,
+          status,
+          durationMs,
+          position: pos
+        });
         containerFrames.push({
           container,
-          position: { x: pos.x, y: pos.y },
-          size: { width: totalWidth, height: maxHeight },
+          position: { x: frameX, y: frameY },
+          size: { width: frameWidth, height: frameHeight },
           headerHeight: CONTAINER_HEADER_HEIGHT,
           regions
         });
         container.regions.forEach((reg, idx) => {
-          let yCursor = pos.y + CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING;
-          const regionX = pos.x + CONTAINER_PADDING + idx * (regionWidth + 2);
+          let regionY = bodyY;
+          for (let i = 0; i < idx; i++) regionY += regionHeights[i];
+          let yCursor = regionY + CONTAINER_PADDING;
+          const regionX = bodyX;
           reg.pathIds.forEach((pathId) => {
             const child = graph.nodes.find((n) => n.pathId === pathId);
             if (!child) return;
@@ -335,6 +378,8 @@ function computeMonitorLayout(
     }
   });
 
+  const { startPathIds, endPathIds } = computeMonitorStartEnd(graph);
+
   let maxX = CANVAS_DEFAULT.width;
   let maxY = CANVAS_DEFAULT.height;
   positionedNodes.forEach((n) => {
@@ -349,7 +394,9 @@ function computeMonitorLayout(
   return {
     positionedNodes,
     containerFrames,
-    canvasSize: { width: maxX, height: maxY }
+    canvasSize: { width: maxX, height: maxY },
+    startPathIds,
+    endPathIds
   };
 }
 
@@ -644,12 +691,19 @@ export function DagView({
 
   // --- Render: Monitor graph mode (containers + nested) ---
   if (useGraphMode && monitorLayout) {
-    const { positionedNodes, containerFrames } = monitorLayout;
+    const { positionedNodes, containerFrames, startPathIds, endPathIds } = monitorLayout;
     const edgesToRenderGraph = monitorGraph.edges.filter((e) => {
       const fromExists = positionedNodes.some((n) => n.pathId === e.from);
       const toExists = positionedNodes.some((n) => n.pathId === e.to);
       return fromExists && toExists;
     });
+
+    const showStartRibbon = (pathId: string) =>
+      startPathIds.has(pathId) && !endPathIds.has(pathId);
+    const showEndRibbon = (pathId: string) =>
+      endPathIds.has(pathId) && !startPathIds.has(pathId);
+    const showStartEndRibbon = (pathId: string) =>
+      startPathIds.has(pathId) && endPathIds.has(pathId);
 
     return (
       <div
@@ -705,11 +759,20 @@ export function DagView({
         ))}
 
         {positionedNodes.map((node) => {
-          const nodeTypeInfo = getNodeTypeInfo(node.nodeName, node.stateName);
+          const nodeTypeInfo =
+            node.containerType === "repeat"
+              ? { type: "Repeat", colors: NODE_TYPE_COLORS.flow_control }
+              : node.containerType === "parallel"
+                ? { type: "Parallel", colors: NODE_TYPE_COLORS.flow_control }
+                : getNodeTypeInfo(node.nodeName, node.stateName);
           const isRunning = node.status === NodeStatus.RUNNING;
           const isCompleted = node.status === NodeStatus.SUCCEEDED;
           const isWaiting = node.status === NodeStatus.WAITING;
           const isSelected = selectedNode === node.pathId;
+          const hasStart = showStartRibbon(node.pathId);
+          const hasEnd = showEndRibbon(node.pathId);
+          const hasStartEnd = showStartEndRibbon(node.pathId);
+          const hasRibbon = hasStart || hasEnd || hasStartEnd;
 
           return (
             <div
@@ -732,6 +795,43 @@ export function DagView({
                   isSelected ? "ring-4 ring-slate-400 ring-offset-2" : "hover:shadow-lg"
                 )}
               >
+                {/* Start/End 리본 — editor와 동일 */}
+                {hasRibbon && (
+                  <>
+                    {hasStartEnd ? (
+                      <div
+                        className="absolute left-0 right-0 top-0 z-10 h-6 overflow-hidden rounded-t-[6px] shadow-sm"
+                        aria-hidden
+                      >
+                        <div
+                          className="absolute inset-0 bg-emerald-600"
+                          style={{ clipPath: "polygon(0 0, 57.14% 0, 42.86% 100%, 0 100%)" }}
+                        />
+                        <div
+                          className="absolute inset-0 bg-slate-500"
+                          style={{ clipPath: "polygon(57.14% 0, 100% 0, 100% 100%, 42.86% 100%)" }}
+                        />
+                        <span className="absolute left-1 top-0.5 text-[9px] font-bold text-white drop-shadow-sm">
+                          ▶ START
+                        </span>
+                        <span className="absolute right-1 bottom-0.5 text-[9px] font-bold text-white drop-shadow-sm">
+                          END ⏹
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        className={cn(
+                          "absolute left-0 right-0 top-0 z-10 flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
+                          hasStart && "bg-emerald-600",
+                          hasEnd && "bg-slate-500"
+                        )}
+                        aria-hidden
+                      >
+                        {hasStart ? "▶ START" : "⏹ END"}
+                      </div>
+                    )}
+                  </>
+                )}
                 <div className={cn("absolute left-0 top-0 bottom-0 w-1", nodeTypeInfo.colors.indicator)} />
                 <div className="flex items-start justify-between pl-1">
                   <div className="flex-1 min-w-0">
