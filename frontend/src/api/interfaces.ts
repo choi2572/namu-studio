@@ -45,6 +45,8 @@ export interface RunsApi {
   getSnapshot(runId: string): Promise<RunSnapshot>;
   getNodeDebug(runId: string, stateName: string): Promise<NodeDebugBundle>;
   getEvents(runId: string, afterSeq: number): Promise<RunEvent[]>;
+  /** Start a new run for a published workflow. Returns the new run summary. */
+  startRun(workflowId: string, runInput?: Record<string, unknown>): Promise<RunSummary>;
 }
 
 export interface SkillsetsApi {

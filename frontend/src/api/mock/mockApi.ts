@@ -12,6 +12,7 @@ import {
   NodeDebugBundle,
   NodeStatus,
   RunEvent,
+  RunStatus,
   RunSummary,
   SkillsetsResponse,
   ValidationError,
@@ -357,6 +358,46 @@ export const mockRunsApi: RunsApi = {
   async getEvents(runId: string, afterSeq: number): Promise<RunEvent[]> {
     const events = runEvents[runId] ?? [];
     return delay(deepClone(events.filter((event) => event.seq > afterSeq)));
+  },
+
+  async startRun(
+    workflowId: string,
+    _runInput?: Record<string, unknown>
+  ): Promise<RunSummary> {
+    const workflow = workflowList.find((w) => w.workflowId === workflowId);
+    if (!workflow || workflow.state !== "PUBLISHED") {
+      throw new Error(`Workflow ${workflowId} not found or not published`);
+    }
+    const runId = `run-${Date.now()}`;
+    const now = new Date().toISOString();
+    const newRun: RunSummary = {
+      runId,
+      workflowId,
+      workflowName: workflow.name,
+      status: RunStatus.RUNNING,
+      startedAt: now,
+      durationMs: null
+    };
+    runSummaries.unshift(newRun);
+    runEvents[runId] = [
+      {
+        eventId: `ev-${runId}`,
+        runId,
+        seq: 1,
+        timestamp: now,
+        eventType: "RUN_STARTED",
+        payload: {}
+      }
+    ];
+    nodeStateSnapshots[runId] = [];
+    const wfIndex = workflowList.findIndex((w) => w.workflowId === workflowId);
+    if (wfIndex >= 0) {
+      workflowList[wfIndex] = {
+        ...workflowList[wfIndex],
+        latestRun: newRun
+      };
+    }
+    return delay(deepClone(newRun));
   }
 };
 

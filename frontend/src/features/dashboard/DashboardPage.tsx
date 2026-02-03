@@ -338,8 +338,11 @@ export function DashboardPage() {
                           router.push(`/editor/${workflow.workflowId}`);
                           return;
                         }
+                        // PUBLISHED: 항상 Run Monitor. run 있으면 해당 run, 없으면 workflow 모니터( Run 버튼 )
                         if (latestRunForWorkflow) {
                           router.push(`/monitor/${latestRunForWorkflow.runId}`);
+                        } else {
+                          router.push(`/monitor/workflow/${workflow.workflowId}`);
                         }
                       }}
                       className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50"

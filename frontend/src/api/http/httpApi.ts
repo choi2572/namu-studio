@@ -160,5 +160,20 @@ export const httpRunsApi: RunsApi = {
     logApiCall("GET", url);
     const response = await fetch(url);
     return handleResponse<RunEvent[]>(response);
+  },
+
+  async startRun(
+    workflowId: string,
+    runInput?: Record<string, unknown>
+  ): Promise<RunSummary> {
+    const url = getApiUrl("/runs");
+    logApiCall("POST", url, { workflowId, runInput });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workflowId, runInput: runInput ?? {} })
+    });
+    const created = await handleResponse<{ runId: string; workflowId: string; status: string }>(response);
+    return this.get(created.runId);
   }
 };
