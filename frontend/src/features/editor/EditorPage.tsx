@@ -1933,13 +1933,14 @@ function NodeCard({
               aria-hidden
             >
               {/* 사선으로 나눈 start(좌상) / end(우하) */}
+              {/* 윗변 4:3, 아랫변 3:4 비율로 나누는 사선 */}
               <div
                 className="absolute inset-0 bg-emerald-600"
-                style={{ clipPath: "polygon(0 0, 100% 0, 0 100%)" }}
+                style={{ clipPath: "polygon(0 0, 57.14% 0, 42.86% 100%, 0 100%)" }}
               />
               <div
                 className="absolute inset-0 bg-slate-500"
-                style={{ clipPath: "polygon(100% 0, 100% 100%, 0 100%)" }}
+                style={{ clipPath: "polygon(57.14% 0, 100% 0, 100% 100%, 42.86% 100%)" }}
               />
               <span className="absolute left-1 top-0.5 text-[9px] font-bold text-white drop-shadow-sm">
                 ▶ START
