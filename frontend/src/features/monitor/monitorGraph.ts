@@ -31,6 +31,8 @@ export type MonitorEdge = {
   id: string;
   from: string;
   to: string;
+  /** Condition 노드에서 나가는 엣지일 때: Then(녹색) / Else(주황) 구분 */
+  conditionBranch?: "then" | "else";
 };
 
 export type MonitorContainerRegion = {
@@ -119,16 +121,24 @@ function collectNodesAndEdges(
     if (type === "Condition") {
       const thenTarget = isRecord(state.If) && typeof state.If.Then === "string" ? state.If.Then : null;
       const elseTarget = typeof state.Else === "string" ? state.Else : null;
-      [thenTarget, elseTarget].forEach((target) => {
-        if (target && Object.prototype.hasOwnProperty.call(states, target)) {
-          const toPathId = nodePathId([...pathPrefix, target]);
-          edges.push({
-            id: `edge-${edgeIdCounter.current++}`,
-            from: pathId,
-            to: toPathId
-          });
-        }
-      });
+      if (thenTarget && Object.prototype.hasOwnProperty.call(states, thenTarget)) {
+        const toPathId = nodePathId([...pathPrefix, thenTarget]);
+        edges.push({
+          id: `edge-${edgeIdCounter.current++}`,
+          from: pathId,
+          to: toPathId,
+          conditionBranch: "then"
+        });
+      }
+      if (elseTarget && Object.prototype.hasOwnProperty.call(states, elseTarget)) {
+        const toPathId = nodePathId([...pathPrefix, elseTarget]);
+        edges.push({
+          id: `edge-${edgeIdCounter.current++}`,
+          from: pathId,
+          to: toPathId,
+          conditionBranch: "else"
+        });
+      }
     }
 
     if ((type === "Choice" || type === "Condition") && Array.isArray(state.Choices)) {

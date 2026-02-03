@@ -310,14 +310,12 @@ function computeMonitorLayout(
           CONTAINER_BRANCH_MIN_WIDTH,
           NODE_METRICS.width + CONTAINER_PADDING
         );
+        const minRegionHeight = PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2;
         const regionHeights = container.regions.map((reg) => {
           const n = reg.pathIds.length;
           const contentHeight =
             Math.max(0, n) * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) - (n > 0 ? CONTAINER_ROW_GAP : 0);
-          return Math.max(
-            CONTAINER_MIN_HEIGHT,
-            PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2 + contentHeight
-          );
+          return Math.max(minRegionHeight, minRegionHeight + contentHeight);
         });
         const totalBodyHeight = regionHeights.reduce((a, b) => a + b, 0);
         const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
@@ -744,6 +742,12 @@ export function DagView({
             <marker id="arrow-monitor" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
               <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" />
             </marker>
+            <marker id="arrow-monitor-then" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#059669" />
+            </marker>
+            <marker id="arrow-monitor-else" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#d97706" />
+            </marker>
           </defs>
           {edgesToRenderGraph.map((edge) => {
             const fromNode = positionedNodes.find((n) => n.pathId === edge.from);
@@ -761,8 +765,12 @@ export function DagView({
             const c1x = start.x + (end.x >= start.x ? curve : -curve);
             const c2x = end.x + (end.x >= start.x ? -curve : curve);
             const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
+            const isThen = edge.conditionBranch === "then";
+            const isElse = edge.conditionBranch === "else";
+            const stroke = isThen ? "#059669" : isElse ? "#d97706" : "#94a3b8";
+            const marker = isThen ? "url(#arrow-monitor-then)" : isElse ? "url(#arrow-monitor-else)" : "url(#arrow-monitor)";
             return (
-              <path key={edge.id} d={d} stroke="#94a3b8" strokeWidth="2" fill="none" markerEnd="url(#arrow-monitor)" />
+              <path key={edge.id} d={d} stroke={stroke} strokeWidth="2" fill="none" markerEnd={marker} />
             );
           })}
         </svg>
@@ -868,21 +876,11 @@ export function DagView({
                     <StatusBadge status={node.status} />
                   </div>
                 </div>
-                {/* Start/End 리본 — DOM 맨 뒤에 두어 항상 위에 그려지고, pt-6으로 본문이 밀려 있음 */}
+                {/* Start/End 리본 — editor와 동일: start+end 동시면 사선 구획, 아니면 단일 색 */}
                 {hasRibbon && (
-                  <div
-                    className={cn(
-                      "pointer-events-none absolute left-0 right-0 top-0 z-20 flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-md",
-                      hasStartEnd
-                        ? "overflow-hidden"
-                        : hasStart
-                          ? "bg-emerald-600"
-                          : "bg-slate-500"
-                    )}
-                    aria-hidden
-                  >
+                  <div className="pointer-events-none absolute left-0 right-0 top-0 z-20" aria-hidden>
                     {hasStartEnd ? (
-                      <>
+                      <div className="absolute left-0 right-0 top-0 z-10 h-6 overflow-hidden rounded-t-[6px] shadow-sm">
                         <div
                           className="absolute inset-0 bg-emerald-600"
                           style={{ clipPath: "polygon(0 0, 57.14% 0, 42.86% 100%, 0 100%)" }}
@@ -897,9 +895,17 @@ export function DagView({
                         <span className="absolute right-1 bottom-0.5 text-[9px] font-bold text-white drop-shadow-sm">
                           END ⏹
                         </span>
-                      </>
+                      </div>
                     ) : (
-                      hasStart ? "▶ START" : "⏹ END"
+                      <div
+                        className={cn(
+                          "flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
+                          hasStart && "bg-emerald-600",
+                          hasEnd && "bg-slate-500"
+                        )}
+                      >
+                        {hasStart ? "▶ START" : "⏹ END"}
+                      </div>
                     )}
                   </div>
                 )}
