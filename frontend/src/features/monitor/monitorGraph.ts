@@ -62,7 +62,8 @@ type DslState = {
   Label?: string;
   Skill?: string;
   Count?: number;
-  If?: { Then?: string; Else?: string };
+  If?: { Then?: string };
+  Else?: string;
   Choices?: Array<{ Next?: string }>;
   Body?: { StartAt?: string; States?: Record<string, DslState> };
   Branches?: Array<{ StartAt?: string; States?: Record<string, DslState> }>;
@@ -115,10 +116,11 @@ function collectNodesAndEdges(
       });
     }
 
-    if (type === "Condition" && isRecord(state.If)) {
-      const ifState = state.If as { Then?: string; Else?: string };
-      [ifState.Then, ifState.Else].forEach((target) => {
-        if (typeof target === "string" && target && Object.prototype.hasOwnProperty.call(states, target)) {
+    if (type === "Condition") {
+      const thenTarget = isRecord(state.If) && typeof state.If.Then === "string" ? state.If.Then : null;
+      const elseTarget = typeof state.Else === "string" ? state.Else : null;
+      [thenTarget, elseTarget].forEach((target) => {
+        if (target && Object.prototype.hasOwnProperty.call(states, target)) {
           const toPathId = nodePathId([...pathPrefix, target]);
           edges.push({
             id: `edge-${edgeIdCounter.current++}`,

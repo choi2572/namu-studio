@@ -539,23 +539,21 @@ const NODE_TYPE_COLORS: Record<string, { border: string; bg: string; text: strin
   }
 };
 
-/** DSL Type → 배지 라벨 + 색상 (모니터는 DSL 기준으로 표시) */
+/** DSL Type → 대분류 배지(Skill / Flow Control / Event) + 색상 */
 function getNodeTypeInfoFromDsl(
   dslType: string,
   containerType: "repeat" | "parallel" | null
 ): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
-  if (containerType === "repeat") {
-    return { type: "Repeat", colors: NODE_TYPE_COLORS.flow_control };
-  }
-  if (containerType === "parallel") {
-    return { type: "Parallel", colors: NODE_TYPE_COLORS.flow_control };
+  if (containerType === "repeat" || containerType === "parallel") {
+    return { type: "Flow Control", colors: NODE_TYPE_COLORS.flow_control };
   }
   const t = dslType ?? "";
   if (t === "Skill") return { type: "Skill", colors: NODE_TYPE_COLORS.skill };
-  if (t === "Condition" || t === "Choice") return { type: "Condition", colors: NODE_TYPE_COLORS.condition };
+  if (t === "Condition" || t === "Choice" || t === "Repeat" || t === "Parallel") {
+    return { type: "Flow Control", colors: NODE_TYPE_COLORS.flow_control };
+  }
   if (t === "Wait" || t === "Event") return { type: "Event", colors: NODE_TYPE_COLORS.event };
-  if (t === "Repeat" || t === "Parallel") return { type: t, colors: NODE_TYPE_COLORS.flow_control };
-  return { type: t || "Flow Control", colors: NODE_TYPE_COLORS.flow_control };
+  return { type: "Flow Control", colors: NODE_TYPE_COLORS.flow_control };
 }
 
 /** Flat 모드용: nodeName 기반 추론 (DSL 없을 때) */
@@ -816,50 +814,13 @@ export function DagView({
                   isSelected ? "ring-4 ring-slate-400 ring-offset-2" : "hover:shadow-lg"
                 )}
               >
-                {/* Start/End 리본 — editor와 동일, 리본 아래로 본문이 밀리도록 pt 적용 */}
-                {hasRibbon && (
-                  <>
-                    {hasStartEnd ? (
-                      <div
-                        className="absolute left-0 right-0 top-0 z-10 h-6 overflow-hidden rounded-t-[6px] shadow-sm"
-                        aria-hidden
-                      >
-                        <div
-                          className="absolute inset-0 bg-emerald-600"
-                          style={{ clipPath: "polygon(0 0, 57.14% 0, 42.86% 100%, 0 100%)" }}
-                        />
-                        <div
-                          className="absolute inset-0 bg-slate-500"
-                          style={{ clipPath: "polygon(57.14% 0, 100% 0, 100% 100%, 42.86% 100%)" }}
-                        />
-                        <span className="absolute left-1 top-0.5 text-[9px] font-bold text-white drop-shadow-sm">
-                          ▶ START
-                        </span>
-                        <span className="absolute right-1 bottom-0.5 text-[9px] font-bold text-white drop-shadow-sm">
-                          END ⏹
-                        </span>
-                      </div>
-                    ) : (
-                      <div
-                        className={cn(
-                          "absolute left-0 right-0 top-0 z-10 flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
-                          hasStart && "bg-emerald-600",
-                          hasEnd && "bg-slate-500"
-                        )}
-                        aria-hidden
-                      >
-                        {hasStart ? "▶ START" : "⏹ END"}
-                      </div>
-                    )}
-                  </>
-                )}
                 <div
                   className={cn(
-                    "relative flex items-start justify-between pl-1",
+                    "relative z-0 flex items-start justify-between pl-3",
                     hasRibbon && "pt-6"
                   )}
                 >
-                  <div className={cn("absolute left-0 top-0 bottom-0 w-1", nodeTypeInfo.colors.indicator)} />
+                  <div className={cn("absolute left-0 top-0 bottom-0 w-1 rounded-l", nodeTypeInfo.colors.indicator)} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <p
@@ -907,6 +868,41 @@ export function DagView({
                     <StatusBadge status={node.status} />
                   </div>
                 </div>
+                {/* Start/End 리본 — DOM 맨 뒤에 두어 항상 위에 그려지고, pt-6으로 본문이 밀려 있음 */}
+                {hasRibbon && (
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute left-0 right-0 top-0 z-20 flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-md",
+                      hasStartEnd
+                        ? "overflow-hidden"
+                        : hasStart
+                          ? "bg-emerald-600"
+                          : "bg-slate-500"
+                    )}
+                    aria-hidden
+                  >
+                    {hasStartEnd ? (
+                      <>
+                        <div
+                          className="absolute inset-0 bg-emerald-600"
+                          style={{ clipPath: "polygon(0 0, 57.14% 0, 42.86% 100%, 0 100%)" }}
+                        />
+                        <div
+                          className="absolute inset-0 bg-slate-500"
+                          style={{ clipPath: "polygon(57.14% 0, 100% 0, 100% 100%, 42.86% 100%)" }}
+                        />
+                        <span className="absolute left-1 top-0.5 text-[9px] font-bold text-white drop-shadow-sm">
+                          ▶ START
+                        </span>
+                        <span className="absolute right-1 bottom-0.5 text-[9px] font-bold text-white drop-shadow-sm">
+                          END ⏹
+                        </span>
+                      </>
+                    ) : (
+                      hasStart ? "▶ START" : "⏹ END"
+                    )}
+                  </div>
+                )}
               </button>
             </div>
           );
