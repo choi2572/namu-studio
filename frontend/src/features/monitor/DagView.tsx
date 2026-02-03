@@ -547,7 +547,7 @@ function getNodeTypeInfoFromDsl(
   }
   const t = dslType ?? "";
   if (t === "Skill") return { type: "Skill", colors: NODE_TYPE_COLORS.skill };
-  if (t === "Condition") return { type: "Condition", colors: NODE_TYPE_COLORS.condition };
+  if (t === "Condition" || t === "Choice") return { type: "Condition", colors: NODE_TYPE_COLORS.condition };
   if (t === "Wait" || t === "Event") return { type: "Event", colors: NODE_TYPE_COLORS.event };
   if (t === "Repeat" || t === "Parallel") return { type: t, colors: NODE_TYPE_COLORS.flow_control };
   return { type: t || "Flow Control", colors: NODE_TYPE_COLORS.flow_control };
@@ -811,7 +811,7 @@ export function DagView({
                   isSelected ? "ring-4 ring-slate-400 ring-offset-2" : "hover:shadow-lg"
                 )}
               >
-                {/* Start/End 리본 — editor와 동일 */}
+                {/* Start/End 리본 — editor와 동일, 리본 아래로 본문이 밀리도록 pt 적용 */}
                 {hasRibbon && (
                   <>
                     {hasStartEnd ? (
@@ -848,8 +848,13 @@ export function DagView({
                     )}
                   </>
                 )}
-                <div className={cn("absolute left-0 top-0 bottom-0 w-1", nodeTypeInfo.colors.indicator)} />
-                <div className="flex items-start justify-between pl-1">
+                <div
+                  className={cn(
+                    "relative flex items-start justify-between pl-1",
+                    hasRibbon && "pt-6"
+                  )}
+                >
+                  <div className={cn("absolute left-0 top-0 bottom-0 w-1", nodeTypeInfo.colors.indicator)} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <p
