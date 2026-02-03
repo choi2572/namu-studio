@@ -1903,9 +1903,12 @@ function NodeCard({
     : node.kind;
 
   const showStartRibbon =
-    startEndBadge?.showStart && !startEndBadge?.startError;
-  const showEndRibbon = Boolean(startEndBadge?.showEnd);
-  const hasRibbon = showStartRibbon || showEndRibbon;
+    startEndBadge?.showStart && !startEndBadge?.showEnd && !startEndBadge?.startError;
+  const showEndRibbon =
+    Boolean(startEndBadge?.showEnd && !startEndBadge?.showStart);
+  const showStartEndRibbon =
+    Boolean(startEndBadge?.showStart && startEndBadge?.showEnd && !startEndBadge?.startError);
+  const hasRibbon = showStartRibbon || showEndRibbon || showStartEndRibbon;
 
   return (
     <div
@@ -1921,18 +1924,43 @@ function NodeCard({
       onClick={onSelect}
       title={tooltipContent}
     >
-      {/* Start/End 헤더 리본: 줌 아웃에서도 한눈에 구분 */}
+      {/* Start/End 헤더 리본: 줌 아웃에서도 한눈에 구분. start+end 동시면 사선 구획 리본 */}
       {hasRibbon && (
-        <div
-          className={cn(
-            "absolute left-0 right-0 top-0 z-10 flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
-            showStartRibbon && "bg-emerald-600",
-            showEndRibbon && !showStartRibbon && "bg-slate-500"
+        <>
+          {showStartEndRibbon ? (
+            <div
+              className="absolute left-0 right-0 top-0 z-10 h-6 overflow-hidden rounded-t-[6px] shadow-sm"
+              aria-hidden
+            >
+              {/* 사선으로 나눈 start(좌상) / end(우하) */}
+              <div
+                className="absolute inset-0 bg-emerald-600"
+                style={{ clipPath: "polygon(0 0, 100% 0, 0 100%)" }}
+              />
+              <div
+                className="absolute inset-0 bg-slate-500"
+                style={{ clipPath: "polygon(100% 0, 100% 100%, 0 100%)" }}
+              />
+              <span className="absolute left-1 top-0.5 text-[9px] font-bold text-white drop-shadow-sm">
+                ▶ START
+              </span>
+              <span className="absolute right-1 bottom-0.5 text-[9px] font-bold text-white drop-shadow-sm">
+                END ⏹
+              </span>
+            </div>
+          ) : (
+            <div
+              className={cn(
+                "absolute left-0 right-0 top-0 z-10 flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
+                showStartRibbon && "bg-emerald-600",
+                showEndRibbon && "bg-slate-500"
+              )}
+              aria-hidden
+            >
+              {showStartRibbon ? "▶ START" : "⏹ END"}
+            </div>
           )}
-          aria-hidden
-        >
-          {showStartRibbon ? "▶ START" : "⏹ END"}
-        </div>
+        </>
       )}
       {/* 왼쪽 타입 인디케이터 바 */}
       <div
