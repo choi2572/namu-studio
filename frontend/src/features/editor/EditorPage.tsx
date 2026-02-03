@@ -2682,19 +2682,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
   }, [getViewportCanvasSize]);
 
-  useEffect(() => {
-    if (nodes.length === 0) return;
-    const required = getCanvasSizeForNodes(nodes, nodeTypeConfig, effectiveNodeHeightMap);
-    setCanvasBase((prev) => {
-      const nextWidth = Math.max(prev.width, required.width);
-      const nextHeight = Math.max(prev.height, required.height);
-      if (nextWidth === prev.width && nextHeight === prev.height) {
-        return prev;
-      }
-      return { width: nextWidth, height: nextHeight };
-    });
-  }, [nodes, nodeTypeConfig, effectiveNodeHeightMap]);
-
   const { data: validationErrors = [] } = useQuery({
     queryKey: ["workflow-validation", workflowId],
     queryFn: () => workflowsApi.validateDraft(workflowId),
@@ -2947,6 +2934,19 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     });
     return map;
   }, [nodes, nodeTypeConfig, startEndBadges]);
+
+  useEffect(() => {
+    if (nodes.length === 0) return;
+    const required = getCanvasSizeForNodes(nodes, nodeTypeConfig, effectiveNodeHeightMap);
+    setCanvasBase((prev) => {
+      const nextWidth = Math.max(prev.width, required.width);
+      const nextHeight = Math.max(prev.height, required.height);
+      if (nextWidth === prev.width && nextHeight === prev.height) {
+        return prev;
+      }
+      return { width: nextWidth, height: nextHeight };
+    });
+  }, [nodes, nodeTypeConfig, effectiveNodeHeightMap]);
 
   const allValidationErrors = useMemo(
     () => [...validationErrors, ...containerWarnings, ...startEndValidationErrors],
