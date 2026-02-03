@@ -36,6 +36,8 @@ const CONTAINER_MIN_HEIGHT = 120;
 const CONTAINER_BRANCH_MIN_WIDTH = 260;
 /** Parallel 브랜치 상단 라벨(Branch 1, Branch 2) 영역 높이 — 노드가 라벨을 가리지 않도록 */
 const PARALLEL_REGION_LABEL_HEIGHT = 22;
+/** Start/End 리본 높이 (pt-6 = 24px) — 영역 높이 계산 시 노드에 반영 */
+const RIBBON_HEIGHT = 24;
 
 type DagNode = {
   id: string;
@@ -258,6 +260,9 @@ function computeMonitorLayout(
   const containerFrames: ContainerFrameLayout[] = [];
   const frameYOffset = NODE_METRICS.collapsedHeight + CONTAINER_NODE_OFFSET_Y;
 
+  // Start/End 리본 여부는 parallel 영역 높이 계산에 사용 (먼저 계산)
+  const { startPathIds, endPathIds } = computeMonitorStartEnd(graph);
+
   topLevelNodes.forEach((node) => {
     const pos = topPositions.get(node.pathId);
     if (!pos) return;
@@ -283,8 +288,13 @@ function computeMonitorLayout(
           CONTAINER_MIN_WIDTH - CONTAINER_PADDING * 2,
           NODE_METRICS.width
         );
-        const bodyHeight =
+        let bodyHeight =
           children.length * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) - CONTAINER_ROW_GAP;
+        children.forEach((c) => {
+          if (startPathIds.has(c.pathId) || endPathIds.has(c.pathId)) {
+            bodyHeight += RIBBON_HEIGHT;
+          }
+        });
         const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
         const frameHeight =
           CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING * 2 + Math.max(0, bodyHeight);
@@ -391,10 +401,25 @@ function computeMonitorLayout(
           )
         );
 
-        const regionHeights = branchLayouts.map((layout) => {
-          const contentHeight =
-            layout.maxY - layout.minY + NODE_METRICS.collapsedHeight + CONTAINER_PADDING * 2;
-          return Math.max(minRegionHeight, contentHeight + PARALLEL_REGION_LABEL_HEIGHT);
+        const regionHeights = branchLayouts.map((layout, idx) => {
+          const reg = container.regions[idx];
+          if (reg.pathIds.length === 0) {
+            return Math.max(minRegionHeight, PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2);
+          }
+          let maxBottom = layout.minY;
+          reg.pathIds.forEach((pathId) => {
+            const local = layout.positions.get(pathId);
+            if (!local) return;
+            const hasRibbon = startPathIds.has(pathId) || endPathIds.has(pathId);
+            const effectiveHeight =
+              NODE_METRICS.collapsedHeight + (hasRibbon ? RIBBON_HEIGHT : 0);
+            maxBottom = Math.max(maxBottom, local.y + effectiveHeight);
+          });
+          const contentHeight = maxBottom - layout.minY;
+          return Math.max(
+            minRegionHeight,
+            PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2 + contentHeight
+          );
         });
         const totalBodyHeight = regionHeights.reduce((a, b) => a + b, 0);
         const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
@@ -496,8 +521,6 @@ function computeMonitorLayout(
       });
     }
   });
-
-  const { startPathIds, endPathIds } = computeMonitorStartEnd(graph);
 
   let maxX = CANVAS_DEFAULT.width;
   let maxY = CANVAS_DEFAULT.height;
@@ -852,7 +875,7 @@ export function DagView({
           className="absolute pointer-events-none"
           width={canvasSize.width}
           height={canvasSize.height}
-          style={{ top: 0, left: 0, zIndex: 0 }}
+          style={{ top: 0, left: 0, zIndex: 5 }}
         >
           <defs>
             <marker id="arrow-monitor" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -910,9 +933,10 @@ export function DagView({
           })}
         </svg>
 
-        {containerFrames.map((frame) => (
-          <ContainerFrame
-            key={frame.container.pathId}
+        <div className="absolute" style={{ zIndex: 1 }}>
+          {containerFrames.map((frame) => (
+            <ContainerFrame
+              key={frame.container.pathId}
             id={frame.container.pathId}
             label={frame.container.label}
             position={frame.position}
@@ -923,6 +947,7 @@ export function DagView({
             badgeLabel={containerBadge(frame.container, positionedNodes)}
           />
         ))}
+        </div>
 
         {positionedNodes.map((node) => {
           const nodeTypeInfo = getNodeTypeInfoFromDsl(node.dslType, node.containerType);
@@ -945,14 +970,40 @@ export function DagView({
             <div
               key={node.pathId}
               data-node-id={node.pathId}
-              className="absolute"
+              className="absolute overflow-visible"
               style={{
                 left: node.position.x,
                 top: node.position.y,
                 width: NODE_METRICS.width,
+                minHeight: NODE_METRICS.collapsedHeight,
                 zIndex: 10
               }}
             >
+              {/* 입력 포트 (좌측) — 노드 밖으로 반원 보이도록 wrapper 기준 배치 */}
+              <div
+                className="pointer-events-none absolute left-0 flex items-center justify-center z-10"
+                style={{
+                  top: inputOffset,
+                  transform: "translate(-50%, -50%)"
+                }}
+              >
+                <div className="h-4 w-4 rounded-full border-2 border-slate-600 bg-white shadow-sm" />
+              </div>
+
+              {/* 출력 포트(우측) — Condition은 true/false 두 개, 그 외 하나 */}
+              {outputOffsets.map((offset, index) => (
+                <div
+                  key={index}
+                  className="pointer-events-none absolute right-0 flex items-center justify-center z-10"
+                  style={{
+                    top: offset,
+                    transform: "translate(50%, -50%)"
+                  }}
+                >
+                  <div className="h-4 w-4 rounded-full border-2 border-slate-600 bg-white shadow-sm" />
+                </div>
+              ))}
+
               <button
                 type="button"
                 onClick={() => onSelectNode(node.pathId)}
@@ -962,32 +1013,6 @@ export function DagView({
                   isSelected ? "ring-4 ring-slate-400 ring-offset-2" : "hover:shadow-lg"
                 )}
               >
-                {/* 입력 포트 (좌측) - 에디터와 동일한 위치 */}
-                <div
-                  className="pointer-events-none absolute left-0 flex items-center justify-center"
-                  style={{
-                    top: inputOffset,
-                    transform: "translate(-50%, -50%)"
-                  }}
-                >
-                  <div className="h-3 w-3 rounded-full border border-slate-700 bg-slate-100 shadow-sm" />
-                </div>
-
-                {/* 출력 포트(우측) - Condition은 true/false 두 개, 그 외에는 하나 */}
-                {outputOffsets.map((offset, index) => (
-                  <div
-                    // index: 0 -> true, 1 -> false (Condition), 단일 포트 노드면 하나만 사용
-                    key={index}
-                    className="pointer-events-none absolute right-0 flex items-center justify-center"
-                    style={{
-                      top: offset,
-                      transform: "translate(50%, -50%)"
-                    }}
-                  >
-                    <div className="h-3 w-3 rounded-full border border-slate-700 bg-slate-100 shadow-sm" />
-                  </div>
-                ))}
-
                 <div
                   className={cn(
                     "relative z-0 flex items-start justify-between pl-3",
