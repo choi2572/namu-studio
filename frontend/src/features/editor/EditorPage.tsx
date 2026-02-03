@@ -1799,6 +1799,7 @@ function NodeCard({
   onInputDrop,
   warningLabel,
   startEndBadge,
+  effectiveHeight,
   nodeTypeConfig,
   skillset,
   nodes,
