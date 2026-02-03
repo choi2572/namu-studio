@@ -177,22 +177,6 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const showCancel = runStatus === RunStatus.RUNNING && !isReplayMode;
   const showReplay = isTerminal || isReplayMode;
 
-  const selectedNodeState = useMemo(() => {
-    if (!selectedNode) return null;
-    if (monitorGraph) {
-      const node = monitorGraph.nodes.find((n) => n.pathId === selectedNode);
-      if (!node) return null;
-      const snap = nodeStates.find((n) => n.stateName === node.apiStateName);
-      return {
-        stateName: node.apiStateName,
-        nodeName: node.nodeName,
-        status: snap?.status ?? NodeStatus.WAITING,
-        durationMs: snap?.durationMs ?? null
-      } as NodeStateSnapshot;
-    }
-    return allNodes.find((n) => n.stateName === selectedNode) ?? null;
-  }, [selectedNode, monitorGraph, nodeStates, allNodes]);
-
   // DSL에서 엣지 정보 추출
   const edges = useMemo(() => {
     if (!workflowDraft?.dsl_json) {
@@ -306,6 +290,22 @@ export function MonitorPage({ runId }: MonitorPageProps) {
 
     return Array.from(nodeMap.values());
   }, [nodeStates, workflowDraft]);
+
+  const selectedNodeState = useMemo(() => {
+    if (!selectedNode) return null;
+    if (monitorGraph) {
+      const node = monitorGraph.nodes.find((n) => n.pathId === selectedNode);
+      if (!node) return null;
+      const snap = nodeStates.find((n) => n.stateName === node.apiStateName);
+      return {
+        stateName: node.apiStateName,
+        nodeName: node.nodeName,
+        status: snap?.status ?? NodeStatus.WAITING,
+        durationMs: snap?.durationMs ?? null
+      } as NodeStateSnapshot;
+    }
+    return allNodes.find((n) => n.stateName === selectedNode) ?? null;
+  }, [selectedNode, monitorGraph, nodeStates, allNodes]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">

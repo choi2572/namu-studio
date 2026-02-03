@@ -8,6 +8,7 @@ import { formatDuration } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ContainerFrame, type ContainerFrameRegion } from "@/components/ContainerFrame";
 import type { MonitorGraph, MonitorNode, MonitorEdge, MonitorContainer } from "@/features/monitor/monitorGraph";
+import { nodePathId, NODE_PATH } from "@/lib/ids";
 
 // Editor의 상수들 재사용
 const NODE_METRICS = {
@@ -85,9 +86,87 @@ type ContainerFrameLayout = {
   regions: ContainerFrameRegion[];
 };
 
+/** Editor view_json 노드 타입 (position, containerId 등으로 pathId 매핑용) */
+type ViewNodeLike = {
+  id: string;
+  name?: string;
+  position?: { x: number; y: number };
+  containerId?: string | null;
+  containerType?: "repeat" | "parallel" | null;
+  branchIndex?: number | null;
+};
+
+function isRecord(obj: unknown): obj is Record<string, unknown> {
+  return typeof obj === "object" && obj !== null && !Array.isArray(obj);
+}
+
+/** Editor와 동일한 stateName 규칙으로 view 노드 id -> stateName 맵 생성 */
+function buildStateNameMapFromViewNodes(nodes: ViewNodeLike[]): Map<string, string> {
+  const usedNames = new Set<string>();
+  const nameMap = new Map<string, string>();
+  nodes.forEach((node) => {
+    const trimmed = (node.name ?? "").trim();
+    const base = trimmed ? trimmed.replace(/[^A-Za-z0-9_]+/g, "_") : node.id;
+    const baseName = base || node.id;
+    let name = baseName;
+    let index = 1;
+    while (usedNames.has(name)) {
+      name = `${baseName}_${index}`;
+      index += 1;
+    }
+    usedNames.add(name);
+    nameMap.set(node.id, name);
+  });
+  return nameMap;
+}
+
+/** Editor view_json에서 pathId -> position 맵 추출 (에디터 auto layout과 동일한 배치 사용) */
+export function getPathIdToPositionFromViewJson(
+  viewJson: Record<string, unknown> | null | undefined
+): Map<string, { x: number; y: number }> | null {
+  if (!viewJson || !isRecord(viewJson)) return null;
+  const rawNodes = viewJson.nodes;
+  if (!Array.isArray(rawNodes)) return null;
+  const viewNodes: ViewNodeLike[] = rawNodes.filter(
+    (n): n is ViewNodeLike => isRecord(n) && typeof (n as ViewNodeLike).id === "string"
+  );
+  if (viewNodes.length === 0) return null;
+  const stateNameMap = buildStateNameMapFromViewNodes(viewNodes);
+  const result = new Map<string, { x: number; y: number }>();
+  viewNodes.forEach((node) => {
+    const stateName = stateNameMap.get(node.id);
+    if (!stateName) return;
+    const pos = node.position;
+    if (!pos || typeof pos.x !== "number" || typeof pos.y !== "number") return;
+    const containerId = node.containerId;
+    const containerType = node.containerType;
+    const branchIndex = node.branchIndex ?? 0;
+    let pathId: string;
+    if (!containerId) {
+      pathId = nodePathId([NODE_PATH.ROOT, stateName]);
+    } else {
+      const containerStateName = stateNameMap.get(containerId);
+      if (!containerStateName) return;
+      if (containerType === "repeat") {
+        pathId = nodePathId([NODE_PATH.ROOT, containerStateName, NODE_PATH.BODY, stateName]);
+      } else {
+        pathId = nodePathId([
+          NODE_PATH.ROOT,
+          containerStateName,
+          `${NODE_PATH.BRANCH_PREFIX}${branchIndex}`,
+          stateName
+        ]);
+      }
+    }
+    result.set(pathId, { x: pos.x, y: pos.y });
+  });
+  return result;
+}
+
 function computeMonitorLayout(
   graph: MonitorGraph,
-  statusByApiStateName: Map<string, { status: NodeStatus; durationMs: number | null }>
+  statusByApiStateName: Map<string, { status: NodeStatus; durationMs: number | null }>,
+  viewPositions?: Map<string, { x: number; y: number }> | null
 ): {
   positionedNodes: PositionedMonitorNode[];
   containerFrames: ContainerFrameLayout[];
@@ -108,7 +187,18 @@ function computeMonitorLayout(
     position: { x: 0, y: 0 }
   }));
   const dagEdges: DagEdge[] = topLevelEdges.map((e) => ({ id: e.id, from: e.from, to: e.to }));
-  const topPositions = computeAutoLayout(dagNodes, dagEdges);
+  const autoTopPositions = computeAutoLayout(dagNodes, dagEdges);
+  // view_json 위치가 있으면 사용 (에디터 auto layout과 동일), 없으면 auto layout
+  const topPositions = new Map<string, { x: number; y: number }>();
+  topLevelNodes.forEach((n) => {
+    const fromView = viewPositions?.get(n.pathId);
+    if (fromView) {
+      topPositions.set(n.pathId, fromView);
+    } else {
+      const fromAuto = autoTopPositions.get(n.pathId);
+      if (fromAuto) topPositions.set(n.pathId, fromAuto);
+    }
+  });
 
   const positionedNodes: PositionedMonitorNode[] = [];
   const containerFrames: ContainerFrameLayout[] = [];
@@ -163,14 +253,15 @@ function computeMonitorLayout(
         children.forEach((child) => {
           const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
           const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
+          const childPos = viewPositions?.get(child.pathId) ?? {
+            x: pos.x + CONTAINER_PADDING,
+            y: yCursor
+          };
           positionedNodes.push({
             ...child,
             status: cStatus,
             durationMs: cDuration,
-            position: {
-              x: pos.x + CONTAINER_PADDING,
-              y: yCursor
-            }
+            position: childPos
           });
           yCursor += NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP;
         });
@@ -223,11 +314,12 @@ function computeMonitorLayout(
             if (!child) return;
             const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
             const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
+            const childPos = viewPositions?.get(child.pathId) ?? { x: regionX, y: yCursor };
             positionedNodes.push({
               ...child,
               status: cStatus,
               durationMs: cDuration,
-              position: { x: regionX, y: yCursor }
+              position: childPos
             });
             yCursor += NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP;
           });
@@ -430,11 +522,15 @@ export function DagView({
     return map;
   }, [nodeStates]);
 
-  // --- Monitor graph mode (containers + nested nodes) ---
+  // --- Monitor graph mode (containers + nested nodes, editor view_json 레이아웃 사용) ---
+  const viewPositions = useMemo(
+    () => getPathIdToPositionFromViewJson(viewJson ?? null),
+    [viewJson]
+  );
   const monitorLayout = useMemo(() => {
     if (!monitorGraph) return null;
-    return computeMonitorLayout(monitorGraph, statusByApiStateName);
-  }, [monitorGraph, statusByApiStateName]);
+    return computeMonitorLayout(monitorGraph, statusByApiStateName, viewPositions);
+  }, [monitorGraph, statusByApiStateName, viewPositions]);
 
   // --- Flat mode (no containers) ---
   const dagNodes = useMemo<DagNode[]>(() => {
