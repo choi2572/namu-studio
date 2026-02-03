@@ -2420,6 +2420,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [workflowName, setWorkflowName] = useState<string>("");
   const [originalWorkflowName, setOriginalWorkflowName] = useState<string>("");
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [publishToast, setPublishToast] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -2677,7 +2679,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   });
 
   const publishMutation = useMutation({
-    mutationFn: () => workflowsApi.publish(workflowId)
+    mutationFn: () => workflowsApi.publish(workflowId),
+    onSuccess: () => {
+      setShowPublishConfirm(false);
+      setPublishToast(true);
+      queryClient.invalidateQueries({ queryKey: ["workflow", workflowId] });
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+    }
   });
 
   const containerEmptyBranches = useMemo(() => {
@@ -3404,6 +3412,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const handlePublish = () => {
     if (hasErrors) return;
+    setShowPublishConfirm(true);
+  };
+
+  const handleConfirmPublish = () => {
     publishMutation.mutate();
   };
 
@@ -4059,8 +4071,58 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
   }, [hasUnsavedChanges]);
 
+  useEffect(() => {
+    if (!publishToast) return;
+    const id = window.setTimeout(() => setPublishToast(false), 3000);
+    return () => window.clearTimeout(id);
+  }, [publishToast]);
+
   return (
     <div className="space-y-6">
+      {showPublishConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="publish-dialog-title"
+          onClick={() => setShowPublishConfirm(false)}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <Card className="w-full max-w-sm p-4 shadow-xl">
+            <h2 id="publish-dialog-title" className="text-lg font-semibold text-slate-800">
+              Publish workflow?
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              This will create an immutable published version. You can continue editing the draft afterward.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setShowPublishConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmPublish}
+                disabled={publishMutation.isPending}
+              >
+                {publishMutation.isPending ? "Publishing…" : "Publish"}
+              </Button>
+            </div>
+          </Card>
+          </div>
+        </div>
+      )}
+
+      {publishToast && (
+        <div
+          className="fixed bottom-6 right-6 z-50 rounded-lg bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-lg"
+          role="status"
+        >
+          Workflow published successfully.
+        </div>
+      )}
+
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs text-slate-500">Workflow Editor</p>
@@ -4145,6 +4207,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               </div>
             )}
             <StatusBadge status="DRAFT" />
+            {workflows && (() => {
+              const current = workflows.find((w) => w.workflowId === workflowId);
+              const ver = current?.latestVersion?.versionNumber;
+              return ver ? (
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                  Latest: v{ver}
+                </span>
+              ) : null;
+            })()}
           </div>
           {activeDraft && (
             <p className="text-xs text-slate-500">
