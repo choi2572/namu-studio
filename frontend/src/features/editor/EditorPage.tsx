@@ -288,6 +288,9 @@ const NODE_METRICS = {
   conditionButtonHeight: 28
 };
 
+/** 리본(START/END)이 있을 때 카드 상단에 추가되는 높이 (리본 h-6 + pt-6) */
+const RIBBON_EXTRA_HEIGHT = 48;
+
 const CONTAINER_FRAME_DEFAULTS = {
   width: 520,
   height: 320,
@@ -385,6 +388,15 @@ function getNodeHeight(
 ) {
   if (!node.isExpanded) return NODE_METRICS.collapsedHeight;
   return NODE_METRICS.collapsedHeight + getExpandedContentHeight(node, nodeTypeConfig);
+}
+
+function getEffectiveNodeHeight(
+  node: EditorNode,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
+  hasRibbon: boolean
+) {
+  const base = getNodeHeight(node, nodeTypeConfig);
+  return hasRibbon ? base + RIBBON_EXTRA_HEIGHT : base;
 }
 
 function getNodeTypeLabel(
@@ -1444,12 +1456,13 @@ function applyImportedLayout(
 
 function getCanvasSizeForNodes(
   nodes: EditorNode[],
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
+  heightMap?: Map<string, number>
 ) {
   let maxX = CANVAS_DEFAULT.width;
   let maxY = CANVAS_DEFAULT.height;
   nodes.forEach((node) => {
-    const nodeHeight = getNodeHeight(node, nodeTypeConfig);
+    const nodeHeight = heightMap?.get(node.id) ?? getNodeHeight(node, nodeTypeConfig);
     maxX = Math.max(maxX, node.position.x + NODE_METRICS.width + CANVAS_PADDING.x);
     maxY = Math.max(maxY, node.position.y + nodeHeight + CANVAS_PADDING.y);
     if (isContainerNode(node)) {
@@ -1834,6 +1847,8 @@ function NodeCard({
     isRootScope: boolean;
     startError?: string;
   } | null;
+  /** 리본이 있을 때 포함한 전체 높이. 미전달 시 getNodeHeight만 사용(과거 동작) */
+  effectiveHeight?: number;
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
   skillset?: import("@/domain/types").Skillset;
   nodes: EditorNode[];
@@ -1842,6 +1857,7 @@ function NodeCard({
   skillsetMap: Map<string, import("@/domain/types").Skillset>;
 }) {
   const nodeHeight = getNodeHeight(node, nodeTypeConfig);
+  const displayHeight = effectiveHeight ?? nodeHeight;
   const availableVariables = useMemo(
     () =>
       getAvailableVariables(
@@ -1853,7 +1869,7 @@ function NodeCard({
       ),
     [node.id, nodes, edges, stateNameMap, skillsetMap]
   );
-  const outputOffsets = getPortOffsets(nodeHeight, outputs.length);
+  const outputOffsets = getPortOffsets(displayHeight, outputs.length);
   const conditionExpressions =
     node.kind === "flow_control.condition" ? node.conditionExpressions ?? [] : [];
 
@@ -1919,7 +1935,7 @@ function NodeCard({
       data-node-card
       style={{
         width: NODE_METRICS.width,
-        height: nodeHeight
+        height: displayHeight
       }}
       onClick={onSelect}
       title={tooltipContent}
@@ -1977,7 +1993,7 @@ function NodeCard({
             "cursor-pointer absolute left-0 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
             inputConnected ? "border-slate-400" : "border-slate-200"
           )}
-          style={{ top: nodeHeight / 2 }}
+          style={{ top: displayHeight / 2 }}
           title={inputConnected ? "Input connected" : "Input"}
           onDragOver={(event) => {
             event.stopPropagation();
@@ -2668,7 +2684,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   useEffect(() => {
     if (nodes.length === 0) return;
-    const required = getCanvasSizeForNodes(nodes, nodeTypeConfig);
+    const required = getCanvasSizeForNodes(nodes, nodeTypeConfig, effectiveNodeHeightMap);
     setCanvasBase((prev) => {
       const nextWidth = Math.max(prev.width, required.width);
       const nextHeight = Math.max(prev.height, required.height);
@@ -2677,7 +2693,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       }
       return { width: nextWidth, height: nextHeight };
     });
-  }, [nodes, nodeTypeConfig]);
+  }, [nodes, nodeTypeConfig, effectiveNodeHeightMap]);
 
   const { data: validationErrors = [] } = useQuery({
     queryKey: ["workflow-validation", workflowId],
@@ -2922,6 +2938,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
   }, [nodes, edges]);
 
+  const effectiveNodeHeightMap = useMemo(() => {
+    const map = new Map<string, number>();
+    nodes.forEach((node) => {
+      const badge = startEndBadges.get(node.id);
+      const hasRibbon = Boolean(badge?.showStart || badge?.showEnd);
+      map.set(node.id, getEffectiveNodeHeight(node, nodeTypeConfig, hasRibbon));
+    });
+    return map;
+  }, [nodes, nodeTypeConfig, startEndBadges]);
+
   const allValidationErrors = useMemo(
     () => [...validationErrors, ...containerWarnings, ...startEndValidationErrors],
     [containerWarnings, validationErrors, startEndValidationErrors]
@@ -3020,7 +3046,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const resolveContainerAssignment = useCallback(
     (allNodes: EditorNode[], targetNode: EditorNode) => {
       if (isContainerNode(targetNode)) return null;
-      const nodeHeight = getNodeHeight(targetNode, nodeTypeConfig);
+      const hasRibbon = Boolean(startEndBadges.get(targetNode.id)?.showStart || startEndBadges.get(targetNode.id)?.showEnd);
+      const nodeHeight = getEffectiveNodeHeight(targetNode, nodeTypeConfig, hasRibbon);
       const center = {
         x: targetNode.position.x + NODE_METRICS.width / 2,
         y: targetNode.position.y + nodeHeight / 2
@@ -3050,7 +3077,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       }
       return null;
     },
-    [nodeTypeConfig]
+    [nodeTypeConfig, startEndBadges]
   );
 
   const finalizeNodeDrag = useCallback(
@@ -3461,7 +3488,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         if (node.id !== nodeId) return node;
         const nextExpanded = !node.isExpanded;
         const nextNode = { ...node, isExpanded: nextExpanded };
-        const nodeHeight = getNodeHeight(nextNode, nodeTypeConfig);
+        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
+        const nodeHeight = getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon);
         const { minX, minY, maxX, maxY } = getCanvasBounds(canvasBase, nodeHeight);
         const updated = {
           ...nextNode,
@@ -3549,9 +3577,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           createConditionExpression(operator)
         ]);
         const nextNode = { ...node, conditionExpressions: nextExpressions };
+        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
-          getNodeHeight(nextNode, nodeTypeConfig)
+          getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon)
         );
         const updated = {
           ...nextNode,
@@ -3575,9 +3604,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         );
         const nextExpressions = normalizeConditionExpressions(remaining);
         const nextNode = { ...node, conditionExpressions: nextExpressions };
+        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
-          getNodeHeight(nextNode, nodeTypeConfig)
+          getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon)
         );
         const updated = {
           ...nextNode,
@@ -3634,9 +3664,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           }
         ];
         const nextNode = { ...node, variableRows: nextRows };
+        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
-          getNodeHeight(nextNode, nodeTypeConfig)
+          getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon)
         );
         const updated = {
           ...nextNode,
@@ -3662,9 +3693,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const rows = node.variableRows ?? [];
         const nextRows = rows.filter((row) => row.id !== rowId);
         const nextNode = { ...node, variableRows: nextRows };
+        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
         const { minX, minY, maxX, maxY } = getCanvasBounds(
           canvasBase,
-          getNodeHeight(nextNode, nodeTypeConfig)
+          getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon)
         );
         const updated = {
           ...nextNode,
@@ -3846,7 +3878,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         );
         let yCursor = padding;
         sortedGroup.forEach((node) => {
-          const nodeHeight = getNodeHeight(node, nodeTypeConfig);
+          const nodeHeight = effectiveNodeHeightMap.get(node.id) ?? getNodeHeight(node, nodeTypeConfig);
           const x = padding + layer * spacingX;
           const y = yCursor;
           yCursor += nodeHeight + rowGap;
@@ -4421,6 +4453,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           skillsetMap={skillsetMap}
                           warningLabel={containerWarningLabels.get(node.id) ?? null}
                           startEndBadge={startEndBadges.get(node.id) ?? null}
+                          effectiveHeight={effectiveNodeHeightMap.get(node.id)}
                           onSelect={() => {
                             setSelectedNode(node.id);
                             setSelectedEdgeId(null);
@@ -4443,7 +4476,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                               nodeId: node.id,
                               offsetX,
                               offsetY,
-                              height: getNodeHeight(node, nodeTypeConfig)
+                              height: effectiveNodeHeightMap.get(node.id) ?? getNodeHeight(node, nodeTypeConfig)
                             });
                           }}
                           onStartConnect={(portKey) =>
@@ -4548,11 +4581,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                         (output) => output.key === edge.fromPort
                       );
                       if (outputIndex < 0) return null;
-                      const toNodeHeight = getNodeHeight(toNode, nodeTypeConfig);
-                      const outputOffsets = getPortOffsets(
-                        getNodeHeight(fromNode, nodeTypeConfig),
-                        outputs.length
-                      );
+                      const toNodeHeight = effectiveNodeHeightMap.get(toNode.id) ?? getNodeHeight(toNode, nodeTypeConfig);
+                      const fromNodeHeight = effectiveNodeHeightMap.get(fromNode.id) ?? getNodeHeight(fromNode, nodeTypeConfig);
+                      const outputOffsets = getPortOffsets(fromNodeHeight, outputs.length);
                       const start = {
                         x: fromNode.position.x + NODE_METRICS.width,
                         y: fromNode.position.y + outputOffsets[outputIndex]
