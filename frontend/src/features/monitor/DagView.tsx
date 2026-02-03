@@ -324,16 +324,76 @@ function computeMonitorLayout(
         });
       } else {
         const branchCount = container.branchCount || 1;
+        const minRegionHeight = PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2;
+
+        // 각 브랜치별로 독립적인 auto layout 수행 (에디터와 동일한 좌->우 DAG 형태)
+        const branchLayouts = container.regions.map((reg) => {
+          const pathIds = reg.pathIds;
+          const children = pathIds
+            .map((pathId) => graph.nodes.find((n) => n.pathId === pathId))
+            .filter((n): n is MonitorNode => n != null);
+
+          if (children.length === 0) {
+            return {
+              pathIds,
+              positions: new Map<string, { x: number; y: number }>(),
+              minX: 0,
+              minY: 0,
+              maxX: 0,
+              maxY: 0
+            };
+          }
+
+          const dagNodesBranch: DagNode[] = children.map((c) => ({
+            id: c.pathId,
+            name: c.nodeName,
+            stateName: c.stateName,
+            status: statusByApiStateName.get(c.apiStateName)?.status ?? NodeStatus.WAITING,
+            durationMs: statusByApiStateName.get(c.apiStateName)?.durationMs ?? null,
+            position: { x: 0, y: 0 }
+          }));
+          const dagEdgesBranch: DagEdge[] = graph.edges
+            .filter((e) => pathIds.includes(e.from) && pathIds.includes(e.to))
+            .map((e) => ({ id: e.id, from: e.from, to: e.to }));
+
+          const positions = computeAutoLayout(dagNodesBranch, dagEdgesBranch);
+
+          let minX = Number.POSITIVE_INFINITY;
+          let minY = Number.POSITIVE_INFINITY;
+          let maxX = Number.NEGATIVE_INFINITY;
+          let maxY = Number.NEGATIVE_INFINITY;
+
+          positions.forEach((p) => {
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x);
+            maxY = Math.max(maxY, p.y);
+          });
+
+          if (!Number.isFinite(minX)) {
+            minX = 0;
+            maxX = 0;
+          }
+          if (!Number.isFinite(minY)) {
+            minY = 0;
+            maxY = 0;
+          }
+
+          return { pathIds, positions, minX, minY, maxX, maxY };
+        });
+
         const bodyWidth = Math.max(
           CONTAINER_BRANCH_MIN_WIDTH,
-          NODE_METRICS.width + CONTAINER_PADDING * 2
+          NODE_METRICS.width + CONTAINER_PADDING * 2,
+          ...branchLayouts.map((layout) =>
+            layout.maxX - layout.minX + NODE_METRICS.width + CONTAINER_PADDING * 2
+          )
         );
-        const minRegionHeight = PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2;
-        const regionHeights = container.regions.map((reg) => {
-          const n = reg.pathIds.length;
+
+        const regionHeights = branchLayouts.map((layout) => {
           const contentHeight =
-            Math.max(0, n) * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) - (n > 0 ? CONTAINER_ROW_GAP : 0);
-          return Math.max(minRegionHeight, minRegionHeight + contentHeight);
+            layout.maxY - layout.minY + NODE_METRICS.collapsedHeight + CONTAINER_PADDING * 2;
+          return Math.max(minRegionHeight, contentHeight + PARALLEL_REGION_LABEL_HEIGHT);
         });
         const totalBodyHeight = regionHeights.reduce((a, b) => a + b, 0);
         const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
@@ -378,15 +438,34 @@ function computeMonitorLayout(
             if (!child) return;
             const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
             const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
-            // Parallel 브랜치 내부도 컨테이너 기준 정렬 (브랜치 영역 밖으로 삐져나오지 않도록)
-            const childPos = { x: regionX, y: yCursor };
+            const layout = branchLayouts[idx];
+            const local = layout.positions.get(pathId);
+            // layout 정보가 없으면 폴백으로 스택 정렬
+            if (!local) {
+              const fallbackPos = { x: regionX, y: yCursor };
+              positionedNodes.push({
+                ...child,
+                status: cStatus,
+                durationMs: cDuration,
+                position: fallbackPos
+              });
+              yCursor += NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP;
+              return;
+            }
+            // 브랜치 내부 auto layout 좌표를 브랜치 영역 안으로 오프셋
+            const childPos = {
+              x: regionX + (local.x - layout.minX),
+              y: regionY +
+                PARALLEL_REGION_LABEL_HEIGHT +
+                CONTAINER_PADDING +
+                (local.y - layout.minY)
+            };
             positionedNodes.push({
               ...child,
               status: cStatus,
               durationMs: cDuration,
               position: childPos
             });
-            yCursor += NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP;
           });
         });
       }
@@ -609,16 +688,6 @@ export function DagView({
     return map;
   }, [nodeStates]);
 
-  // Monitor 모드용: 각 노드별 incoming edge 개수 (다중 입력 표시용)
-  const incomingCountByPathId = useMemo(() => {
-    const map = new Map<string, number>();
-    if (!monitorGraph) return map;
-    monitorGraph.edges.forEach((e) => {
-      map.set(e.to, (map.get(e.to) ?? 0) + 1);
-    });
-    return map;
-  }, [monitorGraph]);
-
   // --- Monitor graph mode (containers + nested nodes, editor view_json 레이아웃 사용) ---
   const viewPositions = useMemo(
     () => getPathIdToPositionFromViewJson(viewJson ?? null),
@@ -782,9 +851,28 @@ export function DagView({
             const fromNode = positionedNodes.find((n) => n.pathId === edge.from);
             const toNode = positionedNodes.find((n) => n.pathId === edge.to);
             if (!fromNode || !toNode) return null;
+
+            const fromIsCondition = fromNode.dslType === "Condition";
+            const isThen = fromIsCondition && edge.conditionBranch === "then";
+            const isElse = fromIsCondition && edge.conditionBranch === "else";
+
+            // Condition 노드일 때는 true/false 포트를 분리해서 사용
+            let startY = fromNode.position.y + NODE_METRICS.collapsedHeight / 2;
+            if (fromIsCondition) {
+              const conditionEdges = edgesToRenderGraph.filter(
+                (e) => e.from === fromNode.pathId && (e.conditionBranch === "then" || e.conditionBranch === "else")
+              );
+              const portCount = conditionEdges.length || 1;
+              const offsets = getPortOffsets(NODE_METRICS.collapsedHeight, portCount);
+              const index = conditionEdges.findIndex((e) => e.id === edge.id);
+              const offset =
+                index >= 0 && index < offsets.length ? offsets[index] : NODE_METRICS.collapsedHeight / 2;
+              startY = fromNode.position.y + offset;
+            }
+
             const start = {
               x: fromNode.position.x + NODE_METRICS.width,
-              y: fromNode.position.y + NODE_METRICS.collapsedHeight / 2
+              y: startY
             };
             const end = {
               x: toNode.position.x,
@@ -794,9 +882,7 @@ export function DagView({
             const c1x = start.x + (end.x >= start.x ? curve : -curve);
             const c2x = end.x + (end.x >= start.x ? -curve : curve);
             const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
-            const fromIsCondition = fromNode.dslType === "Condition";
-            const isThen = fromIsCondition && edge.conditionBranch === "then";
-            const isElse = fromIsCondition && edge.conditionBranch === "else";
+
             const stroke = isThen ? "#059669" : isElse ? "#d97706" : "#94a3b8";
             const marker = isThen ? "url(#arrow-monitor-then)" : isElse ? "url(#arrow-monitor-else)" : "url(#arrow-monitor)";
             return (
@@ -830,7 +916,6 @@ export function DagView({
           const hasEnd = showEndRibbon(node.pathId);
           const hasStartEnd = showStartEndRibbon(node.pathId);
           const hasRibbon = hasStart || hasEnd || hasStartEnd;
-          const inputCount = incomingCountByPathId.get(node.pathId) ?? 0;
 
           return (
             <div
@@ -898,12 +983,6 @@ export function DagView({
                       <p className={cn("text-xs truncate text-slate-500")}>
                         {typeLabel}
                       </p>
-                    )}
-                    {inputCount > 1 && (
-                      <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
-                        <span className="inline-flex h-1.5 w-1.5 rounded-full bg-slate-400" />
-                        <span>{inputCount} inputs</span>
-                      </div>
                     )}
                     {node.durationMs !== null && (
                       <p className="mt-1 text-xs font-medium text-slate-700">⏱ {formatDuration(node.durationMs)}</p>
