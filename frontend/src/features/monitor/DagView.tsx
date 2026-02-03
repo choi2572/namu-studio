@@ -435,9 +435,9 @@ function computeMonitorLayout(
           const regionX = bodyX;
           const layout = branchLayouts[idx];
 
-          // 이 브랜치 내 전체 DAG 콘텐츠 폭 (auto layout 기준)
+          // 이 브랜치 내 전체 DAG 콘텐츠 폭 (auto layout 기준, padding 제외)
           const contentWidth =
-            layout.maxX - layout.minX + NODE_METRICS.width + CONTAINER_PADDING * 2;
+            layout.maxX - layout.minX + NODE_METRICS.width;
           const regionCenterX = regionX + bodyWidth / 2;
           const contentBaseX = regionCenterX - contentWidth / 2;
 
@@ -471,7 +471,7 @@ function computeMonitorLayout(
 
             // 브랜치 내부 auto layout 좌표를 브랜치 영역 안 중앙 정렬된 위치로 오프셋
             const childPos = {
-              x: contentBaseX + (local.x - layout.minX) + CONTAINER_PADDING,
+              x: contentBaseX + (local.x - layout.minX),
               y:
                 regionY +
                 PARALLEL_REGION_LABEL_HEIGHT +
@@ -856,7 +856,7 @@ export function DagView({
         >
           <defs>
             <marker id="arrow-monitor" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" />
+              <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
             </marker>
             <marker id="arrow-monitor-then" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
               <path d="M0,0 L0,6 L9,3 z" fill="#059669" />
@@ -902,10 +902,10 @@ export function DagView({
             const c2x = end.x + (end.x >= start.x ? -curve : curve);
             const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
 
-            const stroke = isThen ? "#059669" : isElse ? "#d97706" : "#94a3b8";
+            const stroke = isThen ? "#059669" : isElse ? "#d97706" : "#64748b";
             const marker = isThen ? "url(#arrow-monitor-then)" : isElse ? "url(#arrow-monitor-else)" : "url(#arrow-monitor)";
             return (
-              <path key={edge.id} d={d} stroke={stroke} strokeWidth="2" fill="none" markerEnd={marker} />
+              <path key={edge.id} d={d} stroke={stroke} strokeWidth="2.25" fill="none" markerEnd={marker} />
             );
           })}
         </svg>
@@ -970,7 +970,7 @@ export function DagView({
                     transform: "translate(-50%, -50%)"
                   }}
                 >
-                  <div className="h-3 w-3 rounded-full border border-slate-300 bg-white shadow-sm" />
+                  <div className="h-3 w-3 rounded-full border border-slate-700 bg-slate-100 shadow-sm" />
                 </div>
 
                 {/* 출력 포트(우측) - Condition은 true/false 두 개, 그 외에는 하나 */}
@@ -984,7 +984,7 @@ export function DagView({
                       transform: "translate(50%, -50%)"
                     }}
                   >
-                    <div className="h-3 w-3 rounded-full border border-slate-300 bg-white shadow-sm" />
+                    <div className="h-3 w-3 rounded-full border border-slate-700 bg-slate-100 shadow-sm" />
                   </div>
                 ))}
 
