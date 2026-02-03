@@ -534,6 +534,26 @@ const NODE_TYPE_COLORS: Record<string, { border: string; bg: string; text: strin
   }
 };
 
+/** DSL Type → 배지 라벨 + 색상 (모니터는 DSL 기준으로 표시) */
+function getNodeTypeInfoFromDsl(
+  dslType: string,
+  containerType: "repeat" | "parallel" | null
+): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
+  if (containerType === "repeat") {
+    return { type: "Repeat", colors: NODE_TYPE_COLORS.flow_control };
+  }
+  if (containerType === "parallel") {
+    return { type: "Parallel", colors: NODE_TYPE_COLORS.flow_control };
+  }
+  const t = dslType ?? "";
+  if (t === "Skill") return { type: "Skill", colors: NODE_TYPE_COLORS.skill };
+  if (t === "Condition") return { type: "Condition", colors: NODE_TYPE_COLORS.condition };
+  if (t === "Wait" || t === "Event") return { type: "Event", colors: NODE_TYPE_COLORS.event };
+  if (t === "Repeat" || t === "Parallel") return { type: t, colors: NODE_TYPE_COLORS.flow_control };
+  return { type: t || "Flow Control", colors: NODE_TYPE_COLORS.flow_control };
+}
+
+/** Flat 모드용: nodeName 기반 추론 (DSL 없을 때) */
 function getNodeTypeInfo(nodeName: string, stateName: string): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
   const name = nodeName.toLowerCase();
   if (name.includes("condition") || name.includes("if")) {
@@ -759,12 +779,8 @@ export function DagView({
         ))}
 
         {positionedNodes.map((node) => {
-          const nodeTypeInfo =
-            node.containerType === "repeat"
-              ? { type: "Repeat", colors: NODE_TYPE_COLORS.flow_control }
-              : node.containerType === "parallel"
-                ? { type: "Parallel", colors: NODE_TYPE_COLORS.flow_control }
-                : getNodeTypeInfo(node.nodeName, node.stateName);
+          const nodeTypeInfo = getNodeTypeInfoFromDsl(node.dslType, node.containerType);
+          const typeLabel = node.skillName ?? node.dslType;
           const isRunning = node.status === NodeStatus.RUNNING;
           const isCompleted = node.status === NodeStatus.SUCCEEDED;
           const isWaiting = node.status === NodeStatus.WAITING;
@@ -868,7 +884,10 @@ export function DagView({
                       {isWaiting && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">Waiting</span>}
                       {isCompleted && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">✓ Completed</span>}
                     </div>
-                    <p className={cn("text-xs truncate", isRunning ? "text-blue-700" : isCompleted ? "text-green-700" : isWaiting ? "text-amber-700" : "text-slate-600")}>
+                    <p className={cn("text-xs truncate text-slate-500")}>
+                      Type: {typeLabel}
+                    </p>
+                    <p className={cn("text-[10px] truncate mt-0.5 text-slate-400")}>
                       {node.stateName}
                     </p>
                     {node.durationMs !== null && (

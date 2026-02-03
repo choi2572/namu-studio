@@ -21,6 +21,10 @@ export type MonitorNode = {
   isContainer: boolean;
   containerType: "repeat" | "parallel" | null;
   branchIndex: number | null;
+  /** DSL State.Type (Skill, Condition, Repeat, Parallel, Wait 등) */
+  dslType: string;
+  /** Skill 노드일 때 DSL State.Skill (스킬 타입명, 예: PickObject) */
+  skillName: string | null;
 };
 
 export type MonitorEdge = {
@@ -83,6 +87,9 @@ function collectNodesAndEdges(
     const label = (state.Label as string) ?? stateName;
     const pathId = nodePathId([...pathPrefix, stateName]);
     const apiStateName = pathIdToApiStateName(pathId);
+    const dslType = type ?? "Task";
+    const skillName =
+      dslType === "Skill" && typeof state.Skill === "string" ? state.Skill : null;
 
     nodes.push({
       pathId,
@@ -92,7 +99,9 @@ function collectNodesAndEdges(
       containerPathId,
       isContainer: type === "Repeat" || type === "Parallel",
       containerType: type === "Repeat" ? "repeat" : type === "Parallel" ? "parallel" : null,
-      branchIndex
+      branchIndex,
+      dslType,
+      skillName
     });
 
     if (typeof state.Next === "string" && states[state.Next]) {
