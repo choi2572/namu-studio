@@ -33,6 +33,8 @@ const CONTAINER_NODE_OFFSET_Y = 12; // 노드 카드와 프레임 사이 간격 
 const CONTAINER_MIN_WIDTH = 280;
 const CONTAINER_MIN_HEIGHT = 120;
 const CONTAINER_BRANCH_MIN_WIDTH = 200;
+/** Parallel 브랜치 상단 라벨(Branch 1, Branch 2) 영역 높이 — 노드가 라벨을 가리지 않도록 */
+const PARALLEL_REGION_LABEL_HEIGHT = 22;
 
 type DagNode = {
   id: string;
@@ -311,8 +313,11 @@ function computeMonitorLayout(
         const regionHeights = container.regions.map((reg) => {
           const n = reg.pathIds.length;
           const contentHeight =
-            Math.max(1, n) * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) - CONTAINER_ROW_GAP;
-          return Math.max(CONTAINER_MIN_HEIGHT, CONTAINER_PADDING * 2 + contentHeight);
+            Math.max(0, n) * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) - (n > 0 ? CONTAINER_ROW_GAP : 0);
+          return Math.max(
+            CONTAINER_MIN_HEIGHT,
+            PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2 + contentHeight
+          );
         });
         const totalBodyHeight = regionHeights.reduce((a, b) => a + b, 0);
         const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
@@ -350,7 +355,7 @@ function computeMonitorLayout(
         container.regions.forEach((reg, idx) => {
           let regionY = bodyY;
           for (let i = 0; i < idx; i++) regionY += regionHeights[i];
-          let yCursor = regionY + CONTAINER_PADDING;
+          let yCursor = regionY + PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING;
           const regionX = bodyX;
           reg.pathIds.forEach((pathId) => {
             const child = graph.nodes.find((n) => n.pathId === pathId);
@@ -889,12 +894,11 @@ export function DagView({
                       {isWaiting && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">Waiting</span>}
                       {isCompleted && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">✓ Completed</span>}
                     </div>
-                    <p className={cn("text-xs truncate text-slate-500")}>
-                      Type: {typeLabel}
-                    </p>
-                    <p className={cn("text-[10px] truncate mt-0.5 text-slate-400")}>
-                      {node.stateName}
-                    </p>
+                    {typeLabel && typeLabel !== "Pass" && (
+                      <p className={cn("text-xs truncate text-slate-500")}>
+                        {typeLabel}
+                      </p>
+                    )}
                     {node.durationMs !== null && (
                       <p className="mt-1 text-xs font-medium text-slate-700">⏱ {formatDuration(node.durationMs)}</p>
                     )}
