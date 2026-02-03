@@ -185,16 +185,33 @@ function computeMonitorStartEnd(graph: MonitorGraph): {
   rootResult.endNodeIds.forEach((id) => endPathIds.add(id));
 
   graph.containers.forEach((container) => {
-    const innerPathIds = container.regions.flatMap((r) => r.pathIds);
-    const innerEdges = graph.edges.filter(
-      (e) => innerPathIds.includes(e.from) && innerPathIds.includes(e.to)
-    );
-    const scopeResult = computeStartEndForScope({
-      nodeIds: innerPathIds,
-      edges: innerEdges.map((e) => ({ from: e.from, to: e.to }))
-    });
-    if (scopeResult.startNodeId) startPathIds.add(scopeResult.startNodeId);
-    scopeResult.endNodeIds.forEach((id) => endPathIds.add(id));
+    if (container.type === "repeat") {
+      const innerPathIds = container.regions.flatMap((r) => r.pathIds);
+      const innerEdges = graph.edges.filter(
+        (e) => innerPathIds.includes(e.from) && innerPathIds.includes(e.to)
+      );
+      const scopeResult = computeStartEndForScope({
+        nodeIds: innerPathIds,
+        edges: innerEdges.map((e) => ({ from: e.from, to: e.to }))
+      });
+      if (scopeResult.startNodeId) startPathIds.add(scopeResult.startNodeId);
+      scopeResult.endNodeIds.forEach((id) => endPathIds.add(id));
+      return;
+    }
+    if (container.type === "parallel") {
+      container.regions.forEach((region) => {
+        const pathIds = region.pathIds;
+        const regionEdges = graph.edges.filter(
+          (e) => pathIds.includes(e.from) && pathIds.includes(e.to)
+        );
+        const scopeResult = computeStartEndForScope({
+          nodeIds: pathIds,
+          edges: regionEdges.map((e) => ({ from: e.from, to: e.to }))
+        });
+        if (scopeResult.startNodeId) startPathIds.add(scopeResult.startNodeId);
+        scopeResult.endNodeIds.forEach((id) => endPathIds.add(id));
+      });
+    }
   });
   return { startPathIds, endPathIds };
 }
@@ -295,7 +312,8 @@ function computeMonitorLayout(
         children.forEach((child) => {
           const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
           const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
-          const childPos = viewPositions?.get(child.pathId) ?? { x: bodyX, y: yCursor };
+          // 반복 컨테이너 안에서는 에디터 좌표 대신 컨테이너 기준으로 정렬
+          const childPos = { x: bodyX, y: yCursor };
           positionedNodes.push({
             ...child,
             status: cStatus,
@@ -308,7 +326,7 @@ function computeMonitorLayout(
         const branchCount = container.branchCount || 1;
         const bodyWidth = Math.max(
           CONTAINER_BRANCH_MIN_WIDTH,
-          NODE_METRICS.width + CONTAINER_PADDING
+          NODE_METRICS.width + CONTAINER_PADDING * 2
         );
         const minRegionHeight = PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2;
         const regionHeights = container.regions.map((reg) => {
@@ -360,7 +378,8 @@ function computeMonitorLayout(
             if (!child) return;
             const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
             const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
-            const childPos = viewPositions?.get(child.pathId) ?? { x: regionX, y: yCursor };
+            // Parallel 브랜치 내부도 컨테이너 기준 정렬 (브랜치 영역 밖으로 삐져나오지 않도록)
+            const childPos = { x: regionX, y: yCursor };
             positionedNodes.push({
               ...child,
               status: cStatus,
@@ -590,6 +609,16 @@ export function DagView({
     return map;
   }, [nodeStates]);
 
+  // Monitor 모드용: 각 노드별 incoming edge 개수 (다중 입력 표시용)
+  const incomingCountByPathId = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!monitorGraph) return map;
+    monitorGraph.edges.forEach((e) => {
+      map.set(e.to, (map.get(e.to) ?? 0) + 1);
+    });
+    return map;
+  }, [monitorGraph]);
+
   // --- Monitor graph mode (containers + nested nodes, editor view_json 레이아웃 사용) ---
   const viewPositions = useMemo(
     () => getPathIdToPositionFromViewJson(viewJson ?? null),
@@ -765,8 +794,9 @@ export function DagView({
             const c1x = start.x + (end.x >= start.x ? curve : -curve);
             const c2x = end.x + (end.x >= start.x ? -curve : curve);
             const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
-            const isThen = edge.conditionBranch === "then";
-            const isElse = edge.conditionBranch === "else";
+            const fromIsCondition = fromNode.dslType === "Condition";
+            const isThen = fromIsCondition && edge.conditionBranch === "then";
+            const isElse = fromIsCondition && edge.conditionBranch === "else";
             const stroke = isThen ? "#059669" : isElse ? "#d97706" : "#94a3b8";
             const marker = isThen ? "url(#arrow-monitor-then)" : isElse ? "url(#arrow-monitor-else)" : "url(#arrow-monitor)";
             return (
@@ -800,6 +830,7 @@ export function DagView({
           const hasEnd = showEndRibbon(node.pathId);
           const hasStartEnd = showStartEndRibbon(node.pathId);
           const hasRibbon = hasStart || hasEnd || hasStartEnd;
+          const inputCount = incomingCountByPathId.get(node.pathId) ?? 0;
 
           return (
             <div
@@ -867,6 +898,12 @@ export function DagView({
                       <p className={cn("text-xs truncate text-slate-500")}>
                         {typeLabel}
                       </p>
+                    )}
+                    {inputCount > 1 && (
+                      <div className="mt-1 flex items-center gap-1 text-[10px] text-slate-500">
+                        <span className="inline-flex h-1.5 w-1.5 rounded-full bg-slate-400" />
+                        <span>{inputCount} inputs</span>
+                      </div>
                     )}
                     {node.durationMs !== null && (
                       <p className="mt-1 text-xs font-medium text-slate-700">⏱ {formatDuration(node.durationMs)}</p>

@@ -64,7 +64,8 @@ type DslState = {
   Label?: string;
   Skill?: string;
   Count?: number;
-  If?: { Then?: string };
+  // Condition DSL: If 블록 안/밖 모두 지원 (If.Then / If.Else 또는 루트 Else)
+  If?: { Condition?: unknown; Then?: string; Else?: string };
   Else?: string;
   Choices?: Array<{ Next?: string }>;
   Body?: { StartAt?: string; States?: Record<string, DslState> };
@@ -119,8 +120,13 @@ function collectNodesAndEdges(
     }
 
     if (type === "Condition") {
-      const thenTarget = isRecord(state.If) && typeof state.If.Then === "string" ? state.If.Then : null;
-      const elseTarget = typeof state.Else === "string" ? state.Else : null;
+      const thenTarget =
+        isRecord(state.If) && typeof state.If.Then === "string" ? state.If.Then : null;
+      const elseFromIf =
+        isRecord(state.If) && typeof state.If.Else === "string" ? state.If.Else : null;
+      const elseFromRoot = typeof state.Else === "string" ? state.Else : null;
+      const elseTarget = elseFromIf ?? elseFromRoot;
+
       if (thenTarget && Object.prototype.hasOwnProperty.call(states, thenTarget)) {
         const toPathId = nodePathId([...pathPrefix, thenTarget]);
         edges.push({
@@ -208,14 +214,26 @@ function buildContainers(nodes: MonitorNode[]): MonitorContainer[] {
         regions: [{ index: 0, label: "Body", pathIds: bodyPathIds }]
       });
     } else {
-      const branchCount = Math.max(
-        1,
-        ...children.map((c) => (c.branchIndex ?? 0) + 1)
-      );
+      const branchIndexFromPathId = (pathId: string): number => {
+        const segments = pathId.split("/").filter(Boolean);
+        const branchSeg = segments.find((s) => s.startsWith("branch:"));
+        if (!branchSeg) return 0;
+        const num = parseInt(branchSeg.replace("branch:", ""), 10);
+        return Number.isFinite(num) ? num : 0;
+      };
+      const byBranch = new Map<number, string[]>();
+      children.forEach((c) => {
+        const idx = c.branchIndex ?? branchIndexFromPathId(c.pathId);
+        const list = byBranch.get(idx) ?? [];
+        list.push(c.pathId);
+        byBranch.set(idx, list);
+      });
+      const branchIndices = Array.from(byBranch.keys()).sort((a, b) => a - b);
+      const branchCount = Math.max(1, ...branchIndices.map((i) => i + 1));
       const regions: MonitorContainerRegion[] = Array.from({ length: branchCount }, (_, index) => ({
         index,
         label: `Branch ${index + 1}`,
-        pathIds: children.filter((c) => (c.branchIndex ?? 0) === index).map((c) => c.pathId)
+        pathIds: byBranch.get(index) ?? []
       }));
       containers.push({
         pathId: node.pathId,
