@@ -32,7 +32,8 @@ const CONTAINER_ROW_GAP = 24;
 const CONTAINER_NODE_OFFSET_Y = 12; // 노드 카드와 프레임 사이 간격 (editor offsetY)
 const CONTAINER_MIN_WIDTH = 280;
 const CONTAINER_MIN_HEIGHT = 120;
-const CONTAINER_BRANCH_MIN_WIDTH = 200;
+// Parallel 브랜치 최소 폭 — 브랜치 구분선/라벨이 가려지지 않도록 조금 넉넉하게
+const CONTAINER_BRANCH_MIN_WIDTH = 260;
 /** Parallel 브랜치 상단 라벨(Branch 1, Branch 2) 영역 높이 — 노드가 라벨을 가리지 않도록 */
 const PARALLEL_REGION_LABEL_HEIGHT = 22;
 
@@ -431,31 +432,48 @@ function computeMonitorLayout(
         container.regions.forEach((reg, idx) => {
           let regionY = bodyY;
           for (let i = 0; i < idx; i++) regionY += regionHeights[i];
-          let yCursor = regionY + PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING;
           const regionX = bodyX;
+          const layout = branchLayouts[idx];
+
+          // 이 브랜치 내 전체 DAG 콘텐츠 폭 (auto layout 기준)
+          const contentWidth =
+            layout.maxX - layout.minX + NODE_METRICS.width + CONTAINER_PADDING * 2;
+          const regionCenterX = regionX + bodyWidth / 2;
+          const contentBaseX = regionCenterX - contentWidth / 2;
+
           reg.pathIds.forEach((pathId) => {
             const child = graph.nodes.find((n) => n.pathId === pathId);
             if (!child) return;
-            const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
-            const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
-            const layout = branchLayouts[idx];
+            const cStatus =
+              statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
+            const cDuration =
+              statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
             const local = layout.positions.get(pathId);
-            // layout 정보가 없으면 폴백으로 스택 정렬
+
+            // layout 정보가 없으면 브랜치 중앙에 단순 스택 정렬
             if (!local) {
-              const fallbackPos = { x: regionX, y: yCursor };
+              const fallbackPos = {
+                x: regionCenterX - NODE_METRICS.width / 2,
+                y:
+                  regionY +
+                  PARALLEL_REGION_LABEL_HEIGHT +
+                  CONTAINER_PADDING +
+                  CONTAINER_ROW_GAP
+              };
               positionedNodes.push({
                 ...child,
                 status: cStatus,
                 durationMs: cDuration,
                 position: fallbackPos
               });
-              yCursor += NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP;
               return;
             }
-            // 브랜치 내부 auto layout 좌표를 브랜치 영역 안으로 오프셋
+
+            // 브랜치 내부 auto layout 좌표를 브랜치 영역 안 중앙 정렬된 위치로 오프셋
             const childPos = {
-              x: regionX + (local.x - layout.minX),
-              y: regionY +
+              x: contentBaseX + (local.x - layout.minX) + CONTAINER_PADDING,
+              y:
+                regionY +
                 PARALLEL_REGION_LABEL_HEIGHT +
                 CONTAINER_PADDING +
                 (local.y - layout.minY)
@@ -856,18 +874,19 @@ export function DagView({
             const isThen = fromIsCondition && edge.conditionBranch === "then";
             const isElse = fromIsCondition && edge.conditionBranch === "else";
 
-            // Condition 노드일 때는 true/false 포트를 분리해서 사용
+            // Condition 노드일 때는 항상 true/false 두 개의 포트를 사용 (에디터와 동일)
             let startY = fromNode.position.y + NODE_METRICS.collapsedHeight / 2;
             if (fromIsCondition) {
-              const conditionEdges = edgesToRenderGraph.filter(
-                (e) => e.from === fromNode.pathId && (e.conditionBranch === "then" || e.conditionBranch === "else")
-              );
-              const portCount = conditionEdges.length || 1;
-              const offsets = getPortOffsets(NODE_METRICS.collapsedHeight, portCount);
-              const index = conditionEdges.findIndex((e) => e.id === edge.id);
-              const offset =
-                index >= 0 && index < offsets.length ? offsets[index] : NODE_METRICS.collapsedHeight / 2;
-              startY = fromNode.position.y + offset;
+              const offsets = getPortOffsets(NODE_METRICS.collapsedHeight, 2);
+              const trueOffset = offsets[0];
+              const falseOffset = offsets[1] ?? offsets[0];
+              const portOffset =
+                edge.conditionBranch === "then"
+                  ? trueOffset
+                  : edge.conditionBranch === "else"
+                    ? falseOffset
+                    : NODE_METRICS.collapsedHeight / 2;
+              startY = fromNode.position.y + portOffset;
             }
 
             const start = {
@@ -916,6 +935,11 @@ export function DagView({
           const hasEnd = showEndRibbon(node.pathId);
           const hasStartEnd = showStartEndRibbon(node.pathId);
           const hasRibbon = hasStart || hasEnd || hasStartEnd;
+          const isConditionNode = node.dslType === "Condition";
+          const outputOffsets = isConditionNode
+            ? getPortOffsets(NODE_METRICS.collapsedHeight, 2)
+            : getPortOffsets(NODE_METRICS.collapsedHeight, 1);
+          const inputOffset = NODE_METRICS.collapsedHeight / 2;
 
           return (
             <div
@@ -938,6 +962,32 @@ export function DagView({
                   isSelected ? "ring-4 ring-slate-400 ring-offset-2" : "hover:shadow-lg"
                 )}
               >
+                {/* 입력 포트 (좌측) - 에디터와 동일한 위치 */}
+                <div
+                  className="pointer-events-none absolute left-0 flex items-center justify-center"
+                  style={{
+                    top: inputOffset,
+                    transform: "translate(-50%, -50%)"
+                  }}
+                >
+                  <div className="h-3 w-3 rounded-full border border-slate-300 bg-white shadow-sm" />
+                </div>
+
+                {/* 출력 포트(우측) - Condition은 true/false 두 개, 그 외에는 하나 */}
+                {outputOffsets.map((offset, index) => (
+                  <div
+                    // index: 0 -> true, 1 -> false (Condition), 단일 포트 노드면 하나만 사용
+                    key={index}
+                    className="pointer-events-none absolute right-0 flex items-center justify-center"
+                    style={{
+                      top: offset,
+                      transform: "translate(50%, -50%)"
+                    }}
+                  >
+                    <div className="h-3 w-3 rounded-full border border-slate-300 bg-white shadow-sm" />
+                  </div>
+                ))}
+
                 <div
                   className={cn(
                     "relative z-0 flex items-start justify-between pl-3",
