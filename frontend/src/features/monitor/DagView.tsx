@@ -258,7 +258,6 @@ function computeMonitorLayout(
 
   const positionedNodes: PositionedMonitorNode[] = [];
   const containerFrames: ContainerFrameLayout[] = [];
-  const frameYOffset = NODE_METRICS.collapsedHeight + CONTAINER_NODE_OFFSET_Y;
 
   // Start/End 리본 여부는 parallel 영역 높이 계산에 사용 (먼저 계산)
   const { startPathIds, endPathIds } = computeMonitorStartEnd(graph);
@@ -274,7 +273,14 @@ function computeMonitorLayout(
       if (!container) return;
       const innerNodes = graph.nodes.filter((n) => n.containerPathId === node.pathId);
       const frameX = pos.x;
-      const frameY = pos.y + frameYOffset;
+      // 컨테이너 노드에 리본이 있으면 프레임을 더 아래로 (겹침 방지)
+      const nodeRibbonHeight =
+        startPathIds.has(node.pathId) || endPathIds.has(node.pathId) ? RIBBON_HEIGHT : 0;
+      const frameY =
+        pos.y +
+        NODE_METRICS.collapsedHeight +
+        nodeRibbonHeight +
+        CONTAINER_NODE_OFFSET_Y;
       const bodyX = frameX + CONTAINER_PADDING;
       const bodyY = frameY + CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING;
 
@@ -644,6 +650,10 @@ function getPortOffsets(nodeHeight: number, count: number) {
   if (count === 1) {
     return [nodeHeight / 2];
   }
+  // Condition true/false: 간격을 넓히기 위해 25% / 75% 사용
+  if (count === 2) {
+    return [nodeHeight * 0.25, nodeHeight * 0.75];
+  }
   const gap = nodeHeight / (count + 1);
   return Array.from({ length: count }, (_, index) => gap * (index + 1));
 }
@@ -869,7 +879,11 @@ export function DagView({
       <div
         ref={containerRef}
         className="relative w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50"
-        style={{ height: "100%", minHeight: canvasSize.height }}
+        style={{
+          height: "100%",
+          minHeight: canvasSize.height,
+          minWidth: canvasSize.width
+        }}
       >
         <svg
           className="absolute pointer-events-none"
@@ -1116,7 +1130,11 @@ export function DagView({
     <div
       ref={containerRef}
       className="relative w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50"
-      style={{ height: "100%", minHeight: canvasSize.height }}
+      style={{
+        height: "100%",
+        minHeight: canvasSize.height,
+        minWidth: canvasSize.width
+      }}
     >
       {/* SVG for edges - behind nodes */}
       <svg

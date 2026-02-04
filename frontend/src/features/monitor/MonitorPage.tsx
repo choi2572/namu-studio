@@ -29,6 +29,19 @@ function getNextSeq(events: RunEvent[]) {
   return Math.max(...events.map((event) => event.seq)) + 1;
 }
 
+/** DSL 기준 노드 대분류 (Timeline 뱃지용) */
+function getNodeTypeCategory(
+  dslType: string,
+  containerType: "repeat" | "parallel" | null
+): string {
+  if (containerType === "repeat" || containerType === "parallel") return "Flow Control";
+  const t = dslType ?? "";
+  if (t === "Skill") return "Skill";
+  if (t === "Condition" || t === "Choice" || t === "Repeat" || t === "Parallel") return "Flow Control";
+  if (t === "Wait" || t === "Event") return "Event";
+  return "Flow Control";
+}
+
 function getNextTimestamp(events: RunEvent[], fallback: string) {
   const last = events[events.length - 1]?.timestamp ?? fallback;
   const date = new Date(last);
@@ -297,12 +310,14 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       const node = monitorGraph.nodes.find((n) => n.pathId === selectedNode);
       if (!node) return null;
       const snap = nodeStates.find((n) => n.stateName === node.apiStateName);
+      const typeDisplay = node.skillName ?? node.dslType ?? "Task";
       return {
         stateName: node.apiStateName,
         nodeName: node.nodeName,
         status: snap?.status ?? NodeStatus.WAITING,
-        durationMs: snap?.durationMs ?? null
-      } as NodeStateSnapshot;
+        durationMs: snap?.durationMs ?? null,
+        typeDisplay
+      } as NodeStateSnapshot & { typeDisplay?: string };
     }
     return allNodes.find((n) => n.stateName === selectedNode) ?? null;
   }, [selectedNode, monitorGraph, nodeStates, allNodes]);
@@ -381,7 +396,11 @@ export function MonitorPage({ runId }: MonitorPageProps) {
                 <p className="font-semibold text-slate-900">
                   {selectedNodeState.nodeName}
                 </p>
-                <p className="text-slate-500">{selectedNodeState.stateName}</p>
+                {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string }).typeDisplay && (
+                  <p className="mt-0.5 text-slate-500">
+                    {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string }).typeDisplay}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <StatusBadge status={selectedNodeState.status} />
@@ -474,10 +493,18 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               onSelectNode={(stateName) =>
                 setSelectedNode(stateNameToPathId.get(stateName) ?? stateName)
               }
-              nodeStates={allNodes.map((n) => ({
-                stateName: n.stateName,
-                nodeName: n.nodeName
-              }))}
+              nodeStates={
+                monitorGraph
+                  ? monitorGraph.nodes.map((n) => ({
+                      stateName: n.apiStateName,
+                      nodeName: n.nodeName,
+                      typeLabel: getNodeTypeCategory(n.dslType, n.containerType)
+                    }))
+                  : allNodes.map((n) => ({
+                      stateName: n.stateName,
+                      nodeName: n.nodeName
+                    }))
+              }
             />
           </div>
         </Card>

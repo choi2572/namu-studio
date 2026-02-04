@@ -134,7 +134,7 @@ type TimelineTableProps = {
   events: RunEvent[];
   selectedNode: string | null;
   onSelectNode: (stateName: string) => void;
-  nodeStates?: Array<{ stateName: string; nodeName: string }>;
+  nodeStates?: Array<{ stateName: string; nodeName: string; typeLabel?: string }>;
 };
 
 // 이벤트 타입별 색상 (아이콘은 SVG로 대체)
@@ -270,7 +270,13 @@ export function TimelineTable({
             ? nodeStates.find((n) => n.stateName === event.stateName)
             : null;
           const nodeTypeInfo = nodeInfo
-            ? getNodeTypeInfo(nodeInfo.nodeName, event.stateName || "")
+            ? nodeInfo.typeLabel
+              ? (() => {
+                  const key = nodeInfo.typeLabel.toLowerCase().replace(/\s+/g, "_");
+                  const colors = NODE_TYPE_COLORS[key] ?? NODE_TYPE_COLORS.flow_control;
+                  return { type: nodeInfo.typeLabel, colors };
+                })()
+              : getNodeTypeInfo(nodeInfo.nodeName, event.stateName || "")
             : null;
 
           return (
