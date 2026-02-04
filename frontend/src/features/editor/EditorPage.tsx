@@ -4140,7 +4140,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [publishToast]);
 
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-6">
       {showPublishConfirm && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
@@ -4185,7 +4185,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         </div>
       )}
 
-      <div className="flex items-start justify-between">
+      <div className="flex shrink-0 items-start justify-between">
         <div>
           <p className="text-xs text-slate-500">Workflow Editor</p>
           <div className="flex items-center gap-2">
@@ -4302,7 +4302,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         </div>
       </div>
 
-      <div className="relative">
+      <div className="relative flex min-h-0 flex-1 flex-col">
         <button
           type="button"
           onClick={() => setShowPalette((prev) => !prev)}
@@ -4375,10 +4375,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           </div>
         )}
 
-        <Card className="border-dashed min-w-0">
+        <Card className="flex min-h-0 min-w-0 flex-1 flex-col border-dashed">
           <div
             ref={containerRef}
-            className="relative h-[560px] w-full min-w-0 overflow-hidden rounded-md bg-slate-50"
+            className="relative min-h-[560px] w-full min-w-0 flex-1 overflow-hidden rounded-md bg-slate-50"
           >
             <div
               ref={scrollRef}
