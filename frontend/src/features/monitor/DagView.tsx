@@ -29,7 +29,7 @@ const PADDING = 80;
 const CONTAINER_HEADER_HEIGHT = 28;
 const CONTAINER_PADDING = 12;
 const CONTAINER_ROW_GAP = 24;
-const CONTAINER_NODE_OFFSET_Y = 12; // 노드 카드와 프레임 사이 간격 (editor offsetY)
+const CONTAINER_NODE_OFFSET_Y = 28; // 노드 카드와 unfolding 프레임 사이 간격 (겹침 방지)
 const CONTAINER_MIN_WIDTH = 280;
 const CONTAINER_MIN_HEIGHT = 120;
 // Parallel 브랜치 최소 폭 — 브랜치 구분선/라벨이 가려지지 않도록 조금 넉넉하게
