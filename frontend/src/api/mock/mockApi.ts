@@ -14,7 +14,8 @@ import {
   RunSnapshot,
   RunsApi,
   SkillsetsApi,
-  WorkflowsApi
+  WorkflowsApi,
+  WorkflowRunResponse
 } from "@/api/interfaces";
 import {
   NodeDebugBundle,
@@ -319,24 +320,102 @@ function applyRunFilters(runs: RunSummary[], filters?: RunListFilters) {
   });
 }
 
-const MOCK_RUNNER_STATUS: RunnerStatusResponse = {
-  runner_status: "running",
-  workflow: {
-    workflow_id: "wf_175300000000",
-    current_node: "PickObject",
-    progress: {
-      completed_states: ["Start"],
-      current_state: "PickObject",
-      pending_states: ["PlaceObject"]
-    },
-    started_at: "2026-01-23T12:34:56Z",
-    updated_at: "2026-01-23T12:35:06Z"
+// Mock state for workflow run (start/cancel). getRunnerStatus uses this.
+let mockCurrentWorkflowRun: {
+  workflow_id: string;
+  status: "running" | "cancelled";
+  started_at: string;
+  updated_at: string;
+  current_node: string;
+  completed_states: string[];
+  pending_states: string[];
+} | null = null;
+
+function getMockRunnerStatus(): RunnerStatusResponse {
+  if (!mockCurrentWorkflowRun || mockCurrentWorkflowRun.status !== "running") {
+    return { runner_status: "idle" };
   }
-};
+  const w = mockCurrentWorkflowRun;
+  return {
+    runner_status: "running",
+    workflow: {
+      workflow_id: w.workflow_id,
+      current_node: w.current_node,
+      progress: {
+        completed_states: w.completed_states,
+        current_state: w.current_node,
+        pending_states: w.pending_states
+      },
+      started_at: w.started_at,
+      updated_at: w.updated_at
+    }
+  };
+}
 
 export const mockMiddlewareApi: MiddlewareApi = {
   async getRunnerStatus(): Promise<RunnerStatusResponse> {
-    return delay(deepClone(MOCK_RUNNER_STATUS));
+    return delay(deepClone(getMockRunnerStatus()));
+  },
+
+  async runWorkflowStart(workflowJson: Record<string, unknown>): Promise<WorkflowRunResponse> {
+    // Optional: simulate validation error for empty or invalid workflow
+    const states = workflowJson?.States as Record<string, unknown> | undefined;
+    if (!states || typeof states !== "object" || Object.keys(states).length === 0) {
+      const err = new Error("Invalid workflow JSON") as Error & {
+        status?: number;
+        body?: { error: string; message: string; details?: { state?: string; reason?: string } };
+      };
+      err.status = 400;
+      err.body = {
+        error: "validation error",
+        message: "Invalid workflow JSON",
+        details: { state: "", reason: "Workflow must have at least one state" }
+      };
+      throw err;
+    }
+    const workflow_id = `wf_${Date.now()}`;
+    const now = new Date().toISOString();
+    const stateNames = Object.keys(states);
+    const startAt = (workflowJson.StartAt as string) ?? stateNames[0];
+    mockCurrentWorkflowRun = {
+      workflow_id,
+      status: "running",
+      started_at: now,
+      updated_at: now,
+      current_node: startAt,
+      completed_states: [],
+      pending_states: stateNames.filter((s) => s !== startAt)
+    };
+    return delay(
+      deepClone({
+        workflow_id,
+        status: "running"
+      })
+    );
+  },
+
+  async runWorkflowCancel(): Promise<WorkflowRunResponse> {
+    const current = mockCurrentWorkflowRun;
+    if (!current) {
+      return delay(
+        deepClone({
+          workflow_id: `wf_${Date.now()}`,
+          status: "cancelled"
+        })
+      );
+    }
+    const workflow_id = current.workflow_id;
+    mockCurrentWorkflowRun = {
+      ...current,
+      status: "cancelled",
+      updated_at: new Date().toISOString()
+    };
+    // After cancel, runner becomes idle (getRunnerStatus will return idle)
+    const result: WorkflowRunResponse = { workflow_id, status: "cancelled" };
+    setTimeout(() => {
+      mockCurrentWorkflowRun = null;
+    }, 0);
+    return delay(deepClone(result));
   }
 };
 

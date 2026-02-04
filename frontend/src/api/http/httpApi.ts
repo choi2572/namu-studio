@@ -14,7 +14,8 @@ import {
   RunListFilters,
   RunSnapshot,
   RunsApi,
-  WorkflowsApi
+  WorkflowsApi,
+  WorkflowRunResponse
 } from "@/api/interfaces";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api";
@@ -46,6 +47,42 @@ export const httpMiddlewareApi: MiddlewareApi = {
     logApiCall("GET", url);
     const response = await fetch(url);
     return handleResponse<RunnerStatusResponse>(response);
+  },
+
+  async runWorkflowStart(workflowJson: Record<string, unknown>): Promise<WorkflowRunResponse> {
+    const url = getApiUrl("/v1/workflows/run");
+    logApiCall("POST", url, { request_type: "start" });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_type: "start", workflow_json: workflowJson })
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      let body: { error?: string; message?: string; details?: { state?: string; reason?: string } } = {};
+      try {
+        body = JSON.parse(text);
+      } catch {
+        throw new Error(`API error: ${response.status} ${text}`);
+      }
+      const msg = body.message || body.error || text || response.statusText;
+      const err = new Error(msg) as Error & { status?: number; body?: typeof body };
+      err.status = response.status;
+      err.body = body;
+      throw err;
+    }
+    return response.json();
+  },
+
+  async runWorkflowCancel(): Promise<WorkflowRunResponse> {
+    const url = getApiUrl("/v1/workflows/run");
+    logApiCall("POST", url, { request_type: "cancel" });
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_type: "cancel" })
+    });
+    return handleResponse<WorkflowRunResponse>(response);
   }
 };
 
