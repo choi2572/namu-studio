@@ -878,11 +878,11 @@ export function DagView({
     return (
       <div
         ref={containerRef}
-        className="relative min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-slate-200 bg-slate-50"
+        className="relative min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto rounded-lg border border-slate-200 bg-slate-50"
         style={{ minHeight: 0 }}
       >
         <div
-          className="relative"
+          className="relative flex-shrink-0"
           style={{
             width: canvasSize.width,
             height: canvasSize.height
@@ -1133,11 +1133,11 @@ export function DagView({
   return (
     <div
       ref={containerRef}
-      className="relative min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-slate-200 bg-slate-50"
+      className="relative min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto rounded-lg border border-slate-200 bg-slate-50"
       style={{ minHeight: 0 }}
     >
       <div
-        className="relative"
+        className="relative flex-shrink-0"
         style={{
           width: canvasSize.width,
           height: canvasSize.height

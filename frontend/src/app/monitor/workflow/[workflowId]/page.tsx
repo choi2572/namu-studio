@@ -144,11 +144,11 @@ export default function MonitorWorkflowPage() {
         </p>
       </div>
 
-      <div className="flex-1 overflow-hidden p-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
         <Card
           title="DAG View"
           description="Workflow structure. Start a run to see live status."
-          className="flex h-full flex-col overflow-hidden"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           <div className="flex min-h-0 flex-1 flex-col p-6">
             <DagView

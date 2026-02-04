@@ -42,7 +42,7 @@ export function Card({
       )}
       <div className={cn(
         title || actions ? "mt-4" : "",
-        isFlex && "flex-1 min-h-0"
+        isFlex && "flex min-h-0 flex-1 flex-col"
       )}>
         {children}
       </div>

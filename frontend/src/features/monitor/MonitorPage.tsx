@@ -361,9 +361,10 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       </div>
 
       {/* Center: DAG view, Right Panel: Debug Panel */}
-      <div className="flex-1 overflow-hidden p-6">
-        <div className="grid h-full gap-6 lg:grid-cols-[2fr_1fr]">
-        {/* DAG View - Center */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
+        <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[2fr_1fr]">
+        {/* DAG View - Center: min-h-0 so grid item can shrink and vertical scroll works */}
+        <div className="min-h-0 flex flex-col overflow-hidden">
         <Card
           title="DAG View"
           description={
@@ -371,7 +372,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               ? "Replay mode: viewing historical execution state"
               : "Live monitoring: node statuses update in real-time"
           }
-          className="flex flex-col overflow-hidden h-full"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           <div className="flex min-h-0 flex-1 flex-col p-6">
             <DagView
@@ -385,6 +386,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             />
           </div>
         </Card>
+        </div>
 
         {/* Debug Panel - Right (appears when node is selected) */}
         {selectedNodeState ? (
