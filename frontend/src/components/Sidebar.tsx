@@ -96,12 +96,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-      {!isCollapsed && (
-        <div className="mt-auto rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-          <p className="font-semibold text-slate-900">Mode</p>
-          <p className="mt-1">Authoring and Monitoring are separated.</p>
-        </div>
-      )}
     </aside>
   );
 }

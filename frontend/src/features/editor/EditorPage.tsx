@@ -4279,12 +4279,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               ) : null;
             })()}
           </div>
-          {activeDraft && (
-            <p className="text-xs text-slate-500">
-              Draft mode · Publish creates an immutable version · Last updated{" "}
-              {formatDateTime(activeDraft.updatedAt)}
-            </p>
-          )}
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={handleAutoLayout}>
