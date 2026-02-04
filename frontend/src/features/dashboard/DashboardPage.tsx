@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { workflowsApi, runsApi } from "@/api";
+import { middlewareApi, workflowsApi, runsApi } from "@/api";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableCell, TableHead, TableRow } from "@/components/Table";
@@ -65,6 +65,32 @@ export function DashboardPage() {
     .length;
   const successRuns = runs.filter((run) => run.status === RunStatus.SUCCESS)
     .length;
+
+  // Middleware runner status (실제 실행 중인 workflow 정보)
+  const { data: runnerStatus } = useQuery({
+    queryKey: ["middleware-runner-status"],
+    queryFn: () => middlewareApi.getRunnerStatus()
+  });
+
+  const isRunnerRunning =
+    runnerStatus && runnerStatus.runner_status === "running" && runnerStatus.workflow;
+
+  const runnerCurrentNodeName =
+    isRunnerRunning &&
+    (runnerStatus.workflow.progress?.current_state ||
+      runnerStatus.workflow.current_node ||
+      null);
+
+  const runnerElapsedMs = (() => {
+    if (!isRunnerRunning) return null;
+    const { started_at, updated_at } = runnerStatus.workflow;
+    const started = new Date(started_at).getTime();
+    const updated = new Date(updated_at).getTime();
+    if (Number.isNaN(started) || Number.isNaN(updated) || updated < started) {
+      return null;
+    }
+    return updated - started;
+  })();
 
   // Get snapshot for latest run if it's running
   const isLatestRunActive =
@@ -141,6 +167,54 @@ export function DashboardPage() {
           </div>
         </Card>
       </div>
+
+      {/* Middleware Runner 상태 요약 */}
+      <Card
+        className="border-2 border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100"
+        title="Runner Status"
+        description="Middleware runner의 현재 실행 상태"
+      >
+        {runnerStatus ? (
+          runnerStatus.runner_status === "running" && isRunnerRunning ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                Running
+              </p>
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold">Workflow ID:</span>{" "}
+                {runnerStatus.workflow.workflow_id}
+              </p>
+              {runnerCurrentNodeName && (
+                <p className="text-sm text-slate-700">
+                  <span className="font-semibold">Current node:</span>{" "}
+                  {runnerCurrentNodeName}
+                </p>
+              )}
+              {runnerElapsedMs !== null && (
+                <p className="text-sm text-slate-700">
+                  <span className="font-semibold">Elapsed:</span>{" "}
+                  {formatDuration(runnerElapsedMs)}
+                </p>
+              )}
+            </div>
+          ) : runnerStatus.runner_status === "idle" ? (
+            <p className="text-sm text-slate-600">
+              현재 실행 중인 workflow가 없습니다.
+            </p>
+          ) : (
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
+                Error
+              </p>
+              <p className="text-sm text-red-700">
+                {runnerStatus.error || "Runner에서 오류가 보고되었습니다."}
+              </p>
+            </div>
+          )
+        ) : (
+          <p className="text-sm text-slate-500">Runner 상태를 불러오는 중...</p>
+        )}
+      </Card>
 
       {/* Top Section: Overview & Failures */}
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">

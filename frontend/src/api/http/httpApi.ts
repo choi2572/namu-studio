@@ -8,7 +8,14 @@ import {
   WorkflowListItem,
   WorkflowVersionSummary
 } from "@/domain/types";
-import { RunListFilters, RunSnapshot, RunsApi, WorkflowsApi } from "@/api/interfaces";
+import {
+  MiddlewareApi,
+  RunnerStatusResponse,
+  RunListFilters,
+  RunSnapshot,
+  RunsApi,
+  WorkflowsApi
+} from "@/api/interfaces";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api";
 
@@ -31,6 +38,16 @@ function logApiCall(method: string, url: string, data?: unknown) {
     console.log(`[API] ${method} ${url}`, data ? { data } : "");
   }
 }
+
+export const httpMiddlewareApi: MiddlewareApi = {
+  async getRunnerStatus(): Promise<RunnerStatusResponse> {
+    // docs/middleware_api_spec.md - GET /api/v1/runner/status
+    const url = getApiUrl("/v1/runner/status");
+    logApiCall("GET", url);
+    const response = await fetch(url);
+    return handleResponse<RunnerStatusResponse>(response);
+  }
+};
 
 export const httpWorkflowsApi: WorkflowsApi = {
   async list(): Promise<WorkflowListItem[]> {

@@ -7,7 +7,15 @@ import {
   workflowList,
   workflowVersions
 } from "@/api/mock/data";
-import { RunListFilters, RunSnapshot, RunsApi, SkillsetsApi, WorkflowsApi } from "@/api/interfaces";
+import {
+  MiddlewareApi,
+  RunnerStatusResponse,
+  RunListFilters,
+  RunSnapshot,
+  RunsApi,
+  SkillsetsApi,
+  WorkflowsApi
+} from "@/api/interfaces";
 import {
   NodeDebugBundle,
   NodeStatus,
@@ -310,6 +318,27 @@ function applyRunFilters(runs: RunSummary[], filters?: RunListFilters) {
     return true;
   });
 }
+
+const MOCK_RUNNER_STATUS: RunnerStatusResponse = {
+  runner_status: "running",
+  workflow: {
+    workflow_id: "wf_175300000000",
+    current_node: "PickObject",
+    progress: {
+      completed_states: ["Start"],
+      current_state: "PickObject",
+      pending_states: ["PlaceObject"]
+    },
+    started_at: "2026-01-23T12:34:56Z",
+    updated_at: "2026-01-23T12:35:06Z"
+  }
+};
+
+export const mockMiddlewareApi: MiddlewareApi = {
+  async getRunnerStatus(): Promise<RunnerStatusResponse> {
+    return delay(deepClone(MOCK_RUNNER_STATUS));
+  }
+};
 
 export const mockRunsApi: RunsApi = {
   async list(filters?: RunListFilters): Promise<RunSummary[]> {

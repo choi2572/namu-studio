@@ -29,6 +29,40 @@ export type RunSnapshot = {
   nodeStates: NodeStateSnapshot[];
 };
 
+// Middleware runner status (see docs/middleware_api_spec.md)
+export type RunnerStatus = "idle" | "running" | "error";
+
+export type RunnerWorkflowProgress = {
+  completed_states: string[];
+  current_state: string;
+  pending_states: string[];
+};
+
+export type RunnerWorkflowInfo = {
+  workflow_id: string;
+  current_node?: string;
+  progress?: RunnerWorkflowProgress;
+  started_at: string;
+  updated_at: string;
+};
+
+export type RunnerStatusResponse =
+  | {
+      runner_status: "idle";
+    }
+  | {
+      runner_status: "running";
+      workflow: RunnerWorkflowInfo;
+    }
+  | {
+      runner_status: "error";
+      error: string;
+      details?: {
+        error_code: string;
+        error_message: string;
+      };
+    };
+
 export interface WorkflowsApi {
   list(): Promise<WorkflowListItem[]>;
   create(payload?: { name?: string; description?: string }): Promise<WorkflowListItem>;
@@ -37,6 +71,11 @@ export interface WorkflowsApi {
   validateDraft(workflowId: string): Promise<ValidationError[]>;
   publish(workflowId: string): Promise<WorkflowVersionSummary>;
   delete(workflowId: string): Promise<void>;
+}
+
+export interface MiddlewareApi {
+  /** 현재 미들웨어 runner의 상태를 조회 */
+  getRunnerStatus(): Promise<RunnerStatusResponse>;
 }
 
 export interface RunsApi {
