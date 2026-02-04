@@ -879,12 +879,15 @@ export function DagView({
       <div
         ref={containerRef}
         className="relative w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50"
-        style={{
-          height: "100%",
-          minHeight: canvasSize.height,
-          minWidth: canvasSize.width
-        }}
+        style={{ height: "100%" }}
       >
+        <div
+          className="relative"
+          style={{
+            minWidth: canvasSize.width,
+            minHeight: canvasSize.height
+          }}
+        >
         <svg
           className="absolute pointer-events-none"
           width={canvasSize.width}
@@ -1118,6 +1121,7 @@ export function DagView({
             </div>
           );
         })}
+        </div>
       </div>
     );
   }
@@ -1130,12 +1134,15 @@ export function DagView({
     <div
       ref={containerRef}
       className="relative w-full overflow-auto rounded-lg border border-slate-200 bg-slate-50"
-      style={{
-        height: "100%",
-        minHeight: canvasSize.height,
-        minWidth: canvasSize.width
-      }}
+      style={{ height: "100%" }}
     >
+      <div
+        className="relative"
+        style={{
+          minWidth: canvasSize.width,
+          minHeight: canvasSize.height
+        }}
+      >
       {/* SVG for edges - behind nodes */}
       <svg
         className="absolute pointer-events-none"
@@ -1309,6 +1316,7 @@ export function DagView({
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

@@ -61,7 +61,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     queryFn: () => runsApi.getSnapshot(runId)
   });
 
-  const { data: initialEvents = [] } = useQuery({
+  const { data: eventsData } = useQuery({
     queryKey: ["run-events", runId],
     queryFn: () => runsApi.getEvents(runId, 0)
   });
@@ -115,8 +115,9 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   }, [snapshot]);
 
   useEffect(() => {
-    setEvents(initialEvents);
-  }, [initialEvents]);
+    if (eventsData === undefined) return;
+    setEvents(eventsData);
+  }, [runId, eventsData]);
 
   useEffect(() => {
     if (!snapshot || runStatus !== RunStatus.RUNNING || isReplayMode) return;
