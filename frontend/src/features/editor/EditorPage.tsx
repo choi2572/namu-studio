@@ -289,7 +289,7 @@ const NODE_METRICS = {
 };
 
 /** 리본(START/END)이 있을 때 카드 상단에 추가되는 높이 (리본 h-6 + pt-6) */
-const RIBBON_EXTRA_HEIGHT = 48;
+const RIBBON_EXTRA_HEIGHT = 20;
 
 const CONTAINER_FRAME_DEFAULTS = {
   width: 520,

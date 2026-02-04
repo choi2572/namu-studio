@@ -150,7 +150,7 @@ export default function MonitorWorkflowPage() {
           description="Workflow structure. Start a run to see live status."
           className="flex h-full flex-col overflow-hidden"
         >
-          <div className="flex-1 min-h-0 p-6">
+          <div className="flex min-h-0 flex-1 flex-col p-6">
             <DagView
               nodeStates={allNodes}
               selectedNode={null}

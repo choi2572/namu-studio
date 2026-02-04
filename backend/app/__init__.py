@@ -20,7 +20,7 @@ def create_app(config_class=Config):
         init_db()
     
     # Enable CORS for frontend dev
-    CORS(app, origins=["http://localhost:3000"])
+    CORS(app)
     
     # Register error handlers
     register_error_handlers(app)
