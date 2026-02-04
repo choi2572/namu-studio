@@ -61,35 +61,30 @@ export function DashboardPage() {
     .slice(0, 3);
 
   const totalRuns = runs.length;
-  const runningRuns = runs.filter((run) => run.status === RunStatus.RUNNING)
-    .length;
   const successRuns = runs.filter((run) => run.status === RunStatus.SUCCESS)
     .length;
 
-  // Middleware runner status (실제 실행 중인 workflow 정보)
+  // Runner가 running일 때 Latest Run 카드에 미들웨어 정보 표시용
   const { data: runnerStatus } = useQuery({
     queryKey: ["middleware-runner-status"],
     queryFn: () => middlewareApi.getRunnerStatus()
   });
-
   const isRunnerRunning =
-    runnerStatus && runnerStatus.runner_status === "running" && runnerStatus.workflow;
-
-  const runnerCurrentNodeName =
+    runnerStatus?.runner_status === "running" && runnerStatus.workflow;
+  const runnerCurrentNode =
     isRunnerRunning &&
-    (runnerStatus.workflow.progress?.current_state ||
-      runnerStatus.workflow.current_node ||
+    (runnerStatus.workflow.progress?.current_state ??
+      runnerStatus.workflow.current_node ??
       null);
-
+  const runnerStartedAt = isRunnerRunning
+    ? runnerStatus.workflow.started_at
+    : null;
   const runnerElapsedMs = (() => {
     if (!isRunnerRunning) return null;
-    const { started_at, updated_at } = runnerStatus.workflow;
-    const started = new Date(started_at).getTime();
-    const updated = new Date(updated_at).getTime();
-    if (Number.isNaN(started) || Number.isNaN(updated) || updated < started) {
-      return null;
-    }
-    return updated - started;
+    const started = new Date(runnerStatus.workflow.started_at).getTime();
+    const updated = new Date(runnerStatus.workflow.updated_at).getTime();
+    if (Number.isNaN(started) || Number.isNaN(updated)) return null;
+    return Math.max(0, updated - started);
   })();
 
   // Get snapshot for latest run if it's running
@@ -132,7 +127,7 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Stats Overview */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card className="border-slate-200 bg-white">
           <div className="space-y-1">
             <p className="text-xs font-medium text-slate-500">Total Workflows</p>
@@ -149,14 +144,6 @@ export function DashboardPage() {
         </Card>
         <Card className="border-slate-200 bg-white">
           <div className="space-y-1">
-            <p className="text-xs font-medium text-slate-500">Running Now</p>
-            <p className="text-3xl font-bold text-emerald-600">
-              {runningRuns}
-            </p>
-          </div>
-        </Card>
-        <Card className="border-slate-200 bg-white">
-          <div className="space-y-1">
             <p className="text-xs font-medium text-slate-500">Success Rate</p>
             <p className="text-3xl font-bold text-slate-900">
               {totalRuns > 0
@@ -168,54 +155,6 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* Middleware Runner 상태 요약 */}
-      <Card
-        className="border-2 border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100"
-        title="Runner Status"
-        description="Middleware runner의 현재 실행 상태"
-      >
-        {runnerStatus ? (
-          runnerStatus.runner_status === "running" && isRunnerRunning ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
-                Running
-              </p>
-              <p className="text-sm text-slate-700">
-                <span className="font-semibold">Workflow ID:</span>{" "}
-                {runnerStatus.workflow.workflow_id}
-              </p>
-              {runnerCurrentNodeName && (
-                <p className="text-sm text-slate-700">
-                  <span className="font-semibold">Current node:</span>{" "}
-                  {runnerCurrentNodeName}
-                </p>
-              )}
-              {runnerElapsedMs !== null && (
-                <p className="text-sm text-slate-700">
-                  <span className="font-semibold">Elapsed:</span>{" "}
-                  {formatDuration(runnerElapsedMs)}
-                </p>
-              )}
-            </div>
-          ) : runnerStatus.runner_status === "idle" ? (
-            <p className="text-sm text-slate-600">
-              현재 실행 중인 workflow가 없습니다.
-            </p>
-          ) : (
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
-                Error
-              </p>
-              <p className="text-sm text-red-700">
-                {runnerStatus.error || "Runner에서 오류가 보고되었습니다."}
-              </p>
-            </div>
-          )
-        ) : (
-          <p className="text-sm text-slate-500">Runner 상태를 불러오는 중...</p>
-        )}
-      </Card>
-
       {/* Top Section: Overview & Failures */}
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         {/* Overview Card */}
@@ -224,33 +163,38 @@ export function DashboardPage() {
           description="Current or most recent run"
           className="border-2 border-slate-300 bg-gradient-to-br from-white to-slate-50"
         >
-          {latestRun ? (
+          {latestRun || isRunnerRunning ? (
             <div className="space-y-5">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 space-y-2">
                   <h4 className="text-xl font-bold text-slate-900">
-                    {latestRun.workflowName}
+                    {latestRun?.workflowName ?? runnerStatus?.workflow?.workflow_id ?? "—"}
                   </h4>
                   <p className="text-sm text-slate-600">
-                    {latestRun.runId}
+                    {latestRun?.runId ?? (isRunnerRunning ? runnerStatus?.workflow?.workflow_id : null) ?? "—"}
                   </p>
                 </div>
                 <div className="flex-shrink-0">
-                  <StatusBadge status={latestRun.status} />
+                  {latestRun && <StatusBadge status={latestRun.status} />}
+                  {!latestRun && isRunnerRunning && (
+                    <StatusBadge status={RunStatus.RUNNING} />
+                  )}
                 </div>
               </div>
 
-              {/* Current Status / Running Node */}
-              {isLatestRunActive && currentRunningNode ? (
+              {/* Current node: runner running이면 미들웨어 값, 아니면 기존 snapshot */}
+              {(isRunnerRunning && runnerCurrentNode) || (isLatestRunActive && currentRunningNode) ? (
                 <div className="rounded-lg border-2 border-blue-300 bg-blue-50 p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-blue-700">
                     Currently Running
                   </p>
                   <p className="mt-2 text-lg font-bold text-blue-900">
-                    {currentRunningNode.nodeName}
+                    {isRunnerRunning && runnerCurrentNode
+                      ? runnerCurrentNode
+                      : currentRunningNode?.nodeName}
                   </p>
                 </div>
-              ) : !isLatestRunActive ? (
+              ) : latestRun && !isLatestRunActive ? (
                 <div className="rounded-lg border-2 border-slate-200 bg-slate-50 p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-600">
                     Status
@@ -273,25 +217,31 @@ export function DashboardPage() {
                     Started
                   </p>
                   <p className="mt-2 text-base font-semibold text-slate-900">
-                    {formatDateTime(latestRun.startedAt)}
+                    {formatDateTime(
+                      (isRunnerRunning && runnerStartedAt) ? runnerStartedAt : (latestRun?.startedAt ?? "")
+                    )}
                   </p>
                 </div>
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    Duration
+                    {isRunnerRunning ? "Elapsed" : "Duration"}
                   </p>
                   <p className="mt-2 text-base font-semibold text-slate-900">
-                    {formatDuration(latestRun.durationMs)}
+                    {isRunnerRunning && runnerElapsedMs !== null
+                      ? formatDuration(runnerElapsedMs)
+                      : formatDuration(latestRun?.durationMs)}
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => router.push(`/monitor/${latestRun.runId}`)}
-                className="cursor-pointer w-full rounded-lg border-2 border-slate-900 bg-slate-900 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-800"
-              >
-                View Run Details →
-              </button>
+              {latestRun && (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/monitor/${latestRun.runId}`)}
+                  className="cursor-pointer w-full rounded-lg border-2 border-slate-900 bg-slate-900 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-800"
+                >
+                  View Run Details →
+                </button>
+              )}
             </div>
           ) : (
             <div className="py-12 text-center">
