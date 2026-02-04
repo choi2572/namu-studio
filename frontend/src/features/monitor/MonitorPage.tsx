@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { runsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
@@ -55,15 +55,25 @@ function getNextTimestamp(events: RunEvent[], fallback: string) {
 
 export function MonitorPage({ runId }: MonitorPageProps) {
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const isReplayMode = searchParams.get("mode") === "replay";
   const { data: snapshot } = useQuery({
     queryKey: ["run-snapshot", runId],
-    queryFn: () => runsApi.getSnapshot(runId)
+    queryFn: () => runsApi.getSnapshot(runId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.run?.status;
+      return status === RunStatus.RUNNING || status === RunStatus.WAITING ? 1500 : false;
+    }
   });
 
   const { data: eventsData } = useQuery({
     queryKey: ["run-events", runId],
-    queryFn: () => runsApi.getEvents(runId, 0)
+    queryFn: () => runsApi.getEvents(runId, 0),
+    refetchInterval: () => {
+      const snap = queryClient.getQueryData<{ run: { status: string } }>(["run-snapshot", runId]);
+      const status = snap?.run?.status;
+      return status === RunStatus.RUNNING || status === RunStatus.WAITING ? 1500 : false;
+    }
   });
 
   const [events, setEvents] = useState<RunEvent[]>([]);

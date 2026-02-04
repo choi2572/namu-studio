@@ -1,4 +1,5 @@
 """Run API endpoints."""
+import os
 from flask import Blueprint, request, jsonify
 from werkzeug.exceptions import BadRequest, NotFound, Conflict
 
@@ -12,16 +13,32 @@ from app.repos.registry import (
     version_repo as _workflow_version_repo,
 )
 from app.adapters.execution_engine import DummyExecutionEngineAdapter
+from app.adapters.middleware_engine import MiddlewareExecutionEngineAdapter
 
 
-# Initialize execution adapter
-_execution_adapter = DummyExecutionEngineAdapter(
-    _run_repo,
-    _node_run_repo,
-    _run_event_repo,
-    _workflow_repo,
-    _workflow_version_repo
-)
+def _create_execution_adapter():
+    engine = os.environ.get("EXECUTION_ENGINE", "dummy")
+    if engine == "middleware":
+        base_url = os.environ.get("MIDDLEWARE_BASE_URL", "http://localhost:8000")
+        return MiddlewareExecutionEngineAdapter(
+            base_url,
+            _run_repo,
+            _node_run_repo,
+            _run_event_repo,
+            _workflow_repo,
+            _workflow_version_repo,
+        )
+    return DummyExecutionEngineAdapter(
+        _run_repo,
+        _node_run_repo,
+        _run_event_repo,
+        _workflow_repo,
+        _workflow_version_repo,
+    )
+
+
+# Initialize execution adapter (dummy or middleware)
+_execution_adapter = _create_execution_adapter()
 
 # Initialize services
 _run_service = RunService(

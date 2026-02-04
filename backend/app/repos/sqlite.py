@@ -370,8 +370,8 @@ class RunRepositorySqlite(RunRepository):
                 run_id, workflow_id, version_id, trigger_type,
                 trigger_meta_json, run_input_json, status,
                 failure_code, failure_message, started_at,
-                finished_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                finished_at, created_at, updated_at, middleware_workflow_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             run.run_id,
             run.workflow_id,
@@ -386,6 +386,7 @@ class RunRepositorySqlite(RunRepository):
             _datetime_to_iso(run.finished_at),
             _datetime_to_iso(run.created_at),
             _datetime_to_iso(run.updated_at),
+            getattr(run, "middleware_workflow_id", None),
         ))
         conn.commit()
         return run
@@ -397,7 +398,7 @@ class RunRepositorySqlite(RunRepository):
             SELECT run_id, workflow_id, version_id, trigger_type,
                    trigger_meta_json, run_input_json, status,
                    failure_code, failure_message, started_at,
-                   finished_at, created_at, updated_at
+                   finished_at, created_at, updated_at, middleware_workflow_id
             FROM runs
             WHERE run_id = ?
         """, (run_id,))
@@ -418,12 +419,13 @@ class RunRepositorySqlite(RunRepository):
             finished_at=_iso_to_datetime(row["finished_at"]),
             created_at=_iso_to_datetime(row["created_at"]),
             updated_at=_iso_to_datetime(row["updated_at"]),
+            middleware_workflow_id=row["middleware_workflow_id"] if "middleware_workflow_id" in row.keys() else None,
         )
     
     def list_all(self, filters: Optional[dict] = None) -> List[Run]:
         """List all runs with optional filters."""
         conn = get_db()
-        query = "SELECT run_id, workflow_id, version_id, trigger_type, trigger_meta_json, run_input_json, status, failure_code, failure_message, started_at, finished_at, created_at, updated_at FROM runs WHERE 1=1"
+        query = "SELECT run_id, workflow_id, version_id, trigger_type, trigger_meta_json, run_input_json, status, failure_code, failure_message, started_at, finished_at, created_at, updated_at, middleware_workflow_id FROM runs WHERE 1=1"
         params = []
         
         if filters:
@@ -453,6 +455,7 @@ class RunRepositorySqlite(RunRepository):
                 finished_at=_iso_to_datetime(row["finished_at"]),
                 created_at=_iso_to_datetime(row["created_at"]),
                 updated_at=_iso_to_datetime(row["updated_at"]),
+                middleware_workflow_id=row["middleware_workflow_id"] if "middleware_workflow_id" in row.keys() else None,
             ))
         return runs
     
@@ -463,7 +466,7 @@ class RunRepositorySqlite(RunRepository):
             SELECT run_id, workflow_id, version_id, trigger_type,
                    trigger_meta_json, run_input_json, status,
                    failure_code, failure_message, started_at,
-                   finished_at, created_at, updated_at
+                   finished_at, created_at, updated_at, middleware_workflow_id
             FROM runs
             WHERE status IN (?, ?)
             ORDER BY started_at DESC
@@ -486,6 +489,7 @@ class RunRepositorySqlite(RunRepository):
             finished_at=_iso_to_datetime(row["finished_at"]),
             created_at=_iso_to_datetime(row["created_at"]),
             updated_at=_iso_to_datetime(row["updated_at"]),
+            middleware_workflow_id=row["middleware_workflow_id"] if "middleware_workflow_id" in row.keys() else None,
         )
     
     def update(self, run: Run) -> Run:
@@ -497,7 +501,7 @@ class RunRepositorySqlite(RunRepository):
             SET workflow_id = ?, version_id = ?, trigger_type = ?,
                 trigger_meta_json = ?, run_input_json = ?, status = ?,
                 failure_code = ?, failure_message = ?, started_at = ?,
-                finished_at = ?, updated_at = ?
+                finished_at = ?, updated_at = ?, middleware_workflow_id = ?
             WHERE run_id = ?
         """, (
             run.workflow_id,
@@ -511,6 +515,7 @@ class RunRepositorySqlite(RunRepository):
             _datetime_to_iso(run.started_at),
             _datetime_to_iso(run.finished_at),
             _datetime_to_iso(run.updated_at),
+            getattr(run, "middleware_workflow_id", None),
             run.run_id,
         ))
         conn.commit()

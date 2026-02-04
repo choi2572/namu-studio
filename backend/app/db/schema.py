@@ -4,7 +4,7 @@ import json
 from typing import Optional
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def migrate_schema(conn: sqlite3.Connection) -> None:
@@ -15,6 +15,9 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
     if current_version < 1:
         _migrate_to_v1(conn)
         _set_schema_version(conn, 1)
+    if current_version < 2:
+        _migrate_to_v2(conn)
+        _set_schema_version(conn, 2)
 
 
 def _create_version_table(conn: sqlite3.Connection) -> None:
@@ -96,6 +99,7 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
             finished_at TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            middleware_workflow_id TEXT,
             FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id),
             FOREIGN KEY (version_id) REFERENCES workflow_versions(version_id)
         )
@@ -144,4 +148,14 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_events_run_seq ON run_events(run_id, seq)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_versions_workflow ON workflow_versions(workflow_id, version_number)")
     
+    conn.commit()
+
+
+def _migrate_to_v2(conn: sqlite3.Connection) -> None:
+    """Add middleware_workflow_id to runs (for existing v1 DBs)."""
+    try:
+        conn.execute("ALTER TABLE runs ADD COLUMN middleware_workflow_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_middleware_workflow ON runs(middleware_workflow_id)")
     conn.commit()

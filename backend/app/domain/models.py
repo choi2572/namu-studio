@@ -87,6 +87,8 @@ class Run:
     finished_at: Optional[datetime] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
+    # Middleware execution: workflow_id from middleware (e.g. wf_1753xxxxxx)
+    middleware_workflow_id: Optional[str] = None
 
 
 @dataclass

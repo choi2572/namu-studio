@@ -19,6 +19,11 @@ class Config:
     # SQLite database path (only used when REPO_BACKEND=sqlite)
     DB_PATH = os.environ.get("DB_PATH", "./data/app.db")
 
+    # Execution engine: "dummy" (in-process simulation) or "middleware" (REST + WebSocket)
+    EXECUTION_ENGINE = os.environ.get("EXECUTION_ENGINE", "dummy")
+    # Middleware base URL (e.g. http://localhost:8000) when EXECUTION_ENGINE=middleware
+    MIDDLEWARE_BASE_URL = os.environ.get("MIDDLEWARE_BASE_URL", "http://localhost:8000")
+
 
 class DevelopmentConfig(Config):
     """Development configuration."""
