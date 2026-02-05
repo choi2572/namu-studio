@@ -65,6 +65,10 @@ type DagViewProps = {
   monitorGraph?: MonitorGraph | null;
   /** When using monitorGraph, call this so parent can scroll to node by pathId. */
   onScrollToNode?: (pathId: string) => void;
+  /** When true, auto-focus (scroll + select) the running node. Set for live RUNNING or replay playing. */
+  shouldAutoFocusRunningNode?: boolean;
+  /** Condition pathId -> "then" | "else" for the branch that was taken. Unselected edge stays disabled. */
+  takenBranchByConditionPathId?: Map<string, "then" | "else">;
 };
 
 // Node status color mapping - 더 명확한 구분 (top-level + nested 동일)
@@ -740,7 +744,9 @@ export function DagView({
   runStatus,
   viewJson,
   monitorGraph,
-  onScrollToNode
+  onScrollToNode,
+  shouldAutoFocusRunningNode = false,
+  takenBranchByConditionPathId
 }: DagViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -858,11 +864,11 @@ export function DagView({
   );
 
   useEffect(() => {
-    if (!runningNode || runStatus !== RunStatus.RUNNING) return;
+    if (!runningNode || !shouldAutoFocusRunningNode) return;
     const id = useGraphMode ? (runningNode as PositionedMonitorNode).pathId : (runningNode as DagNode).id;
     onSelectNode(id);
     scrollToNode(id);
-  }, [runningNode, runStatus, onSelectNode, useGraphMode, scrollToNode]);
+  }, [runningNode, shouldAutoFocusRunningNode, onSelectNode, useGraphMode, scrollToNode]);
 
   useEffect(() => {
     if (selectedNode) scrollToNode(selectedNode);
@@ -930,9 +936,8 @@ export function DagView({
             const fromIsCondition = fromNode.dslType === "Condition";
             const isThen = fromIsCondition && edge.conditionBranch === "then";
             const isElse = fromIsCondition && edge.conditionBranch === "else";
-            const runEnded = runStatus != null && isRunTerminal(runStatus);
-            const conditionChoseBranch = fromNode.status === NodeStatus.SUCCEEDED;
-            const edgeDisabled = fromIsCondition && toNode.status === NodeStatus.WAITING && (runEnded || conditionChoseBranch);
+            const takenBranch = fromIsCondition && edge.conditionBranch != null ? takenBranchByConditionPathId?.get(fromNode.pathId) : undefined;
+            const edgeDisabled = fromIsCondition && edge.conditionBranch != null && takenBranch != null && takenBranch !== edge.conditionBranch;
 
             // Condition 노드일 때는 항상 true/false 두 개의 포트를 사용 (에디터와 동일)
             let startY = fromNode.position.y + NODE_METRICS.collapsedHeight / 2;

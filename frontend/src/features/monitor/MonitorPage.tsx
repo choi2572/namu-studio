@@ -105,6 +105,42 @@ function applyEventsToNodeStates(
   return baseNodes.map((n) => byStateName.get(n.stateName) ?? n);
 }
 
+/** Condition pathId -> "then" | "else" for the branch that was actually taken (from event order). */
+function computeTakenBranches(
+  monitorGraph: ReturnType<typeof buildMonitorGraph>,
+  events: RunEvent[]
+): Map<string, "then" | "else"> {
+  const result = new Map<string, "then" | "else">();
+  if (!monitorGraph || events.length === 0) return result;
+  const sortedEvents = [...events].sort((a, b) => a.seq - b.seq);
+  const conditionNodes = monitorGraph.nodes.filter((n) => n.dslType === "Condition");
+  for (const cond of conditionNodes) {
+    const outgoing = monitorGraph.edges.filter(
+      (e) => e.from === cond.pathId && (e.conditionBranch === "then" || e.conditionBranch === "else")
+    );
+    if (outgoing.length === 0) continue;
+    const thenEdge = outgoing.find((e) => e.conditionBranch === "then");
+    const elseEdge = outgoing.find((e) => e.conditionBranch === "else");
+    const thenToNode = thenEdge ? monitorGraph.nodes.find((n) => n.pathId === thenEdge.to) : null;
+    const elseToNode = elseEdge ? monitorGraph.nodes.find((n) => n.pathId === elseEdge.to) : null;
+    const condSucceededIdx = sortedEvents.findIndex(
+      (ev) =>
+        ev.eventType === "NODE_SUCCEEDED" &&
+        (ev.stateName === cond.apiStateName || ev.stateName === cond.stateName)
+    );
+    if (condSucceededIdx < 0) continue;
+    const firstStartedAfter = sortedEvents
+      .slice(condSucceededIdx + 1)
+      .find((ev) => ev.eventType === "NODE_STARTED");
+    const startedStateName = firstStartedAfter?.stateName;
+    if (!startedStateName) continue;
+    const match = (node: { apiStateName: string; stateName: string } | null) =>
+      node && (startedStateName === node.apiStateName || startedStateName === node.stateName);
+    if (thenToNode && match(thenToNode)) result.set(cond.pathId, "then");
+    else if (elseToNode && match(elseToNode)) result.set(cond.pathId, "else");
+  }
+  return result;
+}
 
 export function MonitorPage({ runId }: MonitorPageProps) {
   const searchParams = useSearchParams();
@@ -141,6 +177,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
   const replayInitializedRef = useRef(false);
+  const terminalRefetchDoneRef = useRef<string | null>(null);
 
   const simulationRef = useRef<{ runId: string; index: number }>({
     runId: "",
@@ -243,7 +280,20 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   }, [runId, runStatus, events.length, isReplayMode]);
   useEffect(() => {
     replayInitializedRef.current = false;
+    terminalRefetchDoneRef.current = null;
   }, [runId]);
+
+  // Run이 terminal로 바뀐 직후 한 번 더 refetch해서 마지막 NODE_SUCCEEDED 등 누락 방지
+  useEffect(() => {
+    if (!runId || !runStatus || !isRunTerminal(runStatus)) return;
+    if (terminalRefetchDoneRef.current === runId) return;
+    terminalRefetchDoneRef.current = runId;
+    const t = setTimeout(() => {
+      queryClient.refetchQueries({ queryKey: ["run-snapshot", runId] });
+      queryClient.refetchQueries({ queryKey: ["run-events", runId] });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [runId, runStatus, queryClient]);
 
   // Replay: advance index on interval when playing
   useEffect(() => {
@@ -404,6 +454,10 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   );
   const displayEvents = showReplay ? events.slice(0, replayIndex + 1) : events;
   const displayNodeStates = showReplay ? replayNodeStates : allNodes;
+  const takenBranchByConditionPathId = useMemo(() => {
+    const ev = showReplay ? events.slice(0, replayIndex + 1) : events;
+    return computeTakenBranches(monitorGraph, ev);
+  }, [monitorGraph, showReplay, events, replayIndex]);
 
   const selectedNodeState = useMemo(() => {
     if (!selectedNode) return null;
@@ -480,6 +534,8 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               runStatus={runStatus}
               viewJson={workflowDraft?.view_json}
               monitorGraph={monitorGraph ?? undefined}
+              shouldAutoFocusRunningNode={runStatus === RunStatus.RUNNING || (showReplay && replayPlaying)}
+              takenBranchByConditionPathId={takenBranchByConditionPathId}
             />
           </div>
         </Card>
