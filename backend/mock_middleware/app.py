@@ -8,7 +8,7 @@ import threading
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -49,6 +49,22 @@ def _broadcast(data: Dict[str, Any]) -> None:
                 dead.append(ws)
         for ws in dead:
             _ws_clients.discard(ws)
+
+
+def _broadcast_feedback(
+    workflow_id: str,
+    node_name: str,
+    feedback: Dict[str, Any],
+    timestamp: Optional[str] = None,
+) -> None:
+    """Feedback 이벤트 브로드캐스트. 백엔드는 마지막 수신값만 node_run.feedback_json에 저장."""
+    _broadcast({
+        "type": "feedback",
+        "workflow_id": workflow_id,
+        "timestamp": timestamp or _now_iso(),
+        "node_name": node_name,
+        "feedback": feedback,
+    })
 
 
 def _build_initial_message() -> Dict[str, Any]:
@@ -128,11 +144,32 @@ def _run_one_node(
         })
         _state["updated_at"] = started_at
 
-    time.sleep(2)
+    # 2Hz로 feedback 전송 (0.5초 간격). 백엔드는 마지막 수신값만 DB에 저장 → replay 시 마지막 스냅샷만 노출.
+    feedback_interval_s = 0.5
+    elapsed_s = 0.0
+    step = 0
+    while elapsed_s < 2.0:
+        time.sleep(feedback_interval_s)
+        elapsed_s += feedback_interval_s
+        with _state["lock"]:
+            if _state["cancelled"]:
+                return
+        step += 1
+        _broadcast_feedback(workflow_id, state_name, {
+            "message": "running",
+            "step": step,
+            "elapsed_ms": int(elapsed_s * 1000),
+        })
     with _state["lock"]:
         if _state["cancelled"]:
             return
     completed_at = _now_iso()
+    # 노드 끝날 때 마지막 feedback 한 번 더 전송 → DB에 최종 스냅샷 저장
+    _broadcast_feedback(workflow_id, state_name, {
+        "message": "completed",
+        "step": "final",
+        "elapsed_ms": 2000,
+    }, timestamp=completed_at)
     duration_ms = 2000
     total_duration_ms_ref[0] += duration_ms
     output = {"result": "ok", "state": state_name}
@@ -231,16 +268,42 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                             return
                     _run_one_node(workflow_id, name, def_, total_duration_ms_ref)
 
+            stop_feedback = threading.Event()
+
+            def feedback_loop() -> None:
+                step = 0
+                while not stop_feedback.wait(0.5):
+                    with _state["lock"]:
+                        if _state["cancelled"]:
+                            return
+                    step += 1
+                    _broadcast_feedback(workflow_id, state_name, {
+                        "message": "parallel_running",
+                        "step": step,
+                        "branches": len(branches),
+                    })
+
+            feedback_thread = threading.Thread(target=feedback_loop, daemon=True)
+            feedback_thread.start()
+
             threads = [threading.Thread(target=run_branch, args=(deepcopy(b),)) for b in branches]
             for t in threads:
                 t.start()
             for t in threads:
                 t.join()
 
+            stop_feedback.set()
+            feedback_thread.join(timeout=1.0)
+
             with _state["lock"]:
                 if _state["cancelled"]:
                     break
             parallel_end = _now_iso()
+            _broadcast_feedback(workflow_id, state_name, {
+                "message": "completed",
+                "step": "final",
+                "branches": len(branches),
+            }, timestamp=parallel_end)
             try:
                 a = datetime.fromisoformat(parallel_start.replace("Z", "+00:00"))
                 b = datetime.fromisoformat(parallel_end.replace("Z", "+00:00"))
