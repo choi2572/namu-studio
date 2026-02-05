@@ -192,31 +192,8 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
 
         stype = (state_def.get("Type") or "").strip()
         if stype == "Parallel":
-            # Parallel: 브랜치들을 스레드로 동시 실행, 둘 다 끝난 뒤 다음 노드로
+            # Type Parallel = 컨테이너. 실행되는 건 안에 있는 두 브랜치뿐. Parallel 상태 이름으로 이벤트 안 보냄.
             branches = state_def.get("Branches") or []
-            with _state["lock"]:
-                _state["current_node"] = state_name
-                _state["updated_at"] = _now_iso()
-            started_at = _now_iso()
-            _broadcast({
-                "type": "node_status_change",
-                "workflow_id": workflow_id,
-                "timestamp": started_at,
-                "node_name": state_name,
-                "prev_status": "IDLE",
-                "input": state_def.get("Parameters") or state_def.get("If") or {},
-            })
-            with _state["lock"]:
-                _state["node_history"].append({
-                    "node_name": state_name,
-                    "status": "RUNNING",
-                    "started_at": started_at,
-                    "completed_at": None,
-                    "duration_ms": None,
-                    "input": state_def.get("Parameters") or {},
-                    "output": None,
-                })
-                _state["updated_at"] = started_at
 
             def run_branch(branch: Dict[str, Any]) -> None:
                 for name, def_ in get_branch_order(branch):
@@ -231,28 +208,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
             with _state["lock"]:
                 if _state["cancelled"]:
                     break
-            completed_at = _now_iso()
             total_duration_ms_ref[0] += 2000
-            _broadcast({
-                "type": "node_status_change",
-                "workflow_id": workflow_id,
-                "timestamp": completed_at,
-                "node_name": state_name,
-                "prev_status": "RUNNING",
-                "status": "SUCCESS",
-                "output": {"result": "ok", "state": state_name, "branches": len(branches)},
-                "duration_ms": 2000,
-            })
-            with _state["lock"]:
-                for n in _state["node_history"]:
-                    if n.get("node_name") == state_name:
-                        n["status"] = "SUCCESS"
-                        n["completed_at"] = completed_at
-                        n["duration_ms"] = 2000
-                        n["output"] = {"result": "ok", "state": state_name}
-                        break
-                _state["current_node"] = None
-                _state["updated_at"] = completed_at
             continue
 
         _run_one_node(workflow_id, state_name, state_def, total_duration_ms_ref)
