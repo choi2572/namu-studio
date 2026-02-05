@@ -223,9 +223,11 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
     total_duration_ms = 0
     total_duration_ms_ref = [0]
 
+    cancelled = False
     for state_name, state_def in order:
         with _state["lock"]:
             if _state["cancelled"]:
+                cancelled = True
                 break
 
         stype = (state_def.get("Type") or "").strip()
@@ -237,6 +239,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
             parallel_start = _now_iso()
             with _state["lock"]:
                 if _state["cancelled"]:
+                    cancelled = True
                     break
                 _state["current_node"] = state_name
                 _state["updated_at"] = parallel_start
@@ -297,6 +300,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
 
             with _state["lock"]:
                 if _state["cancelled"]:
+                    cancelled = True
                     break
             parallel_end = _now_iso()
             _broadcast_feedback(workflow_id, state_name, {
@@ -346,18 +350,26 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         _state["current_node"] = None
         _state["updated_at"] = _now_iso()
 
-    _broadcast({
-        "type": "workflow_completed",
-        "workflow_id": workflow_id,
-        "timestamp": _now_iso(),
-        "status": "succeeded",
-        "final_stats": {
-            "total_duration_ms": total_duration_ms_ref[0],
-            "total_nodes": len(order),
-            "successful_nodes": len(order),
-            "failed_nodes": 0,
-        },
-    })
+    if cancelled:
+        _broadcast({
+            "type": "workflow_cancelled",
+            "workflow_id": workflow_id,
+            "timestamp": _now_iso(),
+            "status": "cancelled",
+        })
+    else:
+        _broadcast({
+            "type": "workflow_completed",
+            "workflow_id": workflow_id,
+            "timestamp": _now_iso(),
+            "status": "succeeded",
+            "final_stats": {
+                "total_duration_ms": total_duration_ms_ref[0],
+                "total_nodes": len(order),
+                "successful_nodes": len(order),
+                "failed_nodes": 0,
+            },
+        })
 
 
 def create_app() -> Flask:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,9 +15,12 @@ import type { RunSummary } from "@/domain/types";
 import { Button } from "@/components/Button";
 import { cn } from "@/lib/cn";
 
+const WORKFLOWS_PAGE_SIZE = 10;
+
 export function DashboardPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [workflowPage, setWorkflowPage] = useState(1);
   const [workflowToDelete, setWorkflowToDelete] = useState<{
     id: string;
     name: string;
@@ -51,6 +54,18 @@ export function DashboardPage() {
     });
     return map;
   }, [runs]);
+
+  const workflowTotalPages = Math.max(1, Math.ceil(workflows.length / WORKFLOWS_PAGE_SIZE));
+  const paginatedWorkflows = useMemo(() => {
+    const start = (workflowPage - 1) * WORKFLOWS_PAGE_SIZE;
+    return workflows.slice(start, start + WORKFLOWS_PAGE_SIZE);
+  }, [workflows, workflowPage]);
+
+  useEffect(() => {
+    if (workflowPage > workflowTotalPages) {
+      setWorkflowPage(workflowTotalPages);
+    }
+  }, [workflowPage, workflowTotalPages]);
 
   const latestRun = [...runs].sort((a, b) =>
     a.startedAt < b.startedAt ? 1 : -1
@@ -330,6 +345,7 @@ export function DashboardPage() {
         className="border-2 border-slate-200"
       >
         {workflows.length > 0 ? (
+          <>
           <div className="max-h-[420px] overflow-x-auto overflow-y-auto">
             <Table>
               <TableHead>
@@ -349,7 +365,7 @@ export function DashboardPage() {
                 </tr>
               </TableHead>
               <tbody>
-                {workflows.map((workflow) => {
+                {paginatedWorkflows.map((workflow) => {
                   const latestRunForWorkflow =
                     workflow.latestRun ??
                     latestRunsByWorkflow.get(workflow.workflowId) ??
@@ -461,6 +477,35 @@ export function DashboardPage() {
               </tbody>
             </Table>
           </div>
+          {workflowTotalPages > 1 && (
+            <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+              <p className="text-xs text-slate-500">
+                {workflows.length} workflow{workflows.length !== 1 ? "s" : ""}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setWorkflowPage((p) => Math.max(1, p - 1))}
+                  disabled={workflowPage <= 1}
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-slate-600">
+                  Page {workflowPage} of {workflowTotalPages}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setWorkflowPage((p) => Math.min(workflowTotalPages, p + 1))}
+                  disabled={workflowPage >= workflowTotalPages}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
+          </>
         ) : (
           <div className="py-16 text-center">
             <p className="text-base font-semibold text-slate-600">

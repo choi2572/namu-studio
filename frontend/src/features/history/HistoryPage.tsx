@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
@@ -13,6 +13,8 @@ import { Table, TableCell, TableHead, TableRow } from "@/components/Table";
 import { RunStatus } from "@/domain/types";
 import { formatDateTime, formatDuration } from "@/lib/format";
 
+const RUNS_PAGE_SIZE = 10;
+
 export function HistoryPage() {
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<"all" | RunStatus>("all");
@@ -20,6 +22,11 @@ export function HistoryPage() {
   const [timeRange, setTimeRange] = useState<"24h" | "7d" | "30d" | "all">(
     "all"
   );
+  const [runsPage, setRunsPage] = useState(1);
+
+  useEffect(() => {
+    setRunsPage(1);
+  }, [statusFilter, workflowFilter, timeRange]);
 
   const { data: workflows = [] } = useQuery({
     queryKey: ["workflows"],
@@ -43,6 +50,12 @@ export function HistoryPage() {
     }))],
     [workflows]
   );
+
+  const runsTotalPages = Math.max(1, Math.ceil(runs.length / RUNS_PAGE_SIZE));
+  const paginatedRuns = useMemo(() => {
+    const start = (runsPage - 1) * RUNS_PAGE_SIZE;
+    return runs.slice(start, start + RUNS_PAGE_SIZE);
+  }, [runs, runsPage]);
 
   return (
     <div className="space-y-6">
@@ -125,7 +138,7 @@ export function HistoryPage() {
             </tr>
           </TableHead>
           <tbody>
-            {runs.map((run) => (
+            {paginatedRuns.map((run) => (
               <TableRow
                 key={run.runId}
                 onClick={() => router.push(`/monitor/${run.runId}?mode=replay`)}
@@ -158,6 +171,34 @@ export function HistoryPage() {
             ))}
           </tbody>
         </Table>
+        {runsTotalPages > 1 && (
+          <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+            <p className="text-xs text-slate-500">
+              {runs.length} run{runs.length !== 1 ? "s" : ""}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setRunsPage((p) => Math.max(1, p - 1))}
+                disabled={runsPage <= 1}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-slate-600">
+                Page {runsPage} of {runsTotalPages}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setRunsPage((p) => Math.min(runsTotalPages, p + 1))}
+                disabled={runsPage >= runsTotalPages}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );

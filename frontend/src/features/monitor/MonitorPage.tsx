@@ -4,12 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { runsApi, workflowsApi } from "@/api";
+import { middlewareApi, runsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { NodeStateSnapshot } from "@/api/interfaces";
-import { NodeStatus, RunEvent, RunStatus } from "@/domain/types";
+import { NodeStatus, RunEvent, RunStatus, RunSummary } from "@/domain/types";
+import { cn } from "@/lib/cn";
 import { formatDuration } from "@/lib/format";
 import { pathIdToApiStateName } from "@/lib/ids";
 import { isRunTerminal } from "@/domain/types";
@@ -265,7 +266,10 @@ export function MonitorPage({ runId }: MonitorPageProps) {
 
   useEffect(() => {
     if (!autoScroll || !timelineRef.current) return;
-    timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+    const el = timelineRef.current;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
   }, [events, autoScroll]);
 
   // Replay: when run is terminal (or replay mode) and events loaded, show end state initially
@@ -310,9 +314,35 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return () => clearInterval(interval);
   }, [replayPlaying, events.length]);
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
     if (!snapshot) return;
+    try {
+      await middlewareApi.runWorkflowCancel();
+    } catch (e) {
+      console.error("Cancel request failed", e);
+    }
     setRunStatus(RunStatus.CANCELED);
+    // 즉시 캐시를 terminal로 갱신해서 refetchInterval이 폴링을 멈추도록 함
+    queryClient.setQueryData(["run-snapshot", runId], (old: { run: RunSummary; workflowName: string; nodeStates: NodeStateSnapshot[] } | undefined) => {
+      if (!old) return old;
+      const updatedNodes = old.nodeStates.map((n) =>
+        n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
+          ? { ...n, status: NodeStatus.CANCELED }
+          : n
+      );
+      return {
+        ...old,
+        run: { ...old.run, status: RunStatus.CANCELED },
+        nodeStates: updatedNodes
+      };
+    });
+    setNodeStates((prev) =>
+      prev.map((n) =>
+        n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
+          ? { ...n, status: NodeStatus.CANCELED }
+          : n
+      )
+    );
     setEvents((prev) => {
       const nextSeq = getNextSeq(prev);
       return [
@@ -620,17 +650,24 @@ export function MonitorPage({ runId }: MonitorPageProps) {
           description={
             isReplayMode
               ? "Replay-only timeline of events."
-              : "Live timeline (auto-scroll enabled)."
+              : "Live timeline."
           }
           actions={
             !isReplayMode && (
-              <Button
-                variant="ghost"
-                size="sm"
+              <button
+                type="button"
                 onClick={() => setAutoScroll((prev) => !prev)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                  autoScroll
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                )}
+                aria-pressed={autoScroll}
               >
-                {autoScroll ? "Pause auto-scroll" : "Resume auto-scroll"}
-              </Button>
+                <span className="inline-block h-2 w-2 rounded-full bg-current" aria-hidden />
+                Auto-scroll {autoScroll ? "On" : "Off"}
+              </button>
             )
           }
         >

@@ -410,6 +410,19 @@ export const mockMiddlewareApi: MiddlewareApi = {
       status: "cancelled",
       updated_at: new Date().toISOString()
     };
+    // runSummaries / nodeStateSnapshots 갱신해서 getSnapshot이 즉시 cancelled + 노드 not run 반환
+    const run = runSummaries.find((r) => r.runId === workflow_id);
+    if (run) {
+      run.status = RunStatus.CANCELED;
+    }
+    const nodes = nodeStateSnapshots[workflow_id];
+    if (Array.isArray(nodes)) {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].status === NodeStatus.RUNNING || nodes[i].status === NodeStatus.WAITING) {
+          nodes[i] = { ...nodes[i], status: NodeStatus.CANCELED };
+        }
+      }
+    }
     // After cancel, runner becomes idle (getRunnerStatus will return idle)
     const result: WorkflowRunResponse = { workflow_id, status: "cancelled" };
     setTimeout(() => {
