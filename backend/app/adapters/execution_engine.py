@@ -144,8 +144,23 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
         
         node_def = states[state_name]
         node_type = node_def.get("Type")
-        
         seq = initial_seq
+
+        # Parallel = 컨테이너. NODE_STARTED/NODE_SUCCEEDED 없이 브랜치만 실행 후 Next로 진행.
+        if node_type == "Parallel":
+            seq = self._execute_parallel(run_id, state_name, node_def, states, context, seq)
+            next_node = node_def.get("Next")
+            if next_node:
+                return self._execute_node(run_id, next_node, states, context, seq + 1)
+            if node_def.get("End"):
+                run = self.run_repo.get(run_id)
+                run.status = RunStatus.SUCCESS
+                run.finished_at = datetime.utcnow()
+                self.run_repo.update(run)
+                seq += 1
+                self._emit_event(run_id, "RUN_SUCCEEDED", None, {"run_id": run_id}, seq)
+                return seq
+            raise ValueError(f"Parallel state '{state_name}' has neither Next nor End")
         
         # Create node run
         node_run_id = f"{run_id}-{state_name}"
@@ -196,8 +211,6 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
         elif node_type == "Condition":
             seq = self._execute_condition(run_id, state_name, node_def, states, node_run, context, seq)
             return seq  # Condition handles its own next node
-        elif node_type == "Parallel":
-            seq = self._execute_parallel(run_id, state_name, node_def, states, node_run, context, seq)
         elif node_type == "Wait":
             seq = self._execute_wait(run_id, state_name, node_def, node_run, states, context, seq)
             return seq  # Wait pauses execution
@@ -303,63 +316,62 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
         else:
             raise ValueError(f"Condition state '{state_name}' has no valid next node")
     
+    def _run_branch(
+        self,
+        run_id: str,
+        branch: Dict[str, Any],
+        seq: int
+    ) -> int:
+        """Run one Parallel branch: 각 상태를 실제 state_name으로 NODE_STARTED → 실행 → NODE_SUCCEEDED."""
+        branch_states = branch.get("States") or {}
+        current = branch.get("StartAt")
+        if not current or current not in branch_states:
+            return seq
+        while current:
+            state_def = branch_states.get(current)
+            if not state_def:
+                break
+            stype = (state_def.get("Type") or "").strip()
+            node_run_id = f"{run_id}-{current}"
+            node_run = NodeRun(
+                node_run_id=node_run_id,
+                run_id=run_id,
+                state_name=current,
+                node_type=stype or "Task",
+                status=NodeStatus.RUNNING,
+                started_at=datetime.utcnow(),
+                input_json=state_def.get("Parameters") or {},
+            )
+            self.node_run_repo.create(node_run)
+            seq += 1
+            self._emit_event(run_id, "NODE_STARTED", current, {"node": current}, seq)
+            time.sleep(0.5)
+            node_run.status = NodeStatus.SUCCEEDED
+            node_run.finished_at = datetime.utcnow()
+            node_run.duration_ms = 500
+            node_run.output_json = {"result": "ok", "state": current}
+            self.node_run_repo.update(node_run)
+            seq += 1
+            self._emit_event(run_id, "NODE_SUCCEEDED", current, {"node": current}, seq)
+            if state_def.get("End"):
+                break
+            current = state_def.get("Next")
+        return seq
+
     def _execute_parallel(
         self,
         run_id: str,
         state_name: str,
         node_def: Dict[str, Any],
         states: Dict[str, Any],
-        node_run: NodeRun,
         context: Optional[Dict[str, Any]],
         seq: int
     ) -> int:
-        """Execute Parallel state (sequential simulation)."""
+        """Execute Parallel: 브랜치만 순차 실행(각 브랜치 내 노드는 실제 state_name으로). Parallel 자체는 NODE_STARTED/SUCCEEDED 없음."""
         branches = node_def.get("Branches", [])
-        
-        # Execute all branches sequentially (simulation)
-        for i, branch in enumerate(branches):
-            branch_start_at = branch.get("StartAt")
-            branch_states = branch.get("States", {})
-            
-            if branch_start_at and branch_start_at in branch_states:
-                # Execute branch (simplified: just mark as started/succeeded)
-                branch_node_run_id = f"{run_id}-{state_name}-branch-{i}"
-                branch_node_run = NodeRun(
-                    node_run_id=branch_node_run_id,
-                    run_id=run_id,
-                    state_name=f"{state_name}.branch{i}",
-                    node_type="ParallelBranch",
-                    status=NodeStatus.SUCCEEDED,
-                    started_at=datetime.utcnow(),
-                    finished_at=datetime.utcnow(),
-                    duration_ms=500,
-                )
-                self.node_run_repo.create(branch_node_run)
-        
-        node_run.status = NodeStatus.SUCCEEDED
-        node_run.finished_at = datetime.utcnow()
-        node_run.duration_ms = 1000
-        node_run.output_json = {"branches": len(branches), "result": "all_succeeded"}
-        self.node_run_repo.update(node_run)
-        
-        seq += 1
-        self._emit_event(run_id, "NODE_SUCCEEDED", state_name, {"node": state_name, "branches": len(branches)}, seq)
-        
-        # Continue to next node
-        next_node = node_def.get("Next")
-        if next_node:
-            return self._execute_node(run_id, next_node, states, context, seq + 1)
-        elif node_def.get("End"):
-            run = self.run_repo.get(run_id)
-            run.status = RunStatus.SUCCESS
-            run.finished_at = datetime.utcnow()
-            self.run_repo.update(run)
-            
-            seq += 1
-            self._emit_event(run_id, "RUN_SUCCEEDED", None, {"run_id": run_id}, seq)
-            return seq
-        else:
-            raise ValueError(f"Parallel state '{state_name}' has neither Next nor End")
+        for branch in branches:
+            seq = self._run_branch(run_id, branch, seq)
+        return seq
     
     def _execute_wait(
         self,
