@@ -300,17 +300,19 @@ const CONTAINER_FRAME_DEFAULTS = {
 const CONTAINER_FRAME_METRICS = {
   offsetY: 12,
   headerHeight: 28,
-  padding: 12,
-  minWidth: 360,
-  minHeight: 220
+  // 컨테이너 안쪽 여백과 기본/최소 크기를 넉넉하게 조정
+  padding: 20,
+  minWidth: 380,
+  minHeight: 240
 };
 
 const DEFAULT_PARALLEL_BRANCHES = 2;
 
 const CONTAINER_LAYOUT = {
-  rowGap: 24,
-  padding: 12,
-  columnGap: 120
+  // 컨테이너 내부에서 노드 사이 간격 및 내부 패딩
+  rowGap: 32,
+  padding: 20,
+  columnGap: 140
 };
 
 const CANVAS_PADDING = {
