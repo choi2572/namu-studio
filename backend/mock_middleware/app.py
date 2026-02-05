@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Set
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-from .runner import get_execution_order
+from .runner import get_execution_order, get_branch_order
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,69 @@ def _build_initial_message() -> Dict[str, Any]:
     }
 
 
+def _run_one_node(
+    workflow_id: str,
+    state_name: str,
+    state_def: Dict[str, Any],
+    total_duration_ms_ref: list,
+) -> None:
+    """한 노드 실행: RUNNING 브로드캐스트 → 2초 대기 → SUCCESS 브로드캐스트."""
+    with _state["lock"]:
+        if _state["cancelled"]:
+            return
+        _state["current_node"] = state_name
+        _state["updated_at"] = _now_iso()
+    started_at = _now_iso()
+    _broadcast({
+        "type": "node_status_change",
+        "workflow_id": workflow_id,
+        "timestamp": started_at,
+        "node_name": state_name,
+        "prev_status": "IDLE",
+        "input": state_def.get("Parameters") or state_def.get("If") or {},
+    })
+    with _state["lock"]:
+        _state["node_history"].append({
+            "node_name": state_name,
+            "status": "RUNNING",
+            "started_at": started_at,
+            "completed_at": None,
+            "duration_ms": None,
+            "input": state_def.get("Parameters") or {},
+            "output": None,
+        })
+        _state["updated_at"] = started_at
+
+    time.sleep(2)
+    with _state["lock"]:
+        if _state["cancelled"]:
+            return
+    completed_at = _now_iso()
+    duration_ms = 2000
+    total_duration_ms_ref[0] += duration_ms
+    output = {"result": "ok", "state": state_name}
+    _broadcast({
+        "type": "node_status_change",
+        "workflow_id": workflow_id,
+        "timestamp": completed_at,
+        "node_name": state_name,
+        "prev_status": "RUNNING",
+        "status": "SUCCESS",
+        "output": output,
+        "duration_ms": duration_ms,
+    })
+    with _state["lock"]:
+        for n in _state["node_history"]:
+            if n.get("node_name") == state_name:
+                n["status"] = "SUCCESS"
+                n["completed_at"] = completed_at
+                n["duration_ms"] = duration_ms
+                n["output"] = output
+                break
+        _state["current_node"] = None
+        _state["updated_at"] = completed_at
+
+
 def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
     """Background: simulate execution and broadcast events."""
     order = get_execution_order(dsl)
@@ -114,68 +177,87 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         })
         return
 
+    # 워크플로 전체의 마지막 노드(End: true)만 여기서 break. 브랜치 내부 End는 break 안 함.
+    workflow_terminal = next(
+        (name for name, def_ in reversed(order) if def_.get("End")),
+        None,
+    )
     total_duration_ms = 0
+    total_duration_ms_ref = [0]
+
     for state_name, state_def in order:
         with _state["lock"]:
             if _state["cancelled"]:
                 break
-            _state["current_node"] = state_name
-            _state["updated_at"] = _now_iso()
-        started_at = _now_iso()
 
-        # NODE_STARTED
-        _broadcast({
-            "type": "node_status_change",
-            "workflow_id": workflow_id,
-            "timestamp": started_at,
-            "node_name": state_name,
-            "prev_status": "IDLE",
-            "input": state_def.get("Parameters") or state_def.get("If") or {},
-        })
-        with _state["lock"]:
-            _state["node_history"].append({
+        stype = (state_def.get("Type") or "").strip()
+        if stype == "Parallel":
+            # Parallel: 브랜치들을 스레드로 동시 실행, 둘 다 끝난 뒤 다음 노드로
+            branches = state_def.get("Branches") or []
+            with _state["lock"]:
+                _state["current_node"] = state_name
+                _state["updated_at"] = _now_iso()
+            started_at = _now_iso()
+            _broadcast({
+                "type": "node_status_change",
+                "workflow_id": workflow_id,
+                "timestamp": started_at,
                 "node_name": state_name,
-                "status": "RUNNING",
-                "started_at": started_at,
-                "completed_at": None,
-                "duration_ms": None,
-                "input": state_def.get("Parameters") or {},
-                "output": None,
+                "prev_status": "IDLE",
+                "input": state_def.get("Parameters") or state_def.get("If") or {},
             })
-            _state["updated_at"] = started_at
+            with _state["lock"]:
+                _state["node_history"].append({
+                    "node_name": state_name,
+                    "status": "RUNNING",
+                    "started_at": started_at,
+                    "completed_at": None,
+                    "duration_ms": None,
+                    "input": state_def.get("Parameters") or {},
+                    "output": None,
+                })
+                _state["updated_at"] = started_at
 
-        time.sleep(2)
-        with _state["lock"]:
-            if _state["cancelled"]:
-                break
+            def run_branch(branch: Dict[str, Any]) -> None:
+                for name, def_ in get_branch_order(branch):
+                    _run_one_node(workflow_id, name, def_, total_duration_ms_ref)
 
-        completed_at = _now_iso()
-        duration_ms = 2000
-        total_duration_ms += duration_ms
-        output = {"result": "ok", "state": state_name}
+            threads = [threading.Thread(target=run_branch, args=(b,)) for b in branches]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
-        _broadcast({
-            "type": "node_status_change",
-            "workflow_id": workflow_id,
-            "timestamp": completed_at,
-            "node_name": state_name,
-            "prev_status": "RUNNING",
-            "status": "SUCCESS",
-            "output": output,
-            "duration_ms": duration_ms,
-        })
-        with _state["lock"]:
-            for n in _state["node_history"]:
-                if n.get("node_name") == state_name:
-                    n["status"] = "SUCCESS"
-                    n["completed_at"] = completed_at
-                    n["duration_ms"] = duration_ms
-                    n["output"] = output
+            with _state["lock"]:
+                if _state["cancelled"]:
                     break
-            _state["current_node"] = None
-            _state["updated_at"] = completed_at
+            completed_at = _now_iso()
+            total_duration_ms_ref[0] += 2000
+            _broadcast({
+                "type": "node_status_change",
+                "workflow_id": workflow_id,
+                "timestamp": completed_at,
+                "node_name": state_name,
+                "prev_status": "RUNNING",
+                "status": "SUCCESS",
+                "output": {"result": "ok", "state": state_name, "branches": len(branches)},
+                "duration_ms": 2000,
+            })
+            with _state["lock"]:
+                for n in _state["node_history"]:
+                    if n.get("node_name") == state_name:
+                        n["status"] = "SUCCESS"
+                        n["completed_at"] = completed_at
+                        n["duration_ms"] = 2000
+                        n["output"] = {"result": "ok", "state": state_name}
+                        break
+                _state["current_node"] = None
+                _state["updated_at"] = completed_at
+            continue
 
-        if state_def.get("End"):
+        _run_one_node(workflow_id, state_name, state_def, total_duration_ms_ref)
+
+        if state_def.get("End") and state_name == workflow_terminal:
             break
 
     with _state["lock"]:
@@ -191,7 +273,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         "timestamp": _now_iso(),
         "status": "succeeded",
         "final_stats": {
-            "total_duration_ms": total_duration_ms,
+            "total_duration_ms": total_duration_ms_ref[0],
             "total_nodes": len(order),
             "successful_nodes": len(order),
             "failed_nodes": 0,

@@ -35,13 +35,8 @@ def get_execution_order(dsl: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]
             if next_name:
                 collect_from(next_name)
         elif stype == "Parallel":
+            # Parallel 자체만 order에 넣고, 브랜치 내부는 앱에서 스레드로 동시 실행
             order.append((name, state))
-            branches = state.get("Branches") or []
-            for branch in branches:
-                branch_start = branch.get("StartAt")
-                branch_states = branch.get("States") or {}
-                if branch_start:
-                    _collect_linear(branch_start, branch_states, order, set())
             next_name = state.get("Next")
             if next_name:
                 collect_from(next_name)
@@ -76,3 +71,28 @@ def get_execution_order(dsl: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]
     _visited: set = set()
     collect_from(start_at)
     return order
+
+
+def get_branch_order(branch: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """한 Parallel 브랜치 내 (state_name, state_def) 순서. 스레드에서 실행용."""
+    branch_states = branch.get("States") or {}
+    branch_start = branch.get("StartAt")
+    if not branch_start or branch_start not in branch_states:
+        return []
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    seen: set = set()
+
+    def walk(name: str) -> None:
+        if name in seen:
+            return
+        seen.add(name)
+        state = branch_states.get(name)
+        if not state:
+            return
+        out.append((name, state))
+        next_name = state.get("Next")
+        if next_name:
+            walk(next_name)
+
+    walk(branch_start)
+    return out
