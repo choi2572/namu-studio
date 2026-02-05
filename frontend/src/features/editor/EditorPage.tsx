@@ -483,7 +483,8 @@ function getContainerFrameLayout(
     node.containerFrame?.height ?? defaults.height,
     CONTAINER_FRAME_METRICS.minHeight
   );
-  const nodeHeight = getNodeHeight(node, nodeTypeConfig);
+  // 컨테이너 노드 자체에 START/END 리본이 붙는 경우를 감안해서 여유 높이 추가
+  const nodeHeight = getNodeHeight(node, nodeTypeConfig) + RIBBON_EXTRA_HEIGHT;
   const frameX = node.position.x;
   const frameY = node.position.y + nodeHeight + CONTAINER_FRAME_METRICS.offsetY;
   const headerHeight = CONTAINER_FRAME_METRICS.headerHeight;
@@ -1337,11 +1338,13 @@ function expandContainerFrameForNodes(
     ).length;
   });
   const maxNodes = Math.max(1, ...branchCounts);
+  // START/END 리본이 있는 노드를 고려한 카드의 실질 높이
+  const nodeVisualHeight = NODE_METRICS.collapsedHeight + RIBBON_EXTRA_HEIGHT;
   let requiredWidth = CONTAINER_FRAME_DEFAULTS.width;
   let requiredHeight =
     CONTAINER_FRAME_METRICS.headerHeight +
     CONTAINER_FRAME_METRICS.padding * 2 +
-    maxNodes * (NODE_METRICS.collapsedHeight + CONTAINER_LAYOUT.rowGap) -
+    maxNodes * (nodeVisualHeight + CONTAINER_LAYOUT.rowGap) -
     CONTAINER_LAYOUT.rowGap;
 
   if (containerType === "parallel") {
@@ -1355,7 +1358,7 @@ function expandContainerFrameForNodes(
     requiredWidth = Math.max(CONTAINER_FRAME_DEFAULTS.width, perBranchWidth);
 
     const baseHeightForBranches =
-      branchCount * NODE_METRICS.collapsedHeight +
+      branchCount * nodeVisualHeight +
       Math.max(0, branchCount - 1) * CONTAINER_LAYOUT.rowGap;
     requiredHeight =
       CONTAINER_FRAME_METRICS.headerHeight +
@@ -4112,7 +4115,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         <div>
           <p className="text-xs text-slate-500">Workflow Editor</p>
           <div className="flex items-center gap-2">
-            {isEditingWorkflowName ? (
+            {isNewWorkflow && isEditingWorkflowName ? (
               <input
                 value={workflowName}
                 onChange={(event) => setWorkflowName(event.target.value)}
@@ -4159,36 +4162,40 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   className="text-xl font-semibold cursor-pointer hover:text-slate-700 select-none"
                   onDoubleClick={(e) => {
                     e.stopPropagation();
+                    if (!isNewWorkflow) return;
                     setIsEditingWorkflowName(true);
                   }}
-                  title="더블클릭하여 이름 변경"
+                  title={isNewWorkflow ? "더블클릭하여 이름 변경" : "기존 워크플로우의 이름 변경은 추후 지원 예정입니다."}
                 >
                   {isLoadingWorkflows ? "Loading..." : (workflowName || activeDraft?.workflowId || "Untitled Workflow")}
                 </h1>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsEditingWorkflowName(true);
-                  }}
-                  className="cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100"
-                  title="이름 변경"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                    className="w-4 h-4"
+                {isNewWorkflow && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isNewWorkflow) return;
+                      setIsEditingWorkflowName(true);
+                    }}
+                    className="cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100"
+                    title="이름 변경"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
-                    />
-                  </svg>
-                </button>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.5}
+                      stroke="currentColor"
+                      className="w-4 h-4"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                      />
+                    </svg>
+                  </button>
+                )}
               </div>
             )}
             <StatusBadge status="DRAFT" />
