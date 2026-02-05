@@ -316,8 +316,9 @@ const CONTAINER_LAYOUT = {
 };
 
 const CANVAS_PADDING = {
-  x: 12,
-  y: 12
+  // 오토 레이아웃 시 노드/컨테이너와 캔버스 경계 사이 여백
+  x: 40,
+  y: 40
 };
 
 const CANVAS_DEFAULT = {
