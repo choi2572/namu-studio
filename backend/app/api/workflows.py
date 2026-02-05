@@ -1,8 +1,18 @@
 """Workflow API endpoints."""
+from datetime import timezone
 from flask import Blueprint, request, jsonify
 from werkzeug.exceptions import BadRequest, NotFound, Conflict
 
 from app.services.workflow_service import WorkflowService
+
+
+def _utc_timestamp(dt):
+    """Return timestamp for comparison; normalize naive datetimes as UTC."""
+    if dt is None:
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 from app.repos.registry import (
     workflow_repo as _workflow_repo,
     version_repo as _version_repo,
@@ -38,7 +48,7 @@ def list_workflows():
         if runs:
             run = max(
                 runs,
-                key=lambda r: r.started_at or r.created_at
+                key=lambda r: _utc_timestamp(r.started_at or r.created_at)
             )
             duration_ms = None
             if run.finished_at and run.started_at:
