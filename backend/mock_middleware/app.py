@@ -113,6 +113,7 @@ def _run_one_node(
         "timestamp": started_at,
         "node_name": state_name,
         "prev_status": "IDLE",
+        "status": "RUNNING",
         "input": state_def.get("Parameters") or state_def.get("If") or {},
     })
     with _state["lock"]:
@@ -194,12 +195,14 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         if stype == "Parallel":
             # Type Parallel = 컨테이너. 실행되는 건 안에 있는 두 브랜치뿐. Parallel 상태 이름으로 이벤트 안 보냄.
             branches = state_def.get("Branches") or []
+            # 각 브랜치를 복사해 스레드별로 전달 (참조 공유로 인한 오동작 방지)
+            branch_copies = [deepcopy(b) for b in branches]
 
             def run_branch(branch: Dict[str, Any]) -> None:
                 for name, def_ in get_branch_order(branch):
                     _run_one_node(workflow_id, name, def_, total_duration_ms_ref)
 
-            threads = [threading.Thread(target=run_branch, args=(b,)) for b in branches]
+            threads = [threading.Thread(target=run_branch, args=(bc,)) for bc in branch_copies]
             for t in threads:
                 t.start()
             for t in threads:

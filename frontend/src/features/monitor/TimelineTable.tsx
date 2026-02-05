@@ -132,7 +132,10 @@ function EventIcon({ type }: { type: string }) {
 
 type TimelineTableProps = {
   events: RunEvent[];
+  /** pathId (DAG 선택용); 행 하이라이트는 selectedStateName으로 비교 */
   selectedNode: string | null;
+  /** 이벤트 행 하이라이트용 stateName (pathId에서 추출한 apiStateName) */
+  selectedStateName?: string | null;
   onSelectNode: (stateName: string) => void;
   nodeStates?: Array<{ stateName: string; nodeName: string; typeLabel?: string }>;
 };
@@ -212,9 +215,11 @@ function getEventConfig(eventType: string) {
 export function TimelineTable({
   events,
   selectedNode,
+  selectedStateName = null,
   onSelectNode,
   nodeStates = []
 }: TimelineTableProps) {
+  const highlightStateName = selectedStateName ?? selectedNode;
   if (events.length === 0) {
     return (
       <Table className="text-xs">
@@ -289,7 +294,7 @@ export function TimelineTable({
               }}
               className={cn(
                 "cursor-pointer transition-colors",
-                event.stateName && selectedNode === event.stateName && "bg-blue-50"
+                event.stateName && highlightStateName === event.stateName && "bg-blue-50"
               )}
             >
               <TableCell className="font-mono text-slate-600">

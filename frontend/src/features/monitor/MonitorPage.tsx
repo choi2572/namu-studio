@@ -499,6 +499,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             <TimelineTable
               events={events}
               selectedNode={selectedNode}
+              selectedStateName={selectedNode ? pathIdToApiStateName(selectedNode) : null}
               onSelectNode={(stateName) =>
                 setSelectedNode(stateNameToPathId.get(stateName) ?? stateName)
               }
