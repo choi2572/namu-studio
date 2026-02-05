@@ -193,27 +193,23 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
 
         stype = (state_def.get("Type") or "").strip()
         branches_raw = state_def.get("Branches")
-        is_parallel = stype == "Parallel" or (isinstance(branches_raw, list) and len(branches_raw) > 0)
+        is_parallel = (stype or "").lower() == "parallel" or (isinstance(branches_raw, list) and len(branches_raw or []) > 0)
         if is_parallel:
-            # Parallel = 컨테이너. NODE_STARTED/NODE_SUCCEEDED 보내지 않음. 브랜치만 실행 후 Next로 진행.
-            branches = branches_raw if isinstance(branches_raw, list) else []
-            # 각 브랜치를 복사해 스레드별로 전달 (참조 공유로 인한 오동작 방지)
-            branch_copies = [deepcopy(b) for b in branches]
-
-            def run_branch(branch: Dict[str, Any]) -> None:
-                for name, def_ in get_branch_order(branch):
+            # Parallel = 컨테이너. NODE_STARTED/NODE_SUCCEEDED 절대 보내지 않음. 브랜치만 순차 실행 후 Next로 진행.
+            branches = list(branches_raw) if isinstance(branches_raw, list) else []
+            for branch in branches:
+                with _state["lock"]:
+                    if _state["cancelled"]:
+                        break
+                for name, def_ in get_branch_order(deepcopy(branch)):
+                    with _state["lock"]:
+                        if _state["cancelled"]:
+                            break
                     _run_one_node(workflow_id, name, def_, total_duration_ms_ref)
-
-            threads = [threading.Thread(target=run_branch, args=(bc,)) for bc in branch_copies]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
-
+                total_duration_ms_ref[0] += 2000
             with _state["lock"]:
                 if _state["cancelled"]:
                     break
-            total_duration_ms_ref[0] += 2000
             continue
 
         _run_one_node(workflow_id, state_name, state_def, total_duration_ms_ref)

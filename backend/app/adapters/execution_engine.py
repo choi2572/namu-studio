@@ -143,11 +143,12 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
             raise ValueError(f"State '{state_name}' not found")
         
         node_def = states[state_name]
-        node_type = node_def.get("Type")
+        node_type = (node_def.get("Type") or "").strip()
         seq = initial_seq
 
         # Parallel = 컨테이너. NODE_STARTED/NODE_SUCCEEDED 없이 브랜치만 실행 후 Next로 진행.
-        if node_type == "Parallel":
+        has_branches = isinstance(node_def.get("Branches"), list) and len(node_def.get("Branches", [])) > 0
+        if (node_type or "").lower() == "parallel" or has_branches:
             seq = self._execute_parallel(run_id, state_name, node_def, states, context, seq)
             next_node = node_def.get("Next")
             if next_node:
