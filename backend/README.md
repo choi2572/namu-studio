@@ -79,14 +79,16 @@ python run.py
 # SQLite 사용
 export REPO_BACKEND=sqlite
 export DB_PATH=./data/app.db  # 선택사항 (기본값: ./data/app.db)
-export SEED_DATA=1  # 개발용 시드 데이터 추가 (선택사항)
 python run.py
 ```
+
+**시드 데이터:**  
+개발(DEBUG) 모드에서는 **시드 데이터가 자동으로 로드**됩니다 (샘플 워크플로·Run). 시드만 쓰고 싶을 때는 `SEED_DATA=true`로 명시해도 됩니다.
 
 **SQLite 설정:**
 - `REPO_BACKEND=sqlite`: SQLite 백엔드 활성화
 - `DB_PATH`: 데이터베이스 파일 경로 (기본값: `./data/app.db`)
-- `SEED_DATA=1`: 개발 환경에서만 시드 데이터 추가 (DEV 전용)
+- `SEED_DATA=true`: 시드 데이터 강제 로드 (개발 모드에서는 기본으로 켜짐)
 
 **SQLite PRAGMA 설정:**
 - `journal_mode=WAL`: Write-Ahead Logging 활성화
@@ -118,7 +120,7 @@ python run.py
 
 ### Runs
 - `GET /api/runs` - 실행 목록 (필터 지원)
-- `POST /api/runs` - 실행 시작
+- `POST /api/runs` - 실행 시작 (**워크플로는 반드시 Publish된 상태여야 함**. `workflowId`만 넘기면 백엔드가 해당 워크플로의 published 버전 DSL로 execution adapter를 호출)
 - `GET /api/runs/<run_id>` - 실행 조회
 - `POST /api/runs/<run_id>/cancel` - 실행 취소
 - `GET /api/runs/<run_id>/snapshot` - 실행 스냅샷

@@ -2,35 +2,31 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
-import { middlewareApi, workflowsApi } from "@/api";
+import { runsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { buildMonitorGraph } from "@/features/monitor/monitorGraph";
 import { DagView } from "@/features/monitor/DagView";
 import { NodeStatus, RunStatus } from "@/domain/types";
 import type { NodeStateSnapshot } from "@/api/interfaces";
-import type { WorkflowRunValidationError } from "@/api/interfaces";
 
-type ExecutionState = {
-  workflow_id: string;
-  status: "running" | "cancelled";
-} | null;
-
-function getValidationMessage(err: unknown): string {
-  const e = err as Error & { body?: WorkflowRunValidationError };
-  if (e?.body?.message) return e.body.message;
-  if (e?.body?.details?.reason) return `${e.body.message || "Validation error"}: ${e.body.details.reason}`;
-  if (e?.body?.details?.state) return `${e.body?.message || "Validation error"} (state: ${e.body.details.state})`;
-  return err instanceof Error ? err.message : "Failed to start execution";
+function getRunErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : "Failed to start run";
+  if (msg.includes("published version") || msg.includes("no published")) {
+    return "이 워크플로는 아직 Publish되지 않았습니다. 에디터에서 Publish 후 다시 Run 해주세요.";
+  }
+  if (msg.includes("already active") || msg.includes("another run")) {
+    return "다른 Run이 실행 중입니다. 완료되거나 Cancel 후 다시 시도해주세요.";
+  }
+  return msg;
 }
 
 export default function MonitorWorkflowPage() {
   const params = useParams();
   const router = useRouter();
   const workflowId = params.workflowId as string;
-  const [executionState, setExecutionState] = useState<ExecutionState>(null);
 
   const { data: workflows = [] } = useQuery({
     queryKey: ["workflows"],
@@ -38,52 +34,29 @@ export default function MonitorWorkflowPage() {
   });
   const workflowName =
     workflows.find((w) => w.workflowId === workflowId)?.name ?? workflowId;
+  const workflowState = workflows.find((w) => w.workflowId === workflowId)?.state;
+  const isPublished = workflowState === "PUBLISHED";
 
   const { data: workflowDraft, isLoading: draftLoading } = useQuery({
     queryKey: ["workflow-draft", workflowId],
     queryFn: () => workflowsApi.getDraft(workflowId)
   });
 
-  const { data: runnerStatus } = useQuery({
-    queryKey: ["runner-status"],
-    queryFn: () => middlewareApi.getRunnerStatus(),
-    refetchInterval: executionState?.status === "running" ? 2000 : false,
-    enabled: executionState?.status === "running"
-  });
-
   const executeMutation = useMutation({
     mutationFn: async () => {
-      if (!workflowDraft?.dsl_json || typeof workflowDraft.dsl_json !== "object") {
-        throw new Error("Workflow draft or DSL is missing");
-      }
-      return middlewareApi.runWorkflowStart(workflowDraft.dsl_json as Record<string, unknown>);
+      const run = await runsApi.startRun(workflowId);
+      return run;
     },
-    onSuccess: (res) => {
-      setExecutionState({ workflow_id: res.workflow_id, status: res.status });
+    onSuccess: (run) => {
+      router.push(`/monitor/${run.runId}`);
     },
     onError: (err) => {
-      console.error("Execute failed", err);
+      console.error("Start run failed", err);
       if (typeof window !== "undefined") {
-        window.alert(getValidationMessage(err));
+        window.alert(getRunErrorMessage(err));
       }
     }
   });
-
-  const cancelMutation = useMutation({
-    mutationFn: () => middlewareApi.runWorkflowCancel(),
-    onSuccess: (res) => {
-      setExecutionState({ workflow_id: res.workflow_id, status: "cancelled" });
-    },
-    onError: (err) => {
-      console.error("Cancel failed", err);
-      if (typeof window !== "undefined") {
-        window.alert(err instanceof Error ? err.message : "Failed to cancel");
-      }
-    }
-  });
-
-  const isRunning = executionState?.status === "running";
-  const isCancelled = executionState?.status === "cancelled";
 
   const monitorGraph = workflowDraft
     ? buildMonitorGraph(workflowDraft.dsl_json)
@@ -120,26 +93,17 @@ export default function MonitorWorkflowPage() {
         })()
       : [];
 
-  const progress = runnerStatus && "workflow" in runnerStatus ? runnerStatus.workflow?.progress : null;
-
   const allNodes: NodeStateSnapshot[] = useMemo(() => {
     if (!workflowDraft?.dsl_json || typeof workflowDraft.dsl_json !== "object") return [];
     const dsl = workflowDraft.dsl_json as { States?: Record<string, { Label?: string }> };
     if (!dsl.States) return [];
-    const completedSet = new Set(progress?.completed_states ?? []);
-    const currentState = progress?.current_state ?? null;
-    return Object.entries(dsl.States).map(([stateName, state]) => {
-      let status = NodeStatus.WAITING;
-      if (completedSet.has(stateName)) status = NodeStatus.SUCCEEDED;
-      else if (currentState === stateName && isRunning) status = NodeStatus.RUNNING;
-      return {
-        stateName,
-        nodeName: (state.Label as string) || stateName,
-        status,
-        durationMs: null
-      };
-    });
-  }, [workflowDraft?.dsl_json, progress, isRunning]);
+    return Object.entries(dsl.States).map(([stateName, state]) => ({
+      stateName,
+      nodeName: (state.Label as string) || stateName,
+      status: NodeStatus.WAITING,
+      durationMs: null
+    }));
+  }, [workflowDraft?.dsl_json]);
 
   if (draftLoading || !workflowId) {
     return (
@@ -176,50 +140,27 @@ export default function MonitorWorkflowPage() {
               </svg>
               Edit
             </Button>
-            {!isRunning && (
-              <Button
-                onClick={() => executeMutation.mutate()}
-                disabled={executeMutation.isPending}
-                className="inline-flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
-                </svg>
-                {executeMutation.isPending ? "Starting..." : "Execute"}
-              </Button>
-            )}
-            {isRunning && (
-              <Button
-                variant="secondary"
-                onClick={() => cancelMutation.mutate()}
-                disabled={cancelMutation.isPending}
-                className="inline-flex items-center gap-2"
-              >
-                {cancelMutation.isPending ? "Cancelling..." : "Cancel"}
-              </Button>
-            )}
+            <Button
+              onClick={() => executeMutation.mutate()}
+              disabled={executeMutation.isPending || !isPublished}
+              className="inline-flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
+              </svg>
+              {executeMutation.isPending ? "Starting..." : "Run"}
+            </Button>
           </div>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-          {executionState && (
-            <>
-              <span className="text-slate-500">
-                {isRunning && "Execution running."}
-                {isCancelled && "Execution cancelled."}
-                {executionState.workflow_id && (
-                  <span className="ml-1 font-mono text-slate-600">{executionState.workflow_id}</span>
-                )}
-              </span>
-              {runnerStatus && "workflow" in runnerStatus && runnerStatus.workflow && (
-                <span className="text-slate-500">
-                  Current: <span className="font-medium text-slate-700">{runnerStatus.workflow.current_node}</span>
-                </span>
-              )}
-            </>
+          {!isPublished && (
+            <p className="text-amber-700">
+              이 워크플로는 Draft 상태입니다. Run 하려면 에디터에서 Publish 후 다시 이 페이지로 오세요.
+            </p>
           )}
-          {!executionState && (
+          {isPublished && (
             <p className="text-slate-500">
-              Click Execute to run this workflow via the middleware runner. Use Cancel to stop a running execution.
+              Run을 누르면 백엔드에서 실행이 시작되고 Run 모니터 페이지로 이동합니다.
             </p>
           )}
         </div>
@@ -228,13 +169,7 @@ export default function MonitorWorkflowPage() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
         <Card
           title="DAG View"
-          description={
-            isRunning
-              ? "Live execution: node status updates from runner."
-              : isCancelled
-                ? "Execution was cancelled."
-                : "Workflow structure. Click Execute to run."
-          }
+          description="워크플로 구조. Run을 누르면 실행이 시작되고 모니터 페이지로 이동합니다."
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           <div className="flex min-h-0 flex-1 flex-col p-6">
@@ -243,7 +178,7 @@ export default function MonitorWorkflowPage() {
               selectedNode={null}
               onSelectNode={() => {}}
               edges={edges}
-              runStatus={isRunning ? RunStatus.RUNNING : isCancelled ? RunStatus.CANCELED : null}
+              runStatus={null}
               viewJson={workflowDraft.view_json}
               monitorGraph={monitorGraph ?? undefined}
             />

@@ -48,9 +48,10 @@ def create_app(config_class=Config):
 
 
 def _should_seed(app: Flask) -> bool:
-    if not app.config.get("SEED_DATA"):
-        return False
-    env = app.config.get("ENV")
-    if env == "development" or app.config.get("DEBUG"):
+    """Seed when SEED_DATA is true, or in development when DEBUG is true (default on)."""
+    if app.config.get("SEED_DATA"):
         return True
-    return os.environ.get("FLASK_ENV") == "development" or os.environ.get("FLASK_DEBUG") == "1"
+    # Development default: seed so sample workflows appear without setting env
+    if app.config.get("DEBUG") or app.config.get("ENV") == "development":
+        return True
+    return False
