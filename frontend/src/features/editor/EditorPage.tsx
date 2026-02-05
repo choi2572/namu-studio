@@ -1348,7 +1348,9 @@ function expandContainerFrameForNodes(
     CONTAINER_FRAME_METRICS.headerHeight +
     CONTAINER_FRAME_METRICS.padding * 2 +
     maxNodes * (nodeVisualHeight + CONTAINER_LAYOUT.rowGap) -
-    CONTAINER_LAYOUT.rowGap;
+    CONTAINER_LAYOUT.rowGap +
+    // 컨테이너 Body 하단에 여유 공간
+    CONTAINER_LAYOUT.padding;
 
   if (containerType === "parallel") {
     // Parallel: 브랜치는 세로 스택, 각 브랜치 안에서 노드들은 가로로 배치.
@@ -1357,12 +1359,16 @@ function expandContainerFrameForNodes(
     const perBranchWidth =
       CONTAINER_FRAME_METRICS.padding * 2 +
       maxNodes * (NODE_METRICS.width + CONTAINER_LAYOUT.columnGap) -
-      CONTAINER_LAYOUT.columnGap;
+      CONTAINER_LAYOUT.columnGap +
+      // 브랜치 우측에 여유 공간
+      CONTAINER_LAYOUT.padding;
     requiredWidth = Math.max(CONTAINER_FRAME_DEFAULTS.width, perBranchWidth);
 
     const baseHeightForBranches =
       branchCount * nodeVisualHeight +
-      Math.max(0, branchCount - 1) * CONTAINER_LAYOUT.rowGap;
+      Math.max(0, branchCount - 1) * CONTAINER_LAYOUT.rowGap +
+      // 마지막 브랜치 하단 여유
+      CONTAINER_LAYOUT.padding;
     requiredHeight =
       CONTAINER_FRAME_METRICS.headerHeight +
       CONTAINER_FRAME_METRICS.padding * 2 +
