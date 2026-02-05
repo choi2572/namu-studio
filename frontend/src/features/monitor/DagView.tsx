@@ -2,7 +2,7 @@
 
 import { useMemo, useEffect, useRef, useCallback } from "react";
 import { NodeStateSnapshot } from "@/api/interfaces";
-import { NodeStatus, RunStatus } from "@/domain/types";
+import { NodeStatus, RunStatus, isRunTerminal } from "@/domain/types";
 import { cn } from "@/lib/cn";
 import { formatDuration } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -68,13 +68,14 @@ type DagViewProps = {
 };
 
 // Node status color mapping - 더 명확한 구분 (top-level + nested 동일)
-const NODE_STATUS_STYLE_MAP: Record<NodeStatus, string> = {
+const NODE_STATUS_STYLE_MAP: Record<NodeStatus | "NOT_RUN", string> = {
   [NodeStatus.RUNNING]: "border-blue-600 bg-blue-50 shadow-lg ring-4 ring-blue-400 ring-opacity-50 animate-pulse",
   [NodeStatus.WAITING]: "border-amber-500 bg-amber-50 border-dashed",
   [NodeStatus.SUCCEEDED]: "border-green-600 bg-green-100",
   [NodeStatus.FAILED]: "border-red-600 bg-red-50",
   [NodeStatus.SKIPPED]: "border-slate-300 bg-slate-50 opacity-50",
-  [NodeStatus.CANCELED]: "border-slate-400 bg-slate-100 opacity-60"
+  [NodeStatus.CANCELED]: "border-slate-400 bg-slate-100 opacity-60",
+  NOT_RUN: "border-slate-300 bg-slate-50 opacity-60"
 };
 
 /** API에서 오는 status 문자열을 NodeStatus enum으로 정규화 (비교/스타일 일치용) */
@@ -929,6 +930,8 @@ export function DagView({
             const fromIsCondition = fromNode.dslType === "Condition";
             const isThen = fromIsCondition && edge.conditionBranch === "then";
             const isElse = fromIsCondition && edge.conditionBranch === "else";
+            const runEnded = runStatus != null && isRunTerminal(runStatus);
+            const edgeDisabled = fromIsCondition && runEnded && toNode.status === NodeStatus.WAITING;
 
             // Condition 노드일 때는 항상 true/false 두 개의 포트를 사용 (에디터와 동일)
             let startY = fromNode.position.y + NODE_METRICS.collapsedHeight / 2;
@@ -958,10 +961,18 @@ export function DagView({
             const c2x = end.x + (end.x >= start.x ? -curve : curve);
             const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
 
-            const stroke = isThen ? "#059669" : isElse ? "#d97706" : "#64748b";
-            const marker = isThen ? "url(#arrow-monitor-then)" : isElse ? "url(#arrow-monitor-else)" : "url(#arrow-monitor)";
+            const stroke = edgeDisabled ? "#cbd5e1" : isThen ? "#059669" : isElse ? "#d97706" : "#64748b";
+            const marker = edgeDisabled ? "url(#arrow-monitor)" : isThen ? "url(#arrow-monitor-then)" : isElse ? "url(#arrow-monitor-else)" : "url(#arrow-monitor)";
             return (
-              <path key={edge.id} d={d} stroke={stroke} strokeWidth="2.25" fill="none" markerEnd={marker} />
+              <path
+                key={edge.id}
+                d={d}
+                stroke={stroke}
+                strokeWidth={edgeDisabled ? 1.5 : 2.25}
+                strokeDasharray={edgeDisabled ? "4 4" : undefined}
+                fill="none"
+                markerEnd={marker}
+              />
             );
           })}
         </svg>
@@ -983,11 +994,14 @@ export function DagView({
         </div>
 
         {positionedNodes.map((node) => {
+          const runEnded = runStatus != null && isRunTerminal(runStatus);
+          const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
+          const displayStatus = displayNotRun ? "NOT_RUN" : node.status;
           const nodeTypeInfo = getNodeTypeInfoFromDsl(node.dslType, node.containerType);
           const typeLabel = node.skillName ?? node.dslType;
           const isRunning = node.status === NodeStatus.RUNNING;
           const isCompleted = node.status === NodeStatus.SUCCEEDED;
-          const isWaiting = node.status === NodeStatus.WAITING;
+          const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
           const isSelected = selectedNode === node.pathId;
           const hasStart = showStartRibbon(node.pathId);
           const hasEnd = showEndRibbon(node.pathId);
@@ -1042,7 +1056,7 @@ export function DagView({
                 onClick={() => onSelectNode(node.pathId)}
                 className={cn(
                   "cursor-pointer relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
-                  NODE_STATUS_STYLE_MAP[node.status],
+                  NODE_STATUS_STYLE_MAP[displayStatus],
                   isSelected ? "ring-4 ring-slate-400 ring-offset-2" : "hover:shadow-lg"
                 )}
               >
@@ -1058,7 +1072,7 @@ export function DagView({
                       <p
                         className={cn(
                           "font-semibold truncate",
-                          isRunning ? "text-blue-900" : isCompleted ? "text-green-900" : isWaiting ? "text-amber-900" : "text-slate-800"
+                          isRunning ? "text-blue-900" : isCompleted ? "text-green-900" : isWaiting ? "text-amber-900" : displayNotRun ? "text-slate-600" : "text-slate-800"
                         )}
                       >
                         {node.nodeName}
@@ -1085,6 +1099,7 @@ export function DagView({
                         </span>
                       )}
                       {isWaiting && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">Waiting</span>}
+                      {displayNotRun && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">Not run</span>}
                       {isCompleted && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">✓ Completed</span>}
                     </div>
                     {typeLabel && typeLabel !== "Pass" && (
@@ -1097,7 +1112,7 @@ export function DagView({
                     )}
                   </div>
                   <div className="ml-2 flex-shrink-0">
-                    <StatusBadge status={node.status} />
+                    <StatusBadge status={displayStatus} />
                   </div>
                 </div>
                 {/* Start/End 리본 — editor와 동일: start+end 동시면 사선 구획, 아니면 단일 색 */}
@@ -1223,10 +1238,13 @@ export function DagView({
 
       {/* Nodes - in front of edges */}
       {positionedNodes.map((node) => {
+        const runEnded = runStatus != null && isRunTerminal(runStatus);
+        const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
+        const displayStatus = displayNotRun ? "NOT_RUN" : node.status;
         const nodeTypeInfo = getNodeTypeInfo(node.name, node.stateName);
         const isRunning = node.status === NodeStatus.RUNNING;
         const isCompleted = node.status === NodeStatus.SUCCEEDED;
-        const isWaiting = node.status === NodeStatus.WAITING;
+        const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
 
         return (
           <div
@@ -1245,7 +1263,7 @@ export function DagView({
               onClick={() => onSelectNode(node.stateName)}
               className={cn(
                 "cursor-pointer relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
-                NODE_STATUS_STYLE_MAP[node.status],
+                NODE_STATUS_STYLE_MAP[displayStatus],
                 selectedNode === node.stateName
                   ? "ring-4 ring-slate-400 ring-offset-2"
                   : "hover:shadow-lg"
@@ -1264,9 +1282,10 @@ export function DagView({
                   <div className="flex items-center gap-2 mb-1">
                     <p className={cn(
                       "font-semibold truncate",
-                      isRunning ? "text-blue-900" : 
-                      isCompleted ? "text-green-900" : 
+                      isRunning ? "text-blue-900" :
+                      isCompleted ? "text-green-900" :
                       isWaiting ? "text-amber-900" :
+                      displayNotRun ? "text-slate-600" :
                       "text-slate-800"
                     )}>
                       {node.name}
@@ -1299,6 +1318,11 @@ export function DagView({
                         Waiting
                       </span>
                     )}
+                    {displayNotRun && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                        Not run
+                      </span>
+                    )}
                     {isCompleted && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">
                         ✓ Completed
@@ -1311,6 +1335,7 @@ export function DagView({
                     isRunning ? "text-blue-700" :
                     isCompleted ? "text-green-700" :
                     isWaiting ? "text-amber-700" :
+                    displayNotRun ? "text-slate-500" :
                     "text-slate-600"
                   )}>
                     {node.stateName}
@@ -1325,7 +1350,7 @@ export function DagView({
                 
                 {/* 상태 배지 */}
                 <div className="ml-2 flex-shrink-0">
-                  <StatusBadge status={node.status} />
+                  <StatusBadge status={displayStatus} />
                 </div>
               </div>
             </button>

@@ -8,10 +8,15 @@ const STATUS_STYLES: Record<string, string> = {
   FAILED: "bg-status-failed text-white",
   CANCELED: "bg-status-canceled text-white",
   SKIPPED: "bg-status-skipped text-slate-900",
+  NOT_RUN: "bg-slate-100 text-slate-500",
   CREATED: "bg-slate-200 text-slate-700",
   DRAFT: "bg-slate-200 text-slate-700",
   PUBLISHED: "bg-slate-900 text-white",
   START: "bg-slate-900 text-white"
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  NOT_RUN: "Not run"
 };
 
 type StatusBadgeProps = {
@@ -28,7 +33,7 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
         className
       )}
     >
-      {status}
+      {STATUS_LABELS[status] ?? status}
     </span>
   );
 }

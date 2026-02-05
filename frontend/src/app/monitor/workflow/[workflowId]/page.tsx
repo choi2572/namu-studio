@@ -15,10 +15,10 @@ import type { NodeStateSnapshot } from "@/api/interfaces";
 function getRunErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : "Failed to start run";
   if (msg.includes("published version") || msg.includes("no published")) {
-    return "이 워크플로는 아직 Publish되지 않았습니다. 에디터에서 Publish 후 다시 Run 해주세요.";
+    return "This workflow is not published yet. Publish from the editor and try again.";
   }
   if (msg.includes("already active") || msg.includes("another run")) {
-    return "다른 Run이 실행 중입니다. 완료되거나 Cancel 후 다시 시도해주세요.";
+    return "Another run is in progress. Wait for it to finish or cancel it first.";
   }
   return msg;
 }
@@ -155,12 +155,12 @@ export default function MonitorWorkflowPage() {
         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
           {!isPublished && (
             <p className="text-amber-700">
-              이 워크플로는 Draft 상태입니다. Run 하려면 에디터에서 Publish 후 다시 이 페이지로 오세요.
+              This workflow is in Draft. Publish from the editor to run.
             </p>
           )}
           {isPublished && (
             <p className="text-slate-500">
-              Run을 누르면 백엔드에서 실행이 시작되고 Run 모니터 페이지로 이동합니다.
+              Click Run to start execution; you will be redirected to the monitor.
             </p>
           )}
         </div>
@@ -169,7 +169,7 @@ export default function MonitorWorkflowPage() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
         <Card
           title="DAG View"
-          description="워크플로 구조. Run을 누르면 실행이 시작되고 모니터 페이지로 이동합니다."
+          description="Workflow structure. Click Run to start and open the monitor."
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           <div className="flex min-h-0 flex-1 flex-col p-6">
