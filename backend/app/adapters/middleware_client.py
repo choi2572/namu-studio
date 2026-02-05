@@ -228,7 +228,9 @@ def _apply_node_status_change(
     node_run_id = f"{run_id}-{node_name}"
     existing = node_run_repo.get_by_run_and_state(run_id, node_name)
 
-    if status == "RUNNING":
+    # 스펙: RUNNING 전환 시 "prev_status": "IDLE"만 오고 "status" 없을 수 있음 → NODE_STARTED 처리
+    is_node_started = status == "RUNNING" or (prev == "IDLE" and status != "SUCCESS")
+    if is_node_started:
         if not existing:
             node_run_repo.create(
                 NodeRun(
