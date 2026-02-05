@@ -52,6 +52,59 @@ function getNextTimestamp(events: RunEvent[], fallback: string) {
   return date.toISOString();
 }
 
+/** Replay: apply events in order to initial (all WAITING) node states */
+function applyEventsToNodeStates(
+  baseNodes: NodeStateSnapshot[],
+  eventsToApply: RunEvent[]
+): NodeStateSnapshot[] {
+  const byStateName = new Map<string, NodeStateSnapshot>();
+  baseNodes.forEach((n) => byStateName.set(n.stateName, { ...n }));
+
+  function findNode(evStateName: string): NodeStateSnapshot | undefined {
+    const direct = byStateName.get(evStateName);
+    if (direct) return direct;
+    for (const [, node] of byStateName) {
+      if (node.stateName === evStateName || node.stateName.endsWith("/" + evStateName)) return node;
+    }
+    return undefined;
+  }
+
+  eventsToApply.forEach((ev) => {
+    const stateName = ev.stateName ?? (ev.payload as { stateName?: string } | undefined)?.stateName;
+    if (!stateName) return;
+    const node = findNode(stateName);
+    if (!node) return;
+
+    const key = node.stateName;
+    switch (ev.eventType) {
+      case "NODE_STARTED":
+        byStateName.set(key, { ...node, status: NodeStatus.RUNNING });
+        break;
+      case "NODE_SUCCEEDED": {
+        const durationMs = (ev.payload as { durationMs?: number } | undefined)?.durationMs ?? null;
+        byStateName.set(key, { ...node, status: NodeStatus.SUCCEEDED, durationMs });
+        break;
+      }
+      case "NODE_FAILED":
+        byStateName.set(key, { ...node, status: NodeStatus.FAILED });
+        break;
+      case "NODE_WAITING":
+        byStateName.set(key, { ...node, status: NodeStatus.WAITING });
+        break;
+      case "NODE_SKIPPED":
+        byStateName.set(key, { ...node, status: NodeStatus.SKIPPED });
+        break;
+      case "NODE_CANCELED":
+        byStateName.set(key, { ...node, status: NodeStatus.CANCELED });
+        break;
+      default:
+        break;
+    }
+  });
+
+  return baseNodes.map((n) => byStateName.get(n.stateName) ?? n);
+}
+
 
 export function MonitorPage({ runId }: MonitorPageProps) {
   const searchParams = useSearchParams();
@@ -86,7 +139,8 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [replayPlaying, setReplayPlaying] = useState(false);
-  const [replayPosition, setReplayPosition] = useState(30);
+  const [replayIndex, setReplayIndex] = useState(0);
+  const replayInitializedRef = useRef(false);
 
   const simulationRef = useRef<{ runId: string; index: number }>({
     runId: "",
@@ -176,6 +230,35 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     if (!autoScroll || !timelineRef.current) return;
     timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
   }, [events, autoScroll]);
+
+  // Replay: when run is terminal (or replay mode) and events loaded, show end state initially
+  useEffect(() => {
+    if (runId && events.length > 0 && !replayInitializedRef.current) {
+      const terminal = runStatus != null && isRunTerminal(runStatus);
+      if (terminal || isReplayMode) {
+        setReplayIndex(events.length - 1);
+        replayInitializedRef.current = true;
+      }
+    }
+  }, [runId, runStatus, events.length, isReplayMode]);
+  useEffect(() => {
+    replayInitializedRef.current = false;
+  }, [runId]);
+
+  // Replay: advance index on interval when playing
+  useEffect(() => {
+    if (!replayPlaying || events.length === 0) return;
+    const interval = setInterval(() => {
+      setReplayIndex((i: number) => {
+        if (i >= events.length - 1) {
+          setReplayPlaying(false);
+          return events.length - 1;
+        }
+        return i + 1;
+      });
+    }, 700);
+    return () => clearInterval(interval);
+  }, [replayPlaying, events.length]);
 
   const handleCancel = () => {
     if (!snapshot) return;
@@ -311,12 +394,24 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return Array.from(nodeMap.values());
   }, [latestNodeStates, workflowDraft]);
 
+  const initialReplayNodes = useMemo(
+    () => allNodes.map((n) => ({ ...n, status: NodeStatus.WAITING, durationMs: null })),
+    [allNodes]
+  );
+  const replayNodeStates = useMemo(
+    () => applyEventsToNodeStates(initialReplayNodes, events.slice(0, replayIndex + 1)),
+    [initialReplayNodes, events, replayIndex]
+  );
+  const displayEvents = showReplay ? events.slice(0, replayIndex + 1) : events;
+  const displayNodeStates = showReplay ? replayNodeStates : allNodes;
+
   const selectedNodeState = useMemo(() => {
     if (!selectedNode) return null;
+    const statesToUse = displayNodeStates;
     if (monitorGraph) {
       const node = monitorGraph.nodes.find((n) => n.pathId === selectedNode);
       if (!node) return null;
-      const snap = latestNodeStates.find((n) => n.stateName === node.apiStateName);
+      const snap = statesToUse.find((n) => n.stateName === node.apiStateName) ?? statesToUse.find((n) => n.stateName === node.stateName);
       const typeDisplay = node.skillName ?? node.dslType ?? "Task";
       return {
         stateName: node.apiStateName,
@@ -326,8 +421,8 @@ export function MonitorPage({ runId }: MonitorPageProps) {
         typeDisplay
       } as NodeStateSnapshot & { typeDisplay?: string };
     }
-    return allNodes.find((n) => n.stateName === selectedNode) ?? null;
-  }, [selectedNode, monitorGraph, latestNodeStates, allNodes]);
+    return statesToUse.find((n) => n.stateName === selectedNode) ?? null;
+  }, [selectedNode, monitorGraph, displayNodeStates]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -343,24 +438,20 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               <Button onClick={handleCancel}>Cancel</Button>
             )}
             {showReplay && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => setReplayPlaying((prev) => !prev)}
-                >
-                  {replayPlaying ? "Pause" : "Play"}
-                </Button>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={replayPosition}
-                  onChange={(event) =>
-                    setReplayPosition(Number(event.target.value))
+              <Button
+                onClick={() => {
+                  if (replayIndex >= events.length - 1 && events.length > 0) {
+                    setReplayIndex(0);
                   }
-                  className="w-32"
-                />
-              </div>
+                  setReplayPlaying((prev) => !prev);
+                }}
+                className="inline-flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
+                </svg>
+                {replayPlaying ? "Pause" : "Play"}
+              </Button>
             )}
           </div>
         </div>
@@ -382,7 +473,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
         >
           <div className="flex min-h-0 flex-1 flex-col p-6">
             <DagView
-              nodeStates={allNodes}
+              nodeStates={displayNodeStates}
               selectedNode={selectedNode}
               onSelectNode={setSelectedNode}
               edges={edges}
@@ -497,7 +588,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             className="h-72 overflow-y-auto rounded-lg border border-slate-200"
           >
             <TimelineTable
-              events={events}
+              events={displayEvents}
               selectedNode={selectedNode}
               selectedStateName={selectedNode ? pathIdToApiStateName(selectedNode) : null}
               onSelectNode={(stateName) =>

@@ -931,7 +931,8 @@ export function DagView({
             const isThen = fromIsCondition && edge.conditionBranch === "then";
             const isElse = fromIsCondition && edge.conditionBranch === "else";
             const runEnded = runStatus != null && isRunTerminal(runStatus);
-            const edgeDisabled = fromIsCondition && runEnded && toNode.status === NodeStatus.WAITING;
+            const conditionChoseBranch = fromNode.status === NodeStatus.SUCCEEDED;
+            const edgeDisabled = fromIsCondition && toNode.status === NodeStatus.WAITING && (runEnded || conditionChoseBranch);
 
             // Condition 노드일 때는 항상 true/false 두 개의 포트를 사용 (에디터와 동일)
             let startY = fromNode.position.y + NODE_METRICS.collapsedHeight / 2;
