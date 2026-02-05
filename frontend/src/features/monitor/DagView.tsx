@@ -308,17 +308,54 @@ function computeMonitorLayout(
         const children = pathIds
           .map((pathId) => graph.nodes.find((n) => n.pathId === pathId))
           .filter((n): n is MonitorNode => n != null);
-        const bodyWidth = Math.max(
-          CONTAINER_MIN_WIDTH - CONTAINER_PADDING * 2,
-          NODE_METRICS.width
-        );
-        let bodyHeight =
-          children.length * (NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP) - CONTAINER_ROW_GAP;
+
+        // 반복 컨테이너 내부도 에디터와 동일하게 좌→우 방향 DAG 레이아웃 사용
+        const dagNodesBranch: DagNode[] = children.map((c) => ({
+          id: c.pathId,
+          name: c.nodeName,
+          stateName: c.stateName,
+          status: statusByApiStateName.get(c.apiStateName)?.status ?? NodeStatus.WAITING,
+          durationMs: statusByApiStateName.get(c.apiStateName)?.durationMs ?? null,
+          position: { x: 0, y: 0 }
+        }));
+        const dagEdgesBranch: DagEdge[] = graph.edges
+          .filter((e) => pathIds.includes(e.from) && pathIds.includes(e.to))
+          .map((e) => ({ id: e.id, from: e.from, to: e.to }));
+
+        const positions = computeAutoLayout(dagNodesBranch, dagEdgesBranch);
+
+        // 콘텐츠 폭/높이 계산 (레이블/리본 포함)
+        let minX = Number.POSITIVE_INFINITY;
+        let minY = Number.POSITIVE_INFINITY;
+        let maxX = Number.NEGATIVE_INFINITY;
+        let maxY = Number.NEGATIVE_INFINITY;
+        positions.forEach((p) => {
+          minX = Math.min(minX, p.x);
+          minY = Math.min(minY, p.y);
+          maxX = Math.max(maxX, p.x);
+          maxY = Math.max(maxY, p.y);
+        });
+        if (!Number.isFinite(minX)) {
+          minX = 0;
+          maxX = 0;
+          minY = 0;
+          maxY = 0;
+        }
+
+        // 반복 바디 전체 콘텐츠 높이: 가장 아래 노드 + 리본 고려
+        let contentHeight = maxY - minY + NODE_METRICS.collapsedHeight;
         children.forEach((c) => {
           if (startPathIds.has(c.pathId) || endPathIds.has(c.pathId)) {
-            bodyHeight += RIBBON_HEIGHT;
+            contentHeight += RIBBON_HEIGHT;
           }
         });
+
+        const contentWidth = maxX - minX + NODE_METRICS.width;
+        const bodyWidth = Math.max(
+          CONTAINER_MIN_WIDTH - CONTAINER_PADDING * 2,
+          contentWidth + CONTAINER_PADDING * 2
+        );
+        const bodyHeight = Math.max(0, contentHeight);
         const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
         const frameHeight =
           CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING * 2 + Math.max(0, bodyHeight);
@@ -343,19 +380,43 @@ function computeMonitorLayout(
             }
           ]
         });
-        let yCursor = bodyY;
+
+        // auto layout 좌표를 컨테이너 바디 안 중앙 정렬 되도록 오프셋
+        const regionCenterX = bodyX + bodyWidth / 2;
+        const contentBaseX = regionCenterX - contentWidth / 2;
+        const offsetY =
+          bodyY +
+          PARALLEL_REGION_LABEL_HEIGHT + // repeat도 상단 여백을 조금 두어 리본/포트와 겹치지 않게
+          CONTAINER_PADDING;
+
         children.forEach((child) => {
           const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
           const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
-          // 반복 컨테이너 안에서는 에디터 좌표 대신 컨테이너 기준으로 정렬
-          const childPos = { x: bodyX, y: yCursor };
+          const local = positions.get(child.pathId);
+          if (!local) {
+            const fallbackPos = {
+              x: regionCenterX - NODE_METRICS.width / 2,
+              y: offsetY
+            };
+            positionedNodes.push({
+              ...child,
+              status: cStatus,
+              durationMs: cDuration,
+              position: fallbackPos
+            });
+            return;
+          }
+
+          const childPos = {
+            x: contentBaseX + (local.x - minX),
+            y: offsetY + (local.y - minY)
+          };
           positionedNodes.push({
             ...child,
             status: cStatus,
             durationMs: cDuration,
             position: childPos
           });
-          yCursor += NODE_METRICS.collapsedHeight + CONTAINER_ROW_GAP;
         });
       } else {
         const branchCount = container.branchCount || 1;

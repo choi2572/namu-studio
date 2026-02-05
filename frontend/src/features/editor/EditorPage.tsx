@@ -2537,14 +2537,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   
   // 현재 workflow의 이름 가져오기
   useEffect(() => {
-    if (workflows) {
-      const currentWorkflow = workflows.find((w) => w.workflowId === workflowId);
-      if (currentWorkflow) {
-        setWorkflowName(currentWorkflow.name);
-        setOriginalWorkflowName(currentWorkflow.name);
-      }
-    }
-  }, [workflows, workflowId]);
+    if (!workflows) return;
+    const currentWorkflow = workflows.find((w) => w.workflowId === workflowId);
+    if (!currentWorkflow) return;
+    // 이미 에디터에서 이름을 설정한 경우에는 리스트 refetch로 덮어쓰지 않음
+    if (workflowName || originalWorkflowName) return;
+    setWorkflowName(currentWorkflow.name);
+    setOriginalWorkflowName(currentWorkflow.name);
+  }, [workflows, workflowId, workflowName, originalWorkflowName]);
 
   const getViewportCanvasSize = useCallback(() => {
     if (!containerRef.current) return CANVAS_DEFAULT;
@@ -3809,105 +3809,28 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const handleAutoLayout = () => {
     if (nodes.length === 0) return;
 
-    const spacingX = 320;
-    const rowGap = 60;
-    const padding = 80;
-    const inDegree = new Map<string, number>();
-    const outgoing = new Map<string, string[]>();
-    const containerIds = new Set(
-      nodes.filter(isContainerNode).map((node) => node.id)
-    );
-    const topLevelNodes = nodes.filter(
-      (node) => !node.containerId || !containerIds.has(node.containerId)
-    );
-    const topLevelNodeIds = new Set(topLevelNodes.map((node) => node.id));
-    const topLevelEdges = validEdges.filter(
-      (edge) => topLevelNodeIds.has(edge.from) && topLevelNodeIds.has(edge.to)
-    );
-
-    topLevelNodes.forEach((node) => {
-      inDegree.set(node.id, 0);
-      outgoing.set(node.id, []);
-    });
-
-    topLevelEdges.forEach((edge) => {
-      if (!inDegree.has(edge.to) || !outgoing.has(edge.from)) return;
-      inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
-      outgoing.get(edge.from)?.push(edge.to);
-    });
-
-    const queue = Array.from(inDegree.entries())
-      .filter(([, value]) => value === 0)
-      .map(([id]) => id);
-    const layers = new Map<string, number>();
-    queue.forEach((id) => layers.set(id, 0));
-
-    while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current) break;
-      const nextLayer = (layers.get(current) ?? 0) + 1;
-      outgoing.get(current)?.forEach((to) => {
-        layers.set(to, Math.max(layers.get(to) ?? 0, nextLayer));
-        inDegree.set(to, (inDegree.get(to) ?? 1) - 1);
-        if (inDegree.get(to) === 0) {
-          queue.push(to);
-        }
-      });
-    }
-
-    topLevelNodes.forEach((node) => {
-      if (!layers.has(node.id)) layers.set(node.id, 0);
-    });
-
-    const grouped = new Map<number, EditorNode[]>();
-    topLevelNodes.forEach((node) => {
-      const layer = layers.get(node.id) ?? 0;
-      const group = grouped.get(layer) ?? [];
-      group.push(node);
-      grouped.set(layer, group);
-    });
-
-    let requiredWidth = canvasBase.width;
-    let requiredHeight = canvasBase.height;
-    const nextPositions = new Map<string, { x: number; y: number }>();
-
-    Array.from(grouped.entries())
-      .sort(([a], [b]) => a - b)
-      .forEach(([layer, group]) => {
-        const sortedGroup = [...group].sort((a, b) =>
-          a.name.localeCompare(b.name)
-        );
-        let yCursor = padding;
-        sortedGroup.forEach((node) => {
-          const nodeHeight = effectiveNodeHeightMap.get(node.id) ?? getNodeHeight(node, nodeTypeConfig);
-          const x = padding + layer * spacingX;
-          const y = yCursor;
-          yCursor += nodeHeight + rowGap;
-          nextPositions.set(node.id, { x, y });
-          requiredWidth = Math.max(
-            requiredWidth,
-            x + NODE_METRICS.width + padding
-          );
-          requiredHeight = Math.max(requiredHeight, y + nodeHeight + padding);
-        });
-      });
-
-    setCanvasBase((prev) => ({
-      width: Math.max(prev.width, requiredWidth),
-      height: Math.max(prev.height, requiredHeight)
-    }));
+    // DSL import 시 사용하던 레이아웃 로직을 그대로 재사용:
+    // - 최상위 노드는 레이어 기반 좌→우 DAG
+    // - Repeat 컨테이너 안은 세로 / Parallel 브랜치 안은 가로 배치
+    const nextNodes = applyImportedLayout(nodes, validEdges, nodeTypeConfig);
 
     setNodes((prev) => {
-      const next = prev.map((node) => {
-        if (nextPositions.has(node.id)) {
-          return { ...node, position: nextPositions.get(node.id)! };
-        }
-        return node;
-      });
-      if (next !== prev) {
+      // 포지션이 실제로 변경된 경우에만 unsaved 플래그 설정
+      const changed =
+        prev.length !== nextNodes.length ||
+        prev.some((node, index) => {
+          const next = nextNodes[index];
+          return (
+            node.id !== next.id ||
+            node.position.x !== next.position.x ||
+            node.position.y !== next.position.y
+          );
+        });
+
+      if (changed) {
         setHasUnsavedChanges(true);
       }
-      return next;
+      return nextNodes;
     });
   };
 
