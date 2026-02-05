@@ -315,7 +315,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   }, [replayPlaying, events.length]);
 
   const handleCancel = async () => {
-    if (!snapshot) return;
+    const startedAt = snapshot?.run.startedAt ?? new Date().toISOString();
     try {
       await middlewareApi.runWorkflowCancel();
     } catch (e) {
@@ -351,7 +351,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
           eventId: `event-cancel-${nextSeq}`,
           runId,
           seq: nextSeq,
-          timestamp: getNextTimestamp(prev, snapshot.run.startedAt),
+          timestamp: getNextTimestamp(prev, startedAt),
           eventType: "RUN_CANCELED",
           payload: { source: "monitor" }
         }
@@ -674,8 +674,13 @@ export function MonitorPage({ runId }: MonitorPageProps) {
           <div
             ref={timelineRef}
             onScroll={() => {
-              if (!isReplayMode) {
-                setAutoScroll(false);
+              if (!isReplayMode && autoScroll && timelineRef.current) {
+                const el = timelineRef.current;
+                const isAtBottom =
+                  el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+                if (!isAtBottom) {
+                  setAutoScroll(false);
+                }
               }
             }}
             className="h-72 overflow-y-auto rounded-lg border border-slate-200"
