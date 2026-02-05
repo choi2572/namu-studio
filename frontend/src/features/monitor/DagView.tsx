@@ -77,6 +77,19 @@ const NODE_STATUS_STYLE_MAP: Record<NodeStatus, string> = {
   [NodeStatus.CANCELED]: "border-slate-400 bg-slate-100 opacity-60"
 };
 
+/** API에서 오는 status 문자열을 NodeStatus enum으로 정규화 (비교/스타일 일치용) */
+function toNodeStatus(s: string | NodeStatus | undefined): NodeStatus {
+  if (s == null || s === "") return NodeStatus.WAITING;
+  const u = String(s).toUpperCase();
+  if (u === NodeStatus.RUNNING) return NodeStatus.RUNNING;
+  if (u === NodeStatus.WAITING) return NodeStatus.WAITING;
+  if (u === NodeStatus.SUCCEEDED) return NodeStatus.SUCCEEDED;
+  if (u === NodeStatus.FAILED) return NodeStatus.FAILED;
+  if (u === NodeStatus.SKIPPED) return NodeStatus.SKIPPED;
+  if (u === NodeStatus.CANCELED) return NodeStatus.CANCELED;
+  return NodeStatus.WAITING;
+}
+
 // --- Monitor graph layout (containers always unfolded) ---
 type PositionedMonitorNode = MonitorNode & {
   status: NodeStatus;
@@ -734,7 +747,10 @@ export function DagView({
   const statusByApiStateName = useMemo(() => {
     const map = new Map<string, { status: NodeStatus; durationMs: number | null }>();
     nodeStates.forEach((n) => {
-      map.set(n.stateName, { status: n.status, durationMs: n.durationMs });
+      map.set(n.stateName, {
+        status: toNodeStatus(n.status as string | NodeStatus),
+        durationMs: n.durationMs ?? null
+      });
     });
     return map;
   }, [nodeStates]);

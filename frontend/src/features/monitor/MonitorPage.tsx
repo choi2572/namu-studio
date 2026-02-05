@@ -62,7 +62,9 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     queryFn: () => runsApi.getSnapshot(runId),
     refetchInterval: (query) => {
       const status = query.state.data?.run?.status;
-      return status === RunStatus.RUNNING || status === RunStatus.WAITING ? 1500 : false;
+      if (status == null) return 1500;
+      if (isRunTerminal(status as RunStatus)) return false;
+      return 1500;
     }
   });
 
@@ -70,9 +72,11 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     queryKey: ["run-events", runId],
     queryFn: () => runsApi.getEvents(runId, 0),
     refetchInterval: () => {
-      const snap = queryClient.getQueryData<{ run: { status: string } }>(["run-snapshot", runId]);
+      const snap = queryClient.getQueryData<{ run: { status?: string } }>(["run-snapshot", runId]);
       const status = snap?.run?.status;
-      return status === RunStatus.RUNNING || status === RunStatus.WAITING ? 1500 : false;
+      if (status == null) return 1500;
+      if (isRunTerminal(status as RunStatus)) return false;
+      return 1500;
     }
   });
 
@@ -270,10 +274,13 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     }));
   }, [workflowDraft]);
 
+  // 스냅샷이 있으면 즉시 사용(폴링 갱신이 한 렌더 지연 없이 DAG에 반영되도록)
+  const latestNodeStates = snapshot?.nodeStates ?? nodeStates;
+
   // 모든 노드가 nodeStates에 있는지 확인하고, 없으면 DSL에서 추가
   const allNodes = useMemo(() => {
     if (!workflowDraft?.dsl_json) {
-      return nodeStates;
+      return latestNodeStates;
     }
 
     const dsl = workflowDraft.dsl_json as {
@@ -282,19 +289,13 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     };
 
     if (!dsl.States) {
-      return nodeStates;
+      return latestNodeStates;
     }
 
     // DSL의 모든 state를 노드로 변환
     const dslNodes = Object.entries(dsl.States).map(([stateName, state]) => {
-      // nodeStates에서 이미 존재하는 노드 찾기
-      const existingNode = nodeStates.find((n) => n.stateName === stateName);
-      
-      if (existingNode) {
-        return existingNode;
-      }
-
-      // 존재하지 않으면 기본 노드 생성 (아직 실행되지 않은 노드)
+      const existingNode = latestNodeStates.find((n) => n.stateName === stateName);
+      if (existingNode) return existingNode;
       return {
         stateName,
         nodeName: (state.Label as string) || stateName,
@@ -303,24 +304,19 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       } as NodeStateSnapshot;
     });
 
-    // nodeStates에 있는 노드와 DSL 노드를 병합 (nodeStates 우선)
     const nodeMap = new Map<string, NodeStateSnapshot>();
-    dslNodes.forEach((node) => {
-      nodeMap.set(node.stateName, node);
-    });
-    nodeStates.forEach((node) => {
-      nodeMap.set(node.stateName, node);
-    });
+    dslNodes.forEach((node) => nodeMap.set(node.stateName, node));
+    latestNodeStates.forEach((node) => nodeMap.set(node.stateName, node));
 
     return Array.from(nodeMap.values());
-  }, [nodeStates, workflowDraft]);
+  }, [latestNodeStates, workflowDraft]);
 
   const selectedNodeState = useMemo(() => {
     if (!selectedNode) return null;
     if (monitorGraph) {
       const node = monitorGraph.nodes.find((n) => n.pathId === selectedNode);
       if (!node) return null;
-      const snap = nodeStates.find((n) => n.stateName === node.apiStateName);
+      const snap = latestNodeStates.find((n) => n.stateName === node.apiStateName);
       const typeDisplay = node.skillName ?? node.dslType ?? "Task";
       return {
         stateName: node.apiStateName,
@@ -331,7 +327,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       } as NodeStateSnapshot & { typeDisplay?: string };
     }
     return allNodes.find((n) => n.stateName === selectedNode) ?? null;
-  }, [selectedNode, monitorGraph, nodeStates, allNodes]);
+  }, [selectedNode, monitorGraph, latestNodeStates, allNodes]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
