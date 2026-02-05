@@ -146,7 +146,7 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
         node_type = (node_def.get("Type") or "").strip()
         seq = initial_seq
 
-        # Parallel = 컨테이너. NODE_STARTED/NODE_SUCCEEDED 없이 브랜치만 실행 후 Next로 진행.
+        # Expected: parallel_node_name NODE_STARTED → 브랜치 동시 실행 → 둘 다 끝나면 NODE_SUCCEEDED(duration) → Next
         has_branches = isinstance(node_def.get("Branches"), list) and len(node_def.get("Branches", [])) > 0
         if (node_type or "").lower() == "parallel" or has_branches:
             seq = self._execute_parallel(run_id, state_name, node_def, states, context, seq)
@@ -321,13 +321,14 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
         self,
         run_id: str,
         branch: Dict[str, Any],
-        seq: int
-    ) -> int:
-        """Run one Parallel branch: 각 상태를 실제 state_name으로 NODE_STARTED → 실행 → NODE_SUCCEEDED."""
+        seq_ref: List[int],
+        seq_lock: threading.Lock,
+    ) -> None:
+        """Run one Parallel branch in a thread; seq_ref[0] and seq_lock for serialized event seq."""
         branch_states = branch.get("States") or {}
         current = branch.get("StartAt")
         if not current or current not in branch_states:
-            return seq
+            return
         while current:
             state_def = branch_states.get(current)
             if not state_def:
@@ -343,8 +344,10 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
                 started_at=datetime.utcnow(),
                 input_json=state_def.get("Parameters") or {},
             )
-            self.node_run_repo.create(node_run)
-            seq += 1
+            with seq_lock:
+                self.node_run_repo.create(node_run)
+                seq_ref[0] += 1
+                seq = seq_ref[0]
             self._emit_event(run_id, "NODE_STARTED", current, {"node": current}, seq)
             time.sleep(0.5)
             node_run.status = NodeStatus.SUCCEEDED
@@ -352,12 +355,13 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
             node_run.duration_ms = 500
             node_run.output_json = {"result": "ok", "state": current}
             self.node_run_repo.update(node_run)
-            seq += 1
+            with seq_lock:
+                seq_ref[0] += 1
+                seq = seq_ref[0]
             self._emit_event(run_id, "NODE_SUCCEEDED", current, {"node": current}, seq)
             if state_def.get("End"):
                 break
             current = state_def.get("Next")
-        return seq
 
     def _execute_parallel(
         self,
@@ -368,10 +372,45 @@ class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
         context: Optional[Dict[str, Any]],
         seq: int
     ) -> int:
-        """Execute Parallel: 브랜치만 순차 실행(각 브랜치 내 노드는 실제 state_name으로). Parallel 자체는 NODE_STARTED/SUCCEEDED 없음."""
+        """Parallel: NODE_STARTED → 브랜치 동시 실행 → NODE_SUCCEEDED(duration) → return seq for Next."""
         branches = node_def.get("Branches", [])
-        for branch in branches:
-            seq = self._run_branch(run_id, branch, seq)
+        node_run_id = f"{run_id}-{state_name}"
+        parallel_node_run = NodeRun(
+            node_run_id=node_run_id,
+            run_id=run_id,
+            state_name=state_name,
+            node_type="Parallel",
+            status=NodeStatus.RUNNING,
+            started_at=datetime.utcnow(),
+            input_json={},
+        )
+        self.node_run_repo.create(parallel_node_run)
+        seq += 1
+        self._emit_event(run_id, "NODE_STARTED", state_name, {"node": state_name}, seq)
+        parallel_start = datetime.utcnow()
+
+        seq_ref = [seq]
+        seq_lock = threading.Lock()
+        threads = [
+            threading.Thread(target=self._run_branch, args=(run_id, b, seq_ref, seq_lock))
+            for b in branches
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        parallel_end = datetime.utcnow()
+        duration_ms = int((parallel_end - parallel_start).total_seconds() * 1000)
+        parallel_node_run.status = NodeStatus.SUCCEEDED
+        parallel_node_run.finished_at = parallel_end
+        parallel_node_run.duration_ms = duration_ms
+        parallel_node_run.output_json = {"branches": len(branches), "result": "all_succeeded"}
+        self.node_run_repo.update(parallel_node_run)
+        with seq_lock:
+            seq_ref[0] += 1
+            seq = seq_ref[0]
+        self._emit_event(run_id, "NODE_SUCCEEDED", state_name, {"node": state_name, "branches": len(branches)}, seq)
         return seq
     
     def _execute_wait(

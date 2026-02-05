@@ -195,21 +195,80 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         branches_raw = state_def.get("Branches")
         is_parallel = (stype or "").lower() == "parallel" or (isinstance(branches_raw, list) and len(branches_raw or []) > 0)
         if is_parallel:
-            # Parallel = 컨테이너. NODE_STARTED/NODE_SUCCEEDED 절대 보내지 않음. 브랜치만 순차 실행 후 Next로 진행.
+            # Expected: parallel_node_name NODE_STARTED → 브랜치들 동시 실행 → 둘 다 끝나면 parallel_node_name NODE_SUCCEEDED(duration) → Next
             branches = list(branches_raw) if isinstance(branches_raw, list) else []
-            for branch in branches:
-                with _state["lock"]:
-                    if _state["cancelled"]:
-                        break
-                for name, def_ in get_branch_order(deepcopy(branch)):
-                    with _state["lock"]:
-                        if _state["cancelled"]:
-                            break
-                    _run_one_node(workflow_id, name, def_, total_duration_ms_ref)
-                total_duration_ms_ref[0] += 2000
+            parallel_start = _now_iso()
             with _state["lock"]:
                 if _state["cancelled"]:
                     break
+                _state["current_node"] = state_name
+                _state["updated_at"] = parallel_start
+            _broadcast({
+                "type": "node_status_change",
+                "workflow_id": workflow_id,
+                "timestamp": parallel_start,
+                "node_name": state_name,
+                "prev_status": "IDLE",
+                "status": "RUNNING",
+                "input": {},
+            })
+            with _state["lock"]:
+                _state["node_history"].append({
+                    "node_name": state_name,
+                    "status": "RUNNING",
+                    "started_at": parallel_start,
+                    "completed_at": None,
+                    "duration_ms": None,
+                    "input": {},
+                    "output": None,
+                })
+                _state["updated_at"] = parallel_start
+
+            def run_branch(branch: Dict[str, Any]) -> None:
+                for name, def_ in get_branch_order(deepcopy(branch)):
+                    with _state["lock"]:
+                        if _state["cancelled"]:
+                            return
+                    _run_one_node(workflow_id, name, def_, total_duration_ms_ref)
+
+            threads = [threading.Thread(target=run_branch, args=(deepcopy(b),)) for b in branches]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            with _state["lock"]:
+                if _state["cancelled"]:
+                    break
+            parallel_end = _now_iso()
+            try:
+                a = datetime.fromisoformat(parallel_start.replace("Z", "+00:00"))
+                b = datetime.fromisoformat(parallel_end.replace("Z", "+00:00"))
+                duration_ms = int((b - a).total_seconds() * 1000)
+            except Exception:
+                duration_ms = 2000 * max(len(branches), 1)
+            output = {"result": "ok", "branches": len(branches)}
+            _broadcast({
+                "type": "node_status_change",
+                "workflow_id": workflow_id,
+                "timestamp": parallel_end,
+                "node_name": state_name,
+                "prev_status": "RUNNING",
+                "status": "SUCCESS",
+                "output": output,
+                "duration_ms": duration_ms,
+            })
+            with _state["lock"]:
+                for n in _state["node_history"]:
+                    if n.get("node_name") == state_name:
+                        n["status"] = "SUCCESS"
+                        n["completed_at"] = parallel_end
+                        n["duration_ms"] = duration_ms
+                        n["output"] = output
+                        break
+                _state["current_node"] = None
+                _state["updated_at"] = parallel_end
+            total_duration_ms_ref[0] += duration_ms
             continue
 
         _run_one_node(workflow_id, state_name, state_def, total_duration_ms_ref)
