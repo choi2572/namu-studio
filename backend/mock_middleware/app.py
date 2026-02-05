@@ -192,9 +192,11 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                 break
 
         stype = (state_def.get("Type") or "").strip()
-        if stype == "Parallel":
-            # Type Parallel = 컨테이너. 실행되는 건 안에 있는 두 브랜치뿐. Parallel 상태 이름으로 이벤트 안 보냄.
-            branches = state_def.get("Branches") or []
+        branches_raw = state_def.get("Branches")
+        is_parallel = stype == "Parallel" or (isinstance(branches_raw, list) and len(branches_raw) > 0)
+        if is_parallel:
+            # Parallel = 컨테이너. NODE_STARTED/NODE_SUCCEEDED 보내지 않음. 브랜치만 실행 후 Next로 진행.
+            branches = branches_raw if isinstance(branches_raw, list) else []
             # 각 브랜치를 복사해 스레드별로 전달 (참조 공유로 인한 오동작 방지)
             branch_copies = [deepcopy(b) for b in branches]
 

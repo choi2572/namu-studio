@@ -165,6 +165,10 @@ def _apply_initial_to_db(
             )
         )
 
+    # 기존에 이미 NODE_STARTED가 있는 노드 집합 (node_status_change 중복 방지)
+    existing_events = run_event_repo.get_by_run(run_id)
+    already_has_started = {e.state_name for e in existing_events if e.event_type == "NODE_STARTED" and e.state_name}
+
     for item in node_history:
         node_name = item.get("node_name") or item.get("name")
         if not node_name:
@@ -205,8 +209,34 @@ def _apply_initial_to_db(
                 )
             )
 
-        # Do not emit per-node events here to avoid duplicates with node_status_change.
-        # Timeline will be populated by subsequent WS events.
+        # initial 수신 시 이미 완료된 노드는 타임라인에 NODE_STARTED/NODE_SUCCEEDED 보정 (WS 연결 지연으로 놓친 이벤트)
+        if node_name not in already_has_started:
+            seq = (run_event_repo.get_max_seq(run_id) or 0) + 1
+            run_event_repo.create(
+                RunEvent(
+                    event_id=str(uuid.uuid4()),
+                    run_id=run_id,
+                    seq=seq,
+                    timestamp=started_at or run.started_at or datetime.utcnow(),
+                    event_type="NODE_STARTED",
+                    state_name=node_name,
+                    payload_json={"input": input_json},
+                )
+            )
+            already_has_started.add(node_name)
+            if status_str == "SUCCESS" and completed_at is not None:
+                seq = (run_event_repo.get_max_seq(run_id) or 0) + 1
+                run_event_repo.create(
+                    RunEvent(
+                        event_id=str(uuid.uuid4()),
+                        run_id=run_id,
+                        seq=seq,
+                        timestamp=completed_at,
+                        event_type="NODE_SUCCEEDED",
+                        state_name=node_name,
+                        payload_json={"output": output_json, "duration_ms": duration_ms},
+                    )
+                )
 
 
 def _apply_node_status_change(
@@ -248,17 +278,21 @@ def _apply_node_status_change(
             existing.started_at = ts
             existing.input_json = payload.get("input") or existing.input_json
             node_run_repo.update(existing)
-        run_event_repo.create(
-            RunEvent(
-                event_id=str(uuid.uuid4()),
-                run_id=run_id,
-                seq=seq,
-                timestamp=ts,
-                event_type="NODE_STARTED",
-                state_name=node_name,
-                payload_json={"input": payload.get("input")},
+        # initial 보정으로 이미 NODE_STARTED가 있으면 중복 생성 안 함
+        existing_events = run_event_repo.get_by_run(run_id)
+        has_started = any(e.state_name == node_name and e.event_type == "NODE_STARTED" for e in existing_events)
+        if not has_started:
+            run_event_repo.create(
+                RunEvent(
+                    event_id=str(uuid.uuid4()),
+                    run_id=run_id,
+                    seq=seq,
+                    timestamp=ts,
+                    event_type="NODE_STARTED",
+                    state_name=node_name,
+                    payload_json={"input": payload.get("input")},
+                )
             )
-        )
     elif status == "SUCCESS":
         output = payload.get("output")
         duration_ms = payload.get("duration_ms")
