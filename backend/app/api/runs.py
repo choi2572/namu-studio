@@ -163,11 +163,20 @@ def get_snapshot(run_id: str):
 
 @bp.route("/<run_id>/nodes/<state_name>/debug", methods=["GET"])
 def get_node_debug(run_id: str, state_name: str):
-    """Get node debug bundle."""
+    """Get node debug bundle. Returns empty bundle when node has no execution data yet."""
     debug = _run_service.get_node_debug(run_id, state_name)
     if not debug:
-        raise NotFound(f"Node debug not found for run {run_id}, state {state_name}")
-    
+        return jsonify({
+            "runId": run_id,
+            "stateName": state_name,
+            "nodeName": state_name,
+            "status": None,
+            "durationMs": None,
+            "input": None,
+            "output": None,
+            "feedback": None,
+            "decision": None,
+        })
     return jsonify(debug)
 
 

@@ -57,13 +57,15 @@ export function parallelBranchPathId(parallelStateName: string, branchIndex: num
 }
 
 /**
- * API stateName used for getNodeDebug(runId, stateName).
- * Top-level: stateName; nested: full pathId so backend can support path-based lookup later.
+ * API stateName used for getNodeDebug(runId, stateName) and status lookup.
+ * Backend stores node_runs by flat state name (e.g. "CheckCondition", "Branch1Start").
+ * Top-level: segments[1]; nested (e.g. parallel branch): last segment.
  */
 export function pathIdToApiStateName(pathId: string): string {
   const segments = parsePathId(pathId);
+  if (segments.length === 0) return pathId;
   if (segments.length <= 2 && segments[0] === NODE_PATH.ROOT) {
     return segments[1] ?? pathId;
   }
-  return pathId;
+  return segments[segments.length - 1] ?? pathId;
 }
