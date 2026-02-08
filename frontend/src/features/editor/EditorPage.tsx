@@ -1349,10 +1349,23 @@ function expandContainerFrameForNodes(
     CONTAINER_FRAME_METRICS.padding * 2 +
     maxNodes * (nodeVisualHeight + CONTAINER_LAYOUT.rowGap) -
     CONTAINER_LAYOUT.rowGap +
-    // 컨테이너 Body 하단에 여유 공간
     CONTAINER_LAYOUT.padding;
 
-  if (containerType === "parallel") {
+  if (containerType === "repeat") {
+    // Repeat body: 노드 가로 배치 → 폭은 노드 수에 비례, 높이는 한 줄
+    requiredWidth = Math.max(
+      CONTAINER_FRAME_DEFAULTS.width,
+      CONTAINER_FRAME_METRICS.padding * 2 +
+        maxNodes * (NODE_METRICS.width + CONTAINER_LAYOUT.columnGap) -
+        CONTAINER_LAYOUT.columnGap +
+        CONTAINER_LAYOUT.padding
+    );
+    requiredHeight =
+      CONTAINER_FRAME_METRICS.headerHeight +
+      CONTAINER_FRAME_METRICS.padding * 2 +
+      nodeVisualHeight +
+      CONTAINER_LAYOUT.padding;
+  } else if (containerType === "parallel") {
     // Parallel: 브랜치는 세로 스택, 각 브랜치 안에서 노드들은 가로로 배치.
     // - 가로(width): 어떤 브랜치든 가장 많은 노드 수 기준으로 계산
     // - 세로(height): 브랜치 수 * 노드 높이 (+ 브랜치 간 rowGap)
@@ -1433,7 +1446,7 @@ function applyImportedLayout(
         bodyEdges,
         layout.regions[0],
         nodeTypeConfig,
-        "vertical"
+        "horizontal"
       );
       nextNodes = nextNodes.map((node) =>
         positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node
