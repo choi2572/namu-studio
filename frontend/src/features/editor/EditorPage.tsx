@@ -225,6 +225,16 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
   }
 };
 
+/** skill 노드 kind: skill.${namespace}.${name} */
+function getSkillNodeKind(skillset: import("@/domain/types").Skillset): NodeKind {
+  return `skill.${skillset.namespace}.${skillset.name}` as NodeKind;
+}
+
+/** 에디터에서 표시할 타입 문자열 (namespace.name) */
+function getSkillDisplayType(skillset: import("@/domain/types").Skillset): string {
+  return `${skillset.namespace}.${skillset.name}`;
+}
+
 // Skillset 기반으로 노드 타입 설정 생성
 function createNodeTypeConfigFromSkillset(skillset: import("@/domain/types").Skillset): NodeTypeConfig {
   const skillName = skillset.name;
@@ -272,7 +282,7 @@ function createNodeTypeConfigFromSkillsets(
   const config: Record<string, NodeTypeConfig> = { ...STATIC_NODE_TYPE_CONFIG };
   
   skillsets.forEach((skillset) => {
-    const nodeKind = `skill.${skillset.name}` as NodeKind;
+    const nodeKind = getSkillNodeKind(skillset);
     config[nodeKind] = createNodeTypeConfigFromSkillset(skillset);
   });
   
@@ -1939,9 +1949,9 @@ function NodeCard({
     ? "Condition" 
     : NODE_CATEGORY_LABELS[config.category];
 
-  // 툴팁 내용 생성
+  // 툴팁 내용 생성 (type은 namespace.name 형태로 표시)
   const tooltipContent = skillset
-    ? `${skillset.name} (${skillset.version})\nType: ${node.kind}\n\n${skillset.description}`
+    ? `${skillset.name} (${skillset.version})\nType: ${getSkillDisplayType(skillset)}\n\n${skillset.description}`
     : node.kind;
 
   const showStartRibbon =
@@ -2173,10 +2183,10 @@ function NodeCard({
             </span>
           </div>
 
-          {/* Skill 노드: 펼쳤을 때 실제 Skill 이름도 노출 */}
+          {/* Skill 노드: 펼쳤을 때 타입을 namespace.name 형태로 노출 */}
           {skillset && node.isExpanded && (
-            <div className="mb-1 text-[10px] text-slate-500 truncate" title={skillset.name}>
-              {skillset.name}
+            <div className="mb-1 text-[10px] text-slate-500 truncate" title={getSkillDisplayType(skillset)}>
+              {getSkillDisplayType(skillset)}
             </div>
           )}
 
@@ -2529,12 +2539,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     return createNodeTypeConfigFromSkillsets(skillsetsResponse.skillsets);
   }, [skillsetsResponse]);
 
-  // Skillset 정보를 노드 kind로 매핑
+  // Skillset 정보를 노드 kind로 매핑 (key: skill.namespace.name). 레거시 kind "skill.name"도 name으로 조회 가능하도록 보조 맵 사용
   const skillsetMap = useMemo(() => {
     if (!skillsetsResponse) return new Map<string, import("@/domain/types").Skillset>();
     const map = new Map<string, import("@/domain/types").Skillset>();
     skillsetsResponse.skillsets.forEach((skillset) => {
-      map.set(`skill.${skillset.name}`, skillset);
+      const key = getSkillNodeKind(skillset);
+      map.set(key, skillset);
+      // 레거시: skill.name 형태로 저장된 드래프트도 조회 가능
+      const legacyKey = `skill.${skillset.name}`;
+      if (!map.has(legacyKey)) map.set(legacyKey, skillset);
     });
     return map;
   }, [skillsetsResponse]);
@@ -2553,7 +2567,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       "event.webhook"
     ];
     const skillTypes: NodeKind[] = skillsetsResponse?.skillsets.map(
-      (s) => `skill.${s.name}` as NodeKind
+      (s) => getSkillNodeKind(s)
     ) ?? [];
     return [...skillTypes, ...staticTypes];
   }, [skillsetsResponse]);
@@ -3485,13 +3499,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setHasUnsavedChanges(false);
   };
 
-  const handleCancel = () => {
-    setDraftOverride(draft ?? null);
-    applyDraftToEditor(draft ?? null);
-    setSelectedNode(null);
-    setHasUnsavedChanges(false);
-  };
-
   const handlePublish = () => {
     if (hasErrors) return;
     setShowPublishConfirm(true);
@@ -4236,9 +4243,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           <Button variant="secondary" onClick={handleAutoLayout}>
             Auto Layout
           </Button>
-          <Button variant="secondary" onClick={handleCancel}>
-            Cancel
-          </Button>
           <Button variant="secondary" onClick={handleSave}>
             Save
           </Button>
@@ -4307,7 +4311,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       </div>
                       <div className="flex-1">
                         <p className="text-xs font-semibold">{config.label}</p>
-                        <p className="text-[10px] text-slate-500">{kind}</p>
+                        <p className="text-[10px] text-slate-500">
+                          {kind.startsWith("skill.") ? kind.replace("skill.", "") : kind}
+                        </p>
                       </div>
                       <span className="text-[10px] text-slate-400">Drag</span>
                     </button>

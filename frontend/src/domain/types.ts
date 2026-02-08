@@ -103,6 +103,7 @@ export type SkillOutput = {
 };
 
 export type Skillset = {
+  namespace: string;
   name: string;
   version: string;
   description: string;

@@ -527,6 +527,7 @@ export const mockSkillsetsApi: SkillsetsApi = {
     const skillsets: SkillsetsResponse = {
       skillsets: [
         {
+          namespace: "default",
           name: "PickObject",
           version: "0.0.1",
           description: "Pick an object from a target location",
@@ -557,6 +558,7 @@ export const mockSkillsetsApi: SkillsetsApi = {
           ]
         },
         {
+          namespace: "default",
           name: "PlaceObject",
           version: "0.0.1",
           description: "Place an object at a destination location",
@@ -591,6 +593,7 @@ export const mockSkillsetsApi: SkillsetsApi = {
           ]
         },
         {
+          namespace: "default",
           name: "MoveObject",
           version: "0.0.1",
           description: "Move an object from one location to another",

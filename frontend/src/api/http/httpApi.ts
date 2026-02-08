@@ -3,6 +3,7 @@ import {
   RunEvent,
   RunStatus,
   RunSummary,
+  SkillsetsResponse,
   ValidationError,
   WorkflowDraft,
   WorkflowListItem,
@@ -14,6 +15,7 @@ import {
   RunListFilters,
   RunSnapshot,
   RunsApi,
+  SkillsetsApi,
   WorkflowsApi,
   WorkflowRunResponse
 } from "@/api/interfaces";
@@ -164,6 +166,15 @@ export const httpWorkflowsApi: WorkflowsApi = {
       const errorText = await response.text().catch(() => response.statusText);
       throw new Error(`API error: ${response.status} ${errorText}`);
     }
+  }
+};
+
+export const httpSkillsetsApi: SkillsetsApi = {
+  async list(): Promise<SkillsetsResponse> {
+    const url = getApiUrl("/vi1/skill-sets");
+    logApiCall("GET", url);
+    const response = await fetch(url);
+    return handleResponse<SkillsetsResponse>(response);
   }
 };
 

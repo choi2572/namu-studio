@@ -372,9 +372,71 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         })
 
 
+# Mock skill-sets for GET /api/vi1/skill-sets (name, version, description, namespace + parameters, outputs, etc.)
+MOCK_SKILL_SETS = {
+    "skillsets": [
+        {
+            "namespace": "default",
+            "name": "PickObject",
+            "version": "0.0.1",
+            "description": "Pick an object from a target location",
+            "parameters": {
+                "target_object": {"type": "string", "description": "The target object identifier to pick"},
+                "location": {"type": "string", "description": "The location where the object is located"},
+            },
+            "outputs": {
+                "object_weight": {"type": "int", "description": "The weight of the picked object in grams"},
+            },
+            "feedback": [],
+            "pre_conditions": ["Object must be visible", "Gripper must be ready"],
+            "post_effects": ["Object is held by gripper", "Location is now empty"],
+        },
+        {
+            "namespace": "default",
+            "name": "PlaceObject",
+            "version": "0.0.1",
+            "description": "Place an object at a destination location",
+            "parameters": {
+                "target_object": {"type": "string", "description": "The object identifier to place"},
+                "destination": {"type": "string", "description": "The destination location identifier"},
+                "orientation": {"type": "string", "description": "The orientation of the object (north, south, east, west)"},
+            },
+            "outputs": {
+                "placement_success": {"type": "bool", "description": "Whether the placement was successful"},
+            },
+            "feedback": [],
+            "pre_conditions": ["Object must be held by gripper", "Destination must be available"],
+            "post_effects": ["Object is placed at destination", "Gripper is now empty"],
+        },
+        {
+            "namespace": "default",
+            "name": "MoveObject",
+            "version": "0.0.1",
+            "description": "Move an object from one location to another",
+            "parameters": {
+                "target_object": {"type": "string", "description": "The object identifier to move"},
+                "source_location": {"type": "string", "description": "The source location identifier"},
+                "target_location": {"type": "string", "description": "The target location identifier"},
+            },
+            "outputs": {
+                "move_distance": {"type": "float", "description": "The distance moved in meters"},
+                "move_duration": {"type": "int", "description": "The time taken to move in milliseconds"},
+            },
+            "feedback": [],
+            "pre_conditions": ["Object must exist at source location", "Target location must be available"],
+            "post_effects": ["Object is now at target location", "Source location is now empty"],
+        },
+    ]
+}
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     CORS(app)
+
+    @app.route("/api/vi1/skill-sets", methods=["GET"])
+    def skill_sets():
+        return jsonify(MOCK_SKILL_SETS)
 
     @app.route("/api/v1/runner/status", methods=["GET"])
     def runner_status():
