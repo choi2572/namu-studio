@@ -27,8 +27,10 @@ const PADDING = 80;
 
 // Monitor container frame (read-only) — editor와 동일한 구조: 노드 아래에 프레임
 const CONTAINER_HEADER_HEIGHT = 28;
-const CONTAINER_PADDING = 12;
+const CONTAINER_PADDING = 20;
 const CONTAINER_ROW_GAP = 24;
+/** Repeat/컨테이너 안쪽 여백 — 노드와 경계선 사이 추가 간격 */
+const CONTAINER_INNER_MARGIN = 24;
 const CONTAINER_NODE_OFFSET_Y = 45; // 노드 카드와 unfolding 프레임 사이 간격 (겹침 방지)
 const CONTAINER_MIN_WIDTH = 280;
 const CONTAINER_MIN_HEIGHT = 120;
@@ -353,9 +355,9 @@ function computeMonitorLayout(
         const contentWidth = maxX - minX + NODE_METRICS.width;
         const bodyWidth = Math.max(
           CONTAINER_MIN_WIDTH - CONTAINER_PADDING * 2,
-          contentWidth + CONTAINER_PADDING * 2
+          contentWidth + CONTAINER_PADDING * 2 + CONTAINER_INNER_MARGIN
         );
-        const bodyHeight = Math.max(0, contentHeight);
+        const bodyHeight = Math.max(0, contentHeight + CONTAINER_INNER_MARGIN);
         const frameWidth = bodyWidth + CONTAINER_PADDING * 2;
         const frameHeight =
           CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING * 2 + Math.max(0, bodyHeight);
