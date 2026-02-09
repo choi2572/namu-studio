@@ -26,10 +26,11 @@ def create_app(config_class=Config):
     register_error_handlers(app)
     
     # Register blueprints
-    from app.api import workflows, runs, capabilities
+    from app.api import workflows, runs, capabilities, middleware_proxy
     app.register_blueprint(workflows.bp, url_prefix="/api/workflows")
     app.register_blueprint(runs.bp, url_prefix="/api/runs")
     app.register_blueprint(capabilities.bp, url_prefix="/api/capabilities")
+    app.register_blueprint(middleware_proxy.bp, url_prefix="/api/v1")
 
     if _should_seed(app):
         from app.seed import seed_data

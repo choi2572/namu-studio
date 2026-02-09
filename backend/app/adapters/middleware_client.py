@@ -104,6 +104,10 @@ class MiddlewareClient:
             {"request_type": "cancel"},
         )
 
+    def workflows_run(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/v1/workflows/run — forward request body (start/cancel)."""
+        return self._request("POST", "/api/v1/workflows/run", body=body)
+
     def get_workflow_info(self, workflow_id: str) -> Dict[str, Any]:
         """GET /api/v1/workflows/{workflow_id} (workflow information)."""
         return self._request(
