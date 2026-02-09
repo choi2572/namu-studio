@@ -1,112 +1,105 @@
 # Frontend
 
-Next.js 기반 프론트엔드 애플리케이션입니다.
+Next.js frontend for namu-studio: Dashboard, Workflow Editor, Run Monitor, and Run History.
 
-## 설치
+## Prerequisites
+
+- Node.js
+- npm (or yarn/pnpm)
+
+## Install
 
 ```bash
 cd frontend
 npm install
 ```
 
-## 실행
+## Run
 
-### 1. 백엔드 서버 시작
+### Option A: With backend (recommended)
 
-먼저 백엔드 서버를 시작해야 합니다:
+1. Start the backend (from project root):
 
-```bash
-# 다른 터미널에서
-cd backend
-pip install -r requirements.txt
-python run.py
-```
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   python run.py
+   ```
 
-백엔드 서버는 `http://localhost:5000`에서 실행됩니다.
+   Backend: **http://localhost:5000**
 
-### 2. 프론트엔드 서버 시작
+2. Start the frontend:
 
-```bash
-cd frontend
-npm run dev
-```
+   ```bash
+   cd frontend
+   npm run dev
+   ```
 
-애플리케이션은 `http://localhost:3000`에서 실행됩니다.
+   App: **http://localhost:3000**
 
-## 환경 변수 설정
+### Option B: Mock API only (no backend)
 
-프론트엔드는 환경 변수를 통해 API 연결을 제어합니다. `.env.local` 파일을 생성하여 설정하세요:
+1. Set `NEXT_PUBLIC_USE_MOCK_API=true` (see [Environment variables](#environment-variables)).
+2. Start the frontend:
+
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+   App: **http://localhost:3000**. Data is stored in browser local storage.
+
+## Environment variables
+
+Create `.env.local` in the `frontend` directory (or copy from `.env.example`):
 
 ```env
-# Mock API 사용 여부 (true: mock 사용, false 또는 미설정: 실제 HTTP API 사용)
+# Use mock API (true) or real HTTP API (false). Default: false
 NEXT_PUBLIC_USE_MOCK_API=false
 
-# 백엔드 API Base URL (USE_MOCK_API=false일 때 사용)
+# Backend API base URL when using real API (no trailing slash)
 NEXT_PUBLIC_API_BASE_URL=http://localhost:5000/api
 ```
 
-### 환경 변수 설명
+| Variable | Description |
+|----------|-------------|
+| `NEXT_PUBLIC_USE_MOCK_API` | `true`: mock adapter (no backend). `false` or unset: HTTP adapter (backend required). |
+| `NEXT_PUBLIC_API_BASE_URL` | Base URL for backend API when not using mock. Only `NEXT_PUBLIC_*` vars are available in the browser. |
 
-- `NEXT_PUBLIC_USE_MOCK_API`: 
-  - `true`: Mock API 어댑터 사용 (백엔드 없이 개발 가능)
-  - `false` 또는 미설정: 실제 HTTP API 어댑터 사용 (백엔드 필요)
-  
-- `NEXT_PUBLIC_API_BASE_URL`: 
-  - 실제 HTTP API를 사용할 때의 백엔드 Base URL
-  - 기본값: `http://localhost:5000/api`
-  - Next.js에서 `NEXT_PUBLIC_` 접두사가 붙은 환경 변수만 클라이언트에서 접근 가능
-
-## 프로젝트 구조
+## Project structure
 
 ```
 src/
-  api/              # API 인터페이스 및 구현
-    interfaces.ts   # API 인터페이스 정의
-    factory.ts       # 환경 변수 기반 API 어댑터 팩토리
-    http/           # 실제 HTTP API 어댑터
-      httpApi.ts
-    mock/           # Mock API 어댑터
-      mockApi.ts
-      data.ts
-  components/       # 재사용 가능한 UI 컴포넌트
-  domain/           # DTOs, enums, 순수 로직
-  features/         # Dashboard, Editor, Monitor, History
-  lib/              # 유틸리티 (포맷팅, ids, 헬퍼)
-  tests/            # 도메인 + mock API 단위 테스트
+  api/           # API interface and adapters
+    interfaces.ts
+    factory.ts   # Chooses mock vs HTTP by env
+    http/        # Real HTTP client
+    mock/        # Mock adapter + seed data
+  app/           # Next.js app router (pages, layout)
+  components/    # Reusable UI components
+  domain/        # DTOs, enums, pure logic
+  features/      # Dashboard, Editor, Monitor, History
+  lib/           # Utilities (format, ids, helpers)
+  tests/         # Unit tests (domain, mock API)
 ```
 
-## API 어댑터 동작 방식
+## API adapter behavior
 
-프론트엔드는 환경 변수에 따라 자동으로 적절한 API 어댑터를 선택합니다:
+- **Mock mode** (`NEXT_PUBLIC_USE_MOCK_API=true`): No backend; data in local storage. Good for UI work and prototyping.
+- **HTTP mode** (`NEXT_PUBLIC_USE_MOCK_API=false`): All calls go to the backend. Use when backend is running.
 
-1. **Mock API 모드** (`USE_MOCK_API=true`):
-   - 백엔드 서버 없이 개발 가능
-   - 로컬 스토리지 기반 데이터 저장
-   - 빠른 프로토타이핑 및 UI 개발에 적합
+Both modes share the same interface, so you can switch without changing UI code.
 
-2. **HTTP API 모드** (`USE_MOCK_API=false`):
-   - 실제 Flask 백엔드와 통신
-   - 모든 API 호출이 백엔드로 전송됨
-   - 개발자 도구 콘솔에서 API 호출 로그 확인 가능
+## Scripts
 
-두 모드 모두 동일한 인터페이스를 제공하므로 UI 코드 변경 없이 전환 가능합니다.
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start dev server (default port 3000) |
+| `npm run build` | Production build |
+| `npm run start` | Run production server |
+| `npm run test` | Run tests (Vitest) |
 
-## 개발 팁
+## Tips
 
-### API 호출 로깅
-
-개발 모드에서는 모든 API 호출이 콘솔에 로깅됩니다:
-- `[API Factory]`: 사용 중인 어댑터 타입 및 Base URL
-- `[API]`: 각 HTTP 요청의 메서드, URL, 데이터
-
-### 백엔드 연결 확인
-
-1. 백엔드 서버가 실행 중인지 확인
-2. 브라우저 개발자 도구의 Network 탭에서 API 요청 확인
-3. 콘솔에서 `[API Factory]` 로그 확인
-
-## 테스트
-
-```bash
-npm run test
-```
+- In dev, API calls are logged to the console (`[API Factory]`, `[API]`).
+- Use the Network tab and console to verify backend connectivity when using HTTP mode.

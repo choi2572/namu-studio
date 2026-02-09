@@ -1,177 +1,137 @@
-# Backend API
+# Backend
 
-Flask 백엔드 API 서버입니다.
+Flask backend API for namu-studio: workflows, runs, capabilities, and optional middleware proxy.
 
-## 구조
+## Prerequisites
 
-```
-backend/
-  app/
-    __init__.py          # Flask app factory
-    config.py            # 설정
-    errors.py            # 에러 핸들러 (Problem+JSON)
-    api/                 # API 엔드포인트 (blueprints)
-      workflows.py       # Workflow APIs
-      runs.py            # Run APIs
-      capabilities.py    # Capabilities APIs
-    domain/              # 도메인 모델
-      models.py          # Dataclass 모델
-    services/            # 비즈니스 로직
-      workflow_service.py
-      run_service.py
-      validation.py
-    repos/               # 리포지토리
-      interfaces.py      # 인터페이스
-      memory.py          # In-memory 구현
-      sqlite.py          # SQLite 구현
-      registry.py        # 저장소 인스턴스 관리
-    db/                  # 데이터베이스 모듈 (SQLite)
-      __init__.py
-      connection.py      # 연결 관리
-      schema.py          # 스키마 및 마이그레이션
-    adapters/            # 외부 시스템 어댑터
-      execution_engine.py  # Dummy ExecutionEngineAdapter
-  tests/                 # 테스트
-  requirements.txt        # Python 의존성
-  run.py                 # 실행 스크립트
-```
+- Python 3.x
+- pip
 
-## 설치
+## Install
 
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-## 실행
+## Run
 
 ```bash
-# 방법 1: run.py 사용
+cd backend
 python run.py
+```
 
-# 방법 2: Flask CLI 사용
+Server runs at **http://localhost:5000** (host `0.0.0.0`, port 5000, debug on).
+
+Alternative:
+
+```bash
 export FLASK_APP=app
 flask run
+```
 
-# 방법 3: Python 모듈로 실행
+Or:
+
+```bash
 python -m app
 ```
 
-서버는 기본적으로 `http://localhost:5000`에서 실행됩니다.
+## Repository backend
 
-## 저장소 백엔드 설정
+| Backend | Env | Description |
+|---------|-----|-------------|
+| **In-memory** (default) | `REPO_BACKEND=inmemory` or unset | Data in memory; lost on restart. Good for dev/tests. |
+| **SQLite** | `REPO_BACKEND=sqlite` | Persistent DB file. Optional: `DB_PATH=./data/app.db` (default: `./data/app.db`). |
 
-백엔드는 두 가지 저장소 백엔드를 지원합니다:
+Seed data is loaded automatically in development (when `DEBUG` or `ENV=development`), or when `SEED_DATA=true`.
 
-### In-Memory (기본값)
-데이터는 메모리에만 저장되며 서버 재시작 시 사라집니다. 개발 및 테스트에 적합합니다.
+## Execution engine
+
+| Engine | Env | Description |
+|--------|-----|-------------|
+| **Dummy** (default) | `EXECUTION_ENGINE=dummy` or unset | Simulated execution; no external service. |
+| **Middleware** | `EXECUTION_ENGINE=middleware` | Calls real or mock middleware. Set `MIDDLEWARE_BASE_URL` (e.g. `http://localhost:8000` for mock). |
+
+Example with mock middleware:
 
 ```bash
-# 기본값 (명시적으로 설정하려면)
-export REPO_BACKEND=inmemory
+set EXECUTION_ENGINE=middleware
+set MIDDLEWARE_BASE_URL=http://localhost:8000
+set SEED_DATA=true
+set REPO_BACKEND=sqlite
 python run.py
 ```
 
-### SQLite
-데이터는 SQLite 데이터베이스 파일에 영구 저장됩니다.
+(Linux/macOS: use `export` instead of `set`.)
 
-```bash
-# SQLite 사용
-export REPO_BACKEND=sqlite
-export DB_PATH=./data/app.db  # 선택사항 (기본값: ./data/app.db)
-python run.py
+## Project structure
+
+```
+backend/
+  app/
+    __init__.py       # Flask app factory
+    config.py         # Configuration
+    errors.py         # Problem+JSON error handlers
+    api/              # Blueprints
+      workflows.py    # Workflow CRUD, draft, validate, publish
+      runs.py         # Run start, cancel, snapshot, events, resume
+      capabilities.py # Skills, skill-set, health
+      middleware_proxy.py  # Proxy to middleware (/api/v1/...)
+    domain/           # Domain models
+    services/         # Workflow and run services
+    repos/            # In-memory and SQLite repositories
+    db/               # SQLite connection and schema
+    adapters/         # Execution (dummy, middleware)
+  tests/
+  requirements.txt
+  run.py
+  mock_middleware/    # Mock middleware server (see mock_middleware/README.md)
 ```
 
-**시드 데이터:**  
-개발(DEBUG) 모드에서는 **시드 데이터가 자동으로 로드**됩니다 (샘플 워크플로·Run). 시드만 쓰고 싶을 때는 `SEED_DATA=true`로 명시해도 됩니다.
+## API specification
 
-**SQLite 설정:**
-- `REPO_BACKEND=sqlite`: SQLite 백엔드 활성화
-- `DB_PATH`: 데이터베이스 파일 경로 (기본값: `./data/app.db`)
-- `SEED_DATA=true`: 시드 데이터 강제 로드 (개발 모드에서는 기본으로 켜짐)
+All backend APIs use the `/api` prefix. Errors use **Problem+JSON** (RFC 7807).
 
-**SQLite PRAGMA 설정:**
-- `journal_mode=WAL`: Write-Ahead Logging 활성화
-- `foreign_keys=ON`: 외래 키 제약 조건 활성화
-- `synchronous=NORMAL`: 성능과 안정성 균형
-- `busy_timeout=5000`: 동시 접근 대기 시간 (5초)
+### Workflows — `/api/workflows`
 
-**데이터베이스 파일 위치:**
-- 기본값: `./data/app.db` (프로젝트 루트의 `data` 디렉토리)
-- 프로덕션 권장: `/var/lib/<app>/app.db` 또는 환경 변수로 지정
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/workflows` | List workflows (id, name, state, latestVersion, latestRun). |
+| `POST` | `/api/workflows` | Create workflow. Body: `name`, optional `description`. |
+| `GET` | `/api/workflows/<workflow_id>` | Get workflow metadata. |
+| `PATCH` | `/api/workflows/<workflow_id>` | Update name/description only. |
+| `DELETE` | `/api/workflows/<workflow_id>` | Delete workflow and related data. |
+| `GET` | `/api/workflows/<workflow_id>/draft` | Get draft (DSL + view). |
+| `PUT` | `/api/workflows/<workflow_id>/draft` | Save draft. Body: `dsl_json`, `view_json`. |
+| `POST` | `/api/workflows/<workflow_id>/validate` | Validate draft; returns list of errors. |
+| `POST` | `/api/workflows/<workflow_id>/publish` | Publish validated draft. Workflow must be validated; only one active run per workflow. |
 
-**마이그레이션:**
-- 앱 시작 시 자동으로 스키마 버전을 확인하고 필요한 마이그레이션을 적용합니다.
-- 간단한 버전 테이블(`schema_version`)을 사용하여 마이그레이션을 관리합니다.
+### Runs — `/api/runs`
 
-## API 엔드포인트
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/runs` | List runs. Query: `status`, `workflowId`, `timeRange`. |
+| `POST` | `/api/runs` | Start run. Body: `workflowId` (required), optional `runInput`. Workflow must be published. |
+| `GET` | `/api/runs/<run_id>` | Get run summary. |
+| `POST` | `/api/runs/<run_id>/cancel` | Cancel run. |
+| `GET` | `/api/runs/<run_id>/snapshot` | Run snapshot for monitoring (metadata, nodes, timing). |
+| `GET` | `/api/runs/<run_id>/nodes/<state_name>/debug` | Node debug bundle (input, output, feedback, decision). |
+| `GET` | `/api/runs/<run_id>/events` | Run events. Query: `afterSeq` for pagination. |
+| `POST` | `/api/runs/<run_id>/resume` | Resume waiting node. Body: `stateName`, optional `payload`. |
 
-모든 API는 `/api` prefix를 사용합니다.
+### Capabilities — `/api/capabilities`
 
-### Workflows
-- `GET /api/workflows` - 워크플로우 목록
-- `POST /api/workflows` - 워크플로우 생성
-- `GET /api/workflows/<workflow_id>` - 워크플로우 조회
-- `PATCH /api/workflows/<workflow_id>` - 워크플로우 메타데이터 업데이트
-- `GET /api/workflows/<workflow_id>/draft` - 드래프트 조회
-- `PUT /api/workflows/<workflow_id>/draft` - 드래프트 저장
-- `POST /api/workflows/<workflow_id>/validate` - 드래프트 검증
-- `POST /api/workflows/<workflow_id>/publish` - 워크플로우 발행
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/capabilities/skills` | List skills (dummy list; name, version, parameterSchema). |
+| `GET` | `/api/capabilities/skill-set` | Skill set from middleware (when middleware is used). |
+| `GET` | `/api/capabilities/health` | Runtime health (status, runtime info). |
 
-### Runs
-- `GET /api/runs` - 실행 목록 (필터 지원)
-- `POST /api/runs` - 실행 시작 (**워크플로는 반드시 Publish된 상태여야 함**. `workflowId`만 넘기면 백엔드가 해당 워크플로의 published 버전 DSL로 execution adapter를 호출)
-- `GET /api/runs/<run_id>` - 실행 조회
-- `POST /api/runs/<run_id>/cancel` - 실행 취소
-- `GET /api/runs/<run_id>/snapshot` - 실행 스냅샷
-- `GET /api/runs/<run_id>/nodes/<state_name>/debug` - 노드 디버그 정보
-- `GET /api/runs/<run_id>/events` - 실행 이벤트 (afterSeq 파라미터 지원)
-- `POST /api/runs/<run_id>/resume` - 대기 중인 노드 재개
+### Middleware proxy — `/api/v1`
 
-### Capabilities
-- `GET /api/capabilities/skills` - 사용 가능한 스킬 목록
-- `GET /api/capabilities/health` - 런타임 헬스 체크
+When using middleware, the backend can proxy requests to the middleware under `/api/v1` (e.g. workflow run, runner status, monitor WebSocket). See `docs/middleware_api_spec.md` for the middleware API.
 
-## 테스트
-
-```bash
-pytest
-```
-
-또는 coverage와 함께:
-
-```bash
-pytest --cov=app --cov-report=html
-```
-
-**테스트 파라미터화:**
-주요 테스트는 `inmemory`와 `sqlite` 백엔드 모두에서 실행됩니다. 각 테스트는 두 백엔드에서 자동으로 실행되어 동일한 동작을 보장합니다.
-
-## 현재 구현 상태
-
-### 완료
-- ✅ In-memory 리포지토리
-- ✅ SQLite 리포지토리 (Python stdlib sqlite3)
-- ✅ 저장소 백엔드 선택 (REPO_BACKEND 환경 변수)
-- ✅ 자동 스키마 마이그레이션
-- ✅ Dummy ExecutionEngineAdapter (시뮬레이션)
-- ✅ Workflow CRUD 및 버전 관리
-- ✅ Run 실행 및 모니터링
-- ✅ 이벤트 페이지네이션
-- ✅ 검증 로직
-- ✅ 하나의 활성 실행 제약 조건
-- ✅ 시드 데이터 (DEV 전용, SEED_DATA=1)
-
-### 미구현 (M1 범위 밖)
-- ❌ 실제 미들웨어 연결
-
-## CORS
-
-개발 환경에서 프론트엔드(`http://localhost:3000`)와의 통신을 위해 CORS가 활성화되어 있습니다.
-
-## 에러 처리
-
-모든 에러는 Problem+JSON 형식으로 반환됩니다:
+### Error response (Problem+JSON)
 
 ```json
 {
@@ -181,3 +141,27 @@ pytest --cov=app --cov-report=html
   "detail": "Error message"
 }
 ```
+
+## Tests
+
+```bash
+cd backend
+pytest
+```
+
+With coverage:
+
+```bash
+pytest --cov=app --cov-report=html
+```
+
+Tests are parameterized for both `inmemory` and `sqlite` backends where relevant.
+
+## CORS
+
+CORS is enabled for development (e.g. frontend at `http://localhost:3000`).
+
+## Documentation
+
+- [docs/10-backend_api.md](../docs/10-backend_api.md) — API responsibilities and design.
+- [docs/middleware_api_spec.md](../docs/middleware_api_spec.md) — Middleware API used by the backend when `EXECUTION_ENGINE=middleware`.
