@@ -51,9 +51,9 @@ export function createRunsApi(): RunsApi {
 }
 
 export function createSkillsetsApi(): SkillsetsApi {
-  // Skillsets are always fetched from API (mock middleware or real backend via GET /api/vi1/skill-sets)
+  // Skillsets: frontend → backend → middleware GET /api/v1/skill-set
   if (process.env.NODE_ENV === "development") {
-    console.log("[API Factory] Using HTTP skillsets API (GET /vi1/skill-sets)");
+    console.log("[API Factory] Using HTTP skillsets API (GET /capabilities/skill-set → middleware)");
     console.log(`[API Factory] Base URL: ${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api"}`);
   }
   return httpSkillsetsApi;

@@ -171,7 +171,7 @@ export const httpWorkflowsApi: WorkflowsApi = {
 
 export const httpSkillsetsApi: SkillsetsApi = {
   async list(): Promise<SkillsetsResponse> {
-    const url = getApiUrl("/vi1/skill-sets");
+    const url = getApiUrl("/capabilities/skill-set");
     logApiCall("GET", url);
     const response = await fetch(url);
     return handleResponse<SkillsetsResponse>(response);

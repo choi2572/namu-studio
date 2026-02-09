@@ -372,8 +372,8 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         })
 
 
-# Mock skill-sets for GET /api/vi1/skill-sets (name, version, description, namespace + parameters, outputs, etc.)
-MOCK_SKILL_SETS = {
+# Mock skill-set for GET /api/v1/skill-set (middleware). name, version, description, namespace + parameters, outputs, etc.
+MOCK_SKILL_SET = {
     "skillsets": [
         {
             "namespace": "default",
@@ -434,9 +434,9 @@ def create_app() -> Flask:
     app = Flask(__name__)
     CORS(app)
 
-    @app.route("/api/vi1/skill-sets", methods=["GET"])
-    def skill_sets():
-        return jsonify(MOCK_SKILL_SETS)
+    @app.route("/api/v1/skill-set", methods=["GET"])
+    def skill_set():
+        return jsonify(MOCK_SKILL_SET)
 
     @app.route("/api/v1/runner/status", methods=["GET"])
     def runner_status():

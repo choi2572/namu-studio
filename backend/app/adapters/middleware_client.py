@@ -111,6 +111,10 @@ class MiddlewareClient:
             f"/api/v1/workflows/{workflow_id}",
         )
 
+    def get_skill_set(self) -> Dict[str, Any]:
+        """GET /api/v1/skill-set from middleware (skillsets list)."""
+        return self._request("GET", "/api/v1/skill-set")
+
 
 def _apply_initial_to_db(
     run_id: str,
