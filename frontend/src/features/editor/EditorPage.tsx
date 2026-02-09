@@ -898,7 +898,8 @@ function buildStateRecords(
   nodes: EditorNode[],
   edges: EditorEdge[],
   stateNameMap: Map<string, string>,
-  containerPayloads?: Map<string, ContainerDslPayload>
+  containerPayloads?: Map<string, ContainerDslPayload>,
+  skillsetMap?: Map<string, import("@/domain/types").Skillset>
 ) {
   const edgesByFrom = new Map<string, EditorEdge[]>();
   edges.forEach((edge) => {
@@ -970,9 +971,14 @@ function buildStateRecords(
       }
     } else {
       const next = getNext("next");
-      const skillName = node.kind.startsWith("skill.")
-        ? node.kind.replace("skill.", "")
-        : node.kind;
+      // DSL Skill 값: 표시와 동일하게 namespace.skilltype( namespace.name ) 형태
+      const skillset = skillsetMap?.get(node.kind);
+      const skillName =
+        skillset != null
+          ? getSkillDisplayType(skillset)
+          : node.kind.startsWith("skill.")
+            ? node.kind.replace("skill.", "")
+            : node.kind;
       state = {
         Type: node.kind === "flow_control.input" ? "Pass" : "Skill",
         Skill: skillName,
@@ -990,7 +996,11 @@ function buildStateRecords(
   return states;
 }
 
-function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
+function buildDslJson(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  skillsetMap?: Map<string, import("@/domain/types").Skillset>
+) {
   if (nodes.length === 0) {
     return {};
   }
@@ -1020,7 +1030,8 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
         bodyNodes,
         bodyEdges,
         stateNameMap,
-        containerPayloads
+        containerPayloads,
+        skillsetMap
       );
       containerPayloads.set(container.id, {
         type: "repeat",
@@ -1048,7 +1059,8 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
         branchNodes,
         branchEdges,
         stateNameMap,
-        containerPayloads
+        containerPayloads,
+        skillsetMap
       );
       return {
         StartAt: branchStartNode
@@ -1068,7 +1080,8 @@ function buildDslJson(nodes: EditorNode[], edges: EditorEdge[]) {
     topLevelNodes,
     topLevelEdges,
     stateNameMap,
-    containerPayloads
+    containerPayloads,
+    skillsetMap
   );
   const inputNode = topLevelNodes.find((n) => n.kind === "flow_control.input");
   const inputsRecord: Record<string, { Type: string; Value: number | boolean | string }> = {};
@@ -3513,7 +3526,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const handleSave = async () => {
     const view_json = buildViewJson(nodes, validEdges, canvasBase, zoom);
-    const dsl_json = buildDslJson(nodes, validEdges);
+    const dsl_json = buildDslJson(nodes, validEdges, skillsetMap);
     const updatedAt = new Date().toISOString();
 
     if (isNewWorkflow) {
