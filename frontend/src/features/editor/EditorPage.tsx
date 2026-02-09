@@ -67,6 +67,34 @@ type ConditionOperator = "AND" | "OR";
 const CONDITION_COMPARISON_OPERATORS = ["==", "!=", ">=", "<=", ">", "<"] as const;
 type ConditionComparisonOperator = (typeof CONDITION_COMPARISON_OPERATORS)[number];
 
+/** 에디터 연산자(==, != 등) → DSL JSON 연산자(Equals, NotEquals 등) */
+const EDITOR_OP_TO_DSL: Record<string, string> = {
+  "==": "Equals",
+  "!=": "NotEquals",
+  "<": "LessThan",
+  ">": "GreaterThan",
+  "<=": "LessThanOrEqual",
+  ">=": "GreaterThanOrEqual"
+};
+
+/** DSL JSON 연산자 → 에디터 연산자 */
+const DSL_OP_TO_EDITOR: Record<string, string> = {
+  Equals: "==",
+  NotEquals: "!=",
+  LessThan: "<",
+  GreaterThan: ">",
+  LessThanOrEqual: "<=",
+  GreaterThanOrEqual: ">="
+};
+
+function comparisonOperatorToDsl(editorOp: string): string {
+  return EDITOR_OP_TO_DSL[editorOp] ?? "Equals";
+}
+
+function dslOperatorToEditor(dslOp: string): string {
+  return DSL_OP_TO_EDITOR[dslOp] ?? "==";
+}
+
 // Condition 노드의 개별 표현식: variable, comparisonOperator, value 각각 별도 필드
 type ConditionExpression = {
   id: string;
@@ -588,6 +616,26 @@ function parseConditionExpressionString(expr: string): {
       };
     }
   }
+  // DSL 단어형 연산자(Equals, NotEquals 등) 인식
+  const dslOpPatterns = [
+    "LessThanOrEqual",
+    "GreaterThanOrEqual",
+    "NotEquals",
+    "LessThan",
+    "GreaterThan",
+    "Equals"
+  ] as const;
+  for (const dslOp of dslOpPatterns) {
+    const i = s.indexOf(dslOp);
+    if (i !== -1) {
+      const editorOp = dslOperatorToEditor(dslOp);
+      return {
+        variable: s.slice(0, i).trim(),
+        comparisonOperator: editorOp,
+        value: s.slice(i + dslOp.length).trim()
+      };
+    }
+  }
   return { variable: s, comparisonOperator: "==", value: "" };
 }
 
@@ -878,7 +926,7 @@ function buildStateRecords(
       const firstExpr = node.conditionExpressions?.[0];
       const variableRaw = firstExpr?.variable?.trim() ?? "";
       const Variable = variableRaw.startsWith("$") ? variableRaw : `$.${variableRaw || "value"}`;
-      const Operator = firstExpr?.comparisonOperator ?? "==";
+      const Operator = comparisonOperatorToDsl(firstExpr?.comparisonOperator ?? "==");
       const rawVal = firstExpr?.value ?? "";
       let Value: number | boolean | string;
       if (rawVal === "true" || rawVal === "false") {
@@ -1604,7 +1652,7 @@ function parseDslToEditor(
         const ifCond = isRecord(state.If) && isRecord(state.If.Condition) ? state.If.Condition : null;
         if (ifCond) {
           const variable = typeof ifCond.Variable === "string" ? ifCond.Variable.replace(/^\$\.?/, "") : "";
-          const comparisonOperator = typeof ifCond.Operator === "string" ? ifCond.Operator : "==";
+          const comparisonOperator = dslOperatorToEditor(typeof ifCond.Operator === "string" ? ifCond.Operator : "Equals");
           const rawVal = ifCond.Value;
           const value =
             typeof rawVal === "string"
