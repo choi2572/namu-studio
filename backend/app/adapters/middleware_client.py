@@ -411,6 +411,35 @@ def _apply_feedback(
         node_run_repo.update(existing)
 
 
+def _apply_graph_patch(
+    run_id: str,
+    data: Dict[str, Any],
+    run_event_repo,
+) -> None:
+    """Persist graph_patch event for replay and monitor (VLM dynamic workflow)."""
+    ts = _parse_ts(data.get("timestamp")) or datetime.utcnow()
+    seq = (run_event_repo.get_max_seq(run_id) or 0) + 1
+    # Store full message as payload so replay can apply patches in order
+    payload = {
+        "target": data.get("target"),
+        "nodes_added": data.get("nodes_added") or [],
+        "edges_added": data.get("edges_added") or [],
+        "start_at": data.get("start_at"),
+        "rev": data.get("rev"),
+    }
+    run_event_repo.create(
+        RunEvent(
+            event_id=str(uuid.uuid4()),
+            run_id=run_id,
+            seq=seq,
+            timestamp=ts,
+            event_type="GRAPH_PATCH",
+            state_name=None,
+            payload_json=payload,
+        )
+    )
+
+
 def run_middleware_monitor_ws(
     base_url: str,
     run_id: str,
@@ -459,6 +488,9 @@ def run_middleware_monitor_ws(
     def persist_feedback(data: Dict[str, Any]) -> None:
         _apply_feedback(run_id, data, node_run_repo)
 
+    def persist_graph_patch(data: Dict[str, Any]) -> None:
+        _apply_graph_patch(run_id, data, run_event_repo)
+
     closed = threading.Event()
 
     def on_message(ws, message: str) -> None:
@@ -479,6 +511,8 @@ def run_middleware_monitor_ws(
             closed.set()
         elif msg_type == "feedback":
             persist_feedback(data)
+        elif msg_type == "graph_patch":
+            persist_graph_patch(data)
         elif msg_type == "pong":
             pass
 

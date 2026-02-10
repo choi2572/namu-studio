@@ -4,6 +4,7 @@ Run: python -m mock_middleware.app (from backend dir) or flask --app mock_middle
 """
 import json
 import logging
+import os
 import threading
 import time
 from copy import deepcopy
@@ -49,6 +50,38 @@ def _broadcast(data: Dict[str, Any]) -> None:
                 dead.append(ws)
         for ws in dead:
             _ws_clients.discard(ws)
+
+
+def _build_mock_graph_patch(workflow_id: str, after_node_name: str) -> Dict[str, Any]:
+    """Build a single mock graph_patch (VLM-generated subflow). Emitted only when MOCK_VLM_DYNAMIC_PATCH is on."""
+    ts = int(datetime.now(timezone.utc).timestamp())
+    return {
+        "type": "graph_patch",
+        "workflow_id": workflow_id,
+        "timestamp": ts,
+        "rev": 1,
+        "target": {"container_path": "root/VLMPlanner_1/generated"},
+        "nodes_added": [
+            {
+                "node_name": "PickBolt_1",
+                "node_type": "Skill",
+                "skill": "Pick",
+                "ui": {"x": 120, "y": 260},
+                "parameters": {"target": "$.Inputs.bolt"},
+            },
+            {
+                "node_name": "PlaceBinA_1",
+                "node_type": "Skill",
+                "skill": "Place",
+                "ui": {"x": 440, "y": 260},
+                "parameters": {"destination": "bin_a"},
+            },
+        ],
+        "edges_added": [
+            {"from": "PickBolt_1", "to": "PlaceBinA_1", "label": ""},
+        ],
+        "start_at": "PickBolt_1",
+    }
 
 
 def _broadcast_feedback(
@@ -222,6 +255,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
     )
     total_duration_ms = 0
     total_duration_ms_ref = [0]
+    graph_patch_emitted = [False]  # mutable so inner loop can set
 
     cancelled = False
     for state_name, state_def in order:
@@ -339,6 +373,11 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
             continue
 
         _run_one_node(workflow_id, state_name, state_def, total_duration_ms_ref)
+
+        # Optional: emit VLM graph_patch once per run (feature flag OFF by default)
+        if not graph_patch_emitted[0] and os.environ.get("MOCK_VLM_DYNAMIC_PATCH", "").strip().lower() in ("true", "1"):
+            _broadcast(_build_mock_graph_patch(workflow_id, state_name))
+            graph_patch_emitted[0] = True
 
         if state_def.get("End") and state_name == workflow_terminal:
             break

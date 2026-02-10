@@ -21,7 +21,11 @@ The server listens at **http://localhost:8000**.
 | `POST` | `/api/v1/workflows/run` | Start or cancel workflow. Body: `request_type` (`"start"` \| `"cancel"`), `workflow_json` (DSL) for start. |
 | `GET` | `/api/v1/runner/status` | Runner status: `idle` \| `running` \| `error`, plus workflow progress when running. |
 | `GET` | `/api/v1/workflows/<workflow_id>` | Workflow info: `node_history`, `progress`, etc. |
-| `WS` | `/api/v1/workflows/monitor` | WebSocket: initial state, then `node_status_change`, `workflow_completed` (simulated at ~2s intervals). Client `ping` → server `pong`. |
+| `WS` | `/api/v1/workflows/monitor` | WebSocket: initial state, then `node_status_change`, `workflow_completed` (simulated at ~2s intervals). Client `ping` → server `pong`. Optional: `graph_patch` when `MOCK_VLM_DYNAMIC_PATCH=true`. |
+
+### VLM dynamic graph (optional, off by default)
+
+Set `MOCK_VLM_DYNAMIC_PATCH=true` (or `1`) to emit one `graph_patch` event per run. The backend persists it as a `GRAPH_PATCH` run event; the frontend applies patches only when `NEXT_PUBLIC_ENABLE_DYNAMIC_GRAPH_PATCH=true`. See `docs/vlm_monitoring.md`.
 
 ## Full test scenario (Run → Monitor → Replay)
 

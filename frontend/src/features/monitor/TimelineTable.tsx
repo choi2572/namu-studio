@@ -122,6 +122,14 @@ function EventIcon({ type }: { type: string }) {
       </svg>
     );
   }
+  if (type.includes("GRAPH_PATCH")) {
+    return (
+      <svg {...iconProps}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M4 16h8" />
+      </svg>
+    );
+  }
   // 기본 아이콘
   return (
     <svg {...iconProps}>
@@ -200,6 +208,10 @@ const EVENT_TYPE_CONFIG: Record<
   SAFETY_INTERRUPT: {
     color: "text-orange-600",
     bgColor: "bg-orange-50"
+  },
+  GRAPH_PATCH: {
+    color: "text-violet-600",
+    bgColor: "bg-violet-50"
   }
 };
 

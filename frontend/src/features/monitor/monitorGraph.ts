@@ -291,6 +291,109 @@ export function buildMonitorGraph(dslJson: Record<string, unknown> | null | unde
   };
 }
 
+/** VLM graph_patch payload (from RunEvent GRAPH_PATCH). */
+export type GraphPatchPayload = {
+  target?: { container_path?: string };
+  nodes_added?: Array<{
+    node_name: string;
+    node_type?: string;
+    skill?: string;
+    ui?: { x?: number; y?: number };
+    parameters?: Record<string, unknown>;
+  }>;
+  edges_added?: Array<{ from: string; to: string; label?: string }>;
+  start_at?: string;
+  rev?: number;
+};
+
+/**
+ * Apply graph_patch payloads in order to a base monitor graph (append-only).
+ * Used when ENABLE_DYNAMIC_GRAPH_PATCH is on. Creates synthetic container and nodes under target container_path.
+ */
+export function applyGraphPatches(
+  baseGraph: MonitorGraph | null,
+  patchPayloads: GraphPatchPayload[]
+): MonitorGraph | null {
+  if (!baseGraph || patchPayloads.length === 0) return baseGraph;
+
+  const nodes = [...baseGraph.nodes];
+  const edges = [...baseGraph.edges];
+  let edgeIdCounter = Math.max(0, ...edges.map((e) => parseInt(e.id.replace(/\D/g, ""), 10) || 0));
+
+  const pathIdsByStateName = new Map<string, string>();
+  nodes.forEach((n) => {
+    pathIdsByStateName.set(n.apiStateName, n.pathId);
+    if (n.containerPathId === null) pathIdsByStateName.set(n.stateName, n.pathId);
+  });
+
+  function resolvePathId(nodeName: string, containerPath: string): string {
+    const underContainer = `${containerPath}/${nodeName}`;
+    if (nodes.some((n) => n.pathId === underContainer)) return underContainer;
+    return pathIdsByStateName.get(nodeName) ?? nodePathId([NODE_PATH.ROOT, nodeName]);
+  }
+
+  for (const payload of patchPayloads) {
+    const containerPath = payload.target?.container_path ?? "root/VLMPlanner_1/generated";
+    const segments = containerPath.split("/").filter(Boolean);
+    const vlmNodeName = segments.length >= 2 ? segments[1] : "VLMPlanner_1";
+    const parentPathId = nodePathId([NODE_PATH.ROOT, vlmNodeName]);
+
+    if (!nodes.some((n) => n.pathId === parentPathId)) {
+      nodes.push({
+        pathId: parentPathId,
+        stateName: vlmNodeName,
+        nodeName: "VLM Planner",
+        apiStateName: vlmNodeName,
+        containerPathId: null,
+        isContainer: true,
+        containerType: "repeat",
+        branchIndex: null,
+        dslType: "Repeat",
+        skillName: null
+      });
+    }
+
+    for (const na of payload.nodes_added ?? []) {
+      const pathId = `${containerPath}/${na.node_name}`;
+      if (nodes.some((n) => n.pathId === pathId)) continue;
+      pathIdsByStateName.set(na.node_name, pathId);
+      nodes.push({
+        pathId,
+        stateName: na.node_name,
+        nodeName: na.node_name,
+        apiStateName: na.node_name,
+        containerPathId: parentPathId,
+        isContainer: false,
+        containerType: null,
+        branchIndex: null,
+        dslType: na.node_type ?? "Skill",
+        skillName: na.skill ?? null
+      });
+    }
+
+    for (const ea of payload.edges_added ?? []) {
+      const fromPathId = resolvePathId(ea.from, containerPath);
+      const toPathId = resolvePathId(ea.to, containerPath);
+      if (!nodes.some((n) => n.pathId === fromPathId) || !nodes.some((n) => n.pathId === toPathId)) continue;
+      if (edges.some((e) => e.from === fromPathId && e.to === toPathId)) continue;
+      edges.push({
+        id: `edge-${++edgeIdCounter}`,
+        from: fromPathId,
+        to: toPathId
+      });
+    }
+  }
+
+  const containers = buildContainers(nodes);
+  const stateNameToPathId = new Map<string, string>();
+  nodes.forEach((n) => {
+    stateNameToPathId.set(n.apiStateName, n.pathId);
+    if (n.containerPathId === null) stateNameToPathId.set(n.stateName, n.pathId);
+  });
+
+  return { nodes, edges, containers, stateNameToPathId };
+}
+
 export {
   rootPathId,
   repeatBodyPathId,

@@ -15,7 +15,8 @@ import { formatDuration } from "@/lib/format";
 import { pathIdToApiStateName } from "@/lib/ids";
 import { isRunTerminal } from "@/domain/types";
 import { SIMULATED_EVENTS_BY_RUN } from "@/features/monitor/simulatedEvents";
-import { buildMonitorGraph } from "@/features/monitor/monitorGraph";
+import { buildMonitorGraph, applyGraphPatches, type GraphPatchPayload } from "@/features/monitor/monitorGraph";
+import { ENABLE_DYNAMIC_GRAPH_PATCH } from "@/lib/featureFlags";
 import { DagView } from "@/features/monitor/DagView";
 import { TimelineTable } from "@/features/monitor/TimelineTable";
 
@@ -204,9 +205,25 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     enabled: Boolean(snapshot?.run.workflowId)
   });
 
-  const monitorGraph = useMemo(
+  const baseMonitorGraph = useMemo(
     () => buildMonitorGraph(workflowDraft?.dsl_json),
     [workflowDraft?.dsl_json]
+  );
+
+  const graphPatchPayloads = useMemo((): GraphPatchPayload[] => {
+    if (!ENABLE_DYNAMIC_GRAPH_PATCH || !events.length) return [];
+    return events
+      .filter((e) => e.eventType === "GRAPH_PATCH" && e.payload)
+      .map((e) => e.payload as GraphPatchPayload)
+      .filter((p) => p && (p.nodes_added != null || p.edges_added != null));
+  }, [events]);
+
+  const monitorGraph = useMemo(
+    () =>
+      ENABLE_DYNAMIC_GRAPH_PATCH && graphPatchPayloads.length > 0
+        ? applyGraphPatches(baseMonitorGraph, graphPatchPayloads)
+        : baseMonitorGraph,
+    [baseMonitorGraph, graphPatchPayloads]
   );
 
   const stateNameToPathId = useMemo(
@@ -440,7 +457,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   // 스냅샷이 있으면 즉시 사용(폴링 갱신이 한 렌더 지연 없이 DAG에 반영되도록)
   const latestNodeStates = snapshot?.nodeStates ?? nodeStates;
 
-  // 모든 노드가 nodeStates에 있는지 확인하고, 없으면 DSL에서 추가
+  // 모든 노드가 nodeStates에 있는지 확인하고, 없으면 DSL에서 추가. VLM 동적 노드 포함.
   const allNodes = useMemo(() => {
     if (!workflowDraft?.dsl_json) {
       return latestNodeStates;
@@ -471,8 +488,22 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     dslNodes.forEach((node) => nodeMap.set(node.stateName, node));
     latestNodeStates.forEach((node) => nodeMap.set(node.stateName, node));
 
+    // VLM 동적 노드: patched graph에만 있는 노드 추가 (플래그 켜진 경우)
+    if (ENABLE_DYNAMIC_GRAPH_PATCH && monitorGraph) {
+      for (const n of monitorGraph.nodes) {
+        if (nodeMap.has(n.apiStateName)) continue;
+        const snap = latestNodeStates.find((s) => s.stateName === n.apiStateName);
+        nodeMap.set(n.apiStateName, {
+          stateName: n.apiStateName,
+          nodeName: n.nodeName,
+          status: snap?.status ?? NodeStatus.WAITING,
+          durationMs: snap?.durationMs ?? null
+        } as NodeStateSnapshot);
+      }
+    }
+
     return Array.from(nodeMap.values());
-  }, [latestNodeStates, workflowDraft]);
+  }, [latestNodeStates, workflowDraft, monitorGraph]);
 
   const initialReplayNodes = useMemo(
     () => allNodes.map((n) => ({ ...n, status: NodeStatus.WAITING, durationMs: null })),
