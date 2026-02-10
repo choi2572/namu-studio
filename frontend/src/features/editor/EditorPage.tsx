@@ -27,6 +27,7 @@ import {
   type ScopeGraph
 } from "@/lib/startEndDetection";
 import { getAvailableVariables } from "@/lib/variableReferences";
+import { ENABLE_VLM_NODES } from "@/lib/featureFlags";
 
 type EditorPageProps = {
   workflowId: string;
@@ -39,6 +40,7 @@ type NodeKind =
   | "flow_control.output"
   | "flow_control.repeat"
   | "flow_control.parallel"
+  | "flow_control.vlm"
   | "event.webhook";
 
 type NodeCategory = "skill" | "flow_control" | "event";
@@ -237,6 +239,14 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
     category: "flow_control",
     iconText: "PA",
     colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
+    paramFields: [],
+    outputs: [{ key: "next", label: "Next" }]
+  },
+  "flow_control.vlm": {
+    label: "VLM Planner",
+    category: "flow_control",
+    iconText: "VLM",
+    colorClass: "border-violet-200 bg-violet-100 text-violet-700",
     paramFields: [],
     outputs: [{ key: "next", label: "Next" }]
   },
@@ -969,6 +979,14 @@ function buildStateRecords(
       } else {
         state.End = true;
       }
+    } else if (node.kind === "flow_control.vlm") {
+      const next = getNext("next");
+      state = { Type: "Pass", Parameters: {} };
+      if (next) {
+        state.Next = next;
+      } else {
+        state.End = true;
+      }
     } else {
       const next = getNext("next");
       // DSL Skill 값: 표시와 동일하게 namespace.skilltype( namespace.name ) 형태
@@ -1632,7 +1650,16 @@ function parseDslToEditor(
     if (state.Type === "Condition") return "flow_control.condition";
     if (state.Type === "Choice") return "flow_control.condition";
     if (state.Type === "Succeed") return "flow_control.output";
-    if (state.Type === "Pass") return "flow_control.input";
+    if (state.Type === "Pass") {
+      const label = state.Label != null ? String(state.Label) : "";
+      if (
+        ENABLE_VLM_NODES &&
+        (stateName.startsWith("VLMPlanner") || /VLM\s*Planner/i.test(label))
+      ) {
+        return "flow_control.vlm";
+      }
+      return "flow_control.input";
+    }
     if (state.Type === "Parallel") return "flow_control.parallel";
     if (state.Type === "Repeat") return "flow_control.repeat";
     const skillName = typeof state.Skill === "string" ? state.Skill : stateName;
@@ -2592,12 +2619,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     queryFn: () => skillsetsApi.list()
   });
 
-  // Skillset 기반으로 동적 노드 타입 생성
+  // Skillset 기반으로 동적 노드 타입 생성 (ENABLE_VLM_NODES 시 VLM 노드 포함)
   const nodeTypeConfig = useMemo(() => {
-    if (!skillsetsResponse) {
-      return STATIC_NODE_TYPE_CONFIG as Record<NodeKind, NodeTypeConfig>;
-    }
-    return createNodeTypeConfigFromSkillsets(skillsetsResponse.skillsets);
+    const base = skillsetsResponse
+      ? createNodeTypeConfigFromSkillsets(skillsetsResponse.skillsets)
+      : (STATIC_NODE_TYPE_CONFIG as Record<NodeKind, NodeTypeConfig>);
+    if (!ENABLE_VLM_NODES) return base;
+    return { ...base, "flow_control.vlm": STATIC_NODE_TYPE_CONFIG["flow_control.vlm"]! };
   }, [skillsetsResponse]);
 
   // Skillset 정보를 노드 kind로 매핑 (key: skill.namespace.name). 레거시 kind "skill.name"도 name으로 조회 가능하도록 보조 맵 사용
@@ -2617,7 +2645,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   // 노드 id → DSL state name (변수 참조 자동완성용)
   const stateNameMap = useMemo(() => buildStateNameMap(nodes), [nodes]);
 
-  // 노드 타입 목록 생성
+  // 노드 타입 목록 생성 (ENABLE_VLM_NODES 시 flow_control.vlm 포함)
   const nodeTypes = useMemo(() => {
     const staticTypes: NodeKind[] = [
       "flow_control.input",
@@ -2627,6 +2655,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       "flow_control.parallel",
       "event.webhook"
     ];
+    if (ENABLE_VLM_NODES) {
+      staticTypes.push("flow_control.vlm");
+    }
     const skillTypes: NodeKind[] = skillsetsResponse?.skillsets.map(
       (s) => getSkillNodeKind(s)
     ) ?? [];
@@ -3466,7 +3497,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const index = nextNodeIndex.current++;
       const id = `node-${index}`;
       const config = nodeTypeConfig[kind];
-      const name = config ? `${config.label} ${index}` : `${kind} ${index}`;
+      const name =
+        kind === "flow_control.vlm"
+          ? `VLMPlanner ${index}`
+          : config
+            ? `${config.label} ${index}`
+            : `${kind} ${index}`;
       const params = buildDefaultParams(kind);
       if (kind === "flow_control.repeat" && !params.count) {
         params.count = "1";
