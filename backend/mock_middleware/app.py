@@ -413,7 +413,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
 
 # Mock skill-set for GET /api/v1/skill-set (middleware). name, version, description, namespace + parameters, outputs, etc.
 MOCK_SKILL_SET = {
-    "skillsets": [
+    "skill_sets": [
         {
             "namespace": "default",
             "name": "PickObject",

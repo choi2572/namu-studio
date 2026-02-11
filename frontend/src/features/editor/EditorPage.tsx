@@ -2622,7 +2622,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   // Skillset 기반으로 동적 노드 타입 생성 (ENABLE_VLM_NODES 시 VLM 노드 포함)
   const nodeTypeConfig = useMemo(() => {
     const base = skillsetsResponse
-      ? createNodeTypeConfigFromSkillsets(skillsetsResponse.skillsets)
+      ? createNodeTypeConfigFromSkillsets(skillsetsResponse.skill_sets)
       : (STATIC_NODE_TYPE_CONFIG as Record<NodeKind, NodeTypeConfig>);
     if (!ENABLE_VLM_NODES) return base;
     return { ...base, "flow_control.vlm": STATIC_NODE_TYPE_CONFIG["flow_control.vlm"]! };
@@ -2632,7 +2632,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const skillsetMap = useMemo(() => {
     if (!skillsetsResponse) return new Map<string, import("@/domain/types").Skillset>();
     const map = new Map<string, import("@/domain/types").Skillset>();
-    skillsetsResponse.skillsets.forEach((skillset) => {
+    skillsetsResponse.skill_sets.forEach((skillset) => {
       const key = getSkillNodeKind(skillset);
       map.set(key, skillset);
       // 레거시: skill.name 형태로 저장된 드래프트도 조회 가능
@@ -2658,7 +2658,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     if (ENABLE_VLM_NODES) {
       staticTypes.push("flow_control.vlm");
     }
-    const skillTypes: NodeKind[] = skillsetsResponse?.skillsets.map(
+    const skillTypes: NodeKind[] = skillsetsResponse?.skill_sets.map(
       (s) => getSkillNodeKind(s)
     ) ?? [];
     return [...skillTypes, ...staticTypes];

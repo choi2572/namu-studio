@@ -115,5 +115,5 @@ export type Skillset = {
 };
 
 export type SkillsetsResponse = {
-  skillsets: Skillset[];
+  skill_sets: Skillset[];
 };

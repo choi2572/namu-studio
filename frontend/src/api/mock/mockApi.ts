@@ -525,7 +525,7 @@ export const mockRunsApi: RunsApi = {
 export const mockSkillsetsApi: SkillsetsApi = {
   async list(): Promise<SkillsetsResponse> {
     const skillsets: SkillsetsResponse = {
-      skillsets: [
+      skill_sets: [
         {
           namespace: "default",
           name: "PickObject",
