@@ -64,6 +64,32 @@ python run.py
 
 (Linux/macOS: use `export` instead of `set`.)
 
+## Docker (gunicorn)
+
+The UI backend can run in a container with **gunicorn** (no ASGI). Base image: `nvcr.io/nvidia/l4t-base:r36.2.0` (L4T / robot onboard).
+
+Build and run:
+
+```bash
+cd backend
+docker build -t namu-backend .
+docker run -p 8000:8000 namu-backend
+```
+
+- **Bind:** `0.0.0.0:8000` (override with `GUNICORN_BIND`)
+- **Workers:** 2 (override with `GUNICORN_WORKERS`, e.g. `1` for low-resource)
+- **Healthcheck:** `GET /api/capabilities/health` (interval 30s)
+
+### Run mock middleware in the same image
+
+Set `RUN_MOCK_MIDDLEWARE=1` (or `true`/`yes`) to start the mock middleware server instead of the main backend:
+
+```bash
+docker run -p 8000:8000 -e RUN_MOCK_MIDDLEWARE=1 namu-backend
+```
+
+The same healthcheck path is used for both modes.
+
 ## Project structure
 
 ```

@@ -473,6 +473,11 @@ def create_app() -> Flask:
     app = Flask(__name__)
     CORS(app)
 
+    @app.route("/api/capabilities/health", methods=["GET"])
+    def health():
+        """Health endpoint for container HEALTHCHECK (same path as main backend)."""
+        return jsonify({"status": "healthy", "runtime": {"middleware": "mock", "robot": "simulated"}})
+
     @app.route("/api/v1/skill-set", methods=["GET"])
     def skill_set():
         return jsonify(MOCK_SKILL_SET)

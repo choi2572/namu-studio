@@ -1,0 +1,59 @@
+# Backend and frontend images are built separately; nginx reverse-proxies both.
+# Build: docker build -t namu-backend backend/
+#        docker build -t namu-frontend frontend/
+# Run:   docker compose up -d
+
+services:
+  backend:
+    image: namu-backend
+    container_name: namu-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Gunicorn
+      GUNICORN_BIND: "0.0.0.0:8000"
+      GUNICORN_WORKERS: "2"
+      # RUN_MOCK_MIDDLEWARE: "1"   # uncomment to run mock middleware instead
+      # App config
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      SEED_DATA: ${SEED_DATA:-false}
+      REPO_BACKEND: ${REPO_BACKEND:-inmemory}
+      DB_PATH: ${DB_PATH:-./data/app.db}
+      EXECUTION_ENGINE: ${EXECUTION_ENGINE:-dummy}
+      # When EXECUTION_ENGINE=middleware: URL of middleware (or separate mock container)
+      MIDDLEWARE_BASE_URL: ${MIDDLEWARE_BASE_URL:-http://localhost:8000}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/capabilities/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  frontend:
+    image: namu-frontend
+    container_name: namu-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+      # NEXT_PUBLIC_* are set at build time; override only if you rebuild with different defaults
+      # NEXT_PUBLIC_API_BASE_URL: /api
+      # NEXT_PUBLIC_USE_MOCK_API: "false"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    container_name: namu-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend

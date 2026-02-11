@@ -52,6 +52,39 @@ python -m mock_middleware
 
 Mock middleware runs at **http://localhost:8000**. See [backend/mock_middleware/README.md](backend/mock_middleware/README.md) for full setup (backend + frontend with middleware mode).
 
+## Docker (Compose + nginx)
+
+Backend and frontend each have a **Dockerfile** (same base image: `nvcr.io/nvidia/l4t-base:r36.2.0`). You build the images separately; then **docker compose** runs them behind an **nginx** reverse proxy.
+
+1. **Build images**
+
+   ```bash
+   docker build -t namu-backend backend/
+   docker build -t namu-frontend frontend/
+   ```
+
+2. **Start stack**
+
+   ```bash
+   docker compose up -d
+   ```
+
+3. **Access**
+
+   - App: **http://localhost** (nginx → frontend:3000)
+   - API: **http://localhost/api/** (nginx → backend:8000)
+
+To run the **mock middleware** instead of the main backend in the same backend image:
+
+```bash
+docker compose run -e RUN_MOCK_MIDDLEWARE=1 backend
+# or in docker-compose.yml set backend.environment.RUN_MOCK_MIDDLEWARE=1
+```
+
+- [backend/README.md](backend/README.md) — Backend Docker (gunicorn, `RUN_MOCK_MIDDLEWARE`)
+- [frontend/README.md](frontend/README.md) — Frontend Docker
+- `nginx/default.conf` — nginx reverse proxy config
+
 ## Documentation
 
 | Document | Description |

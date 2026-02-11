@@ -90,6 +90,18 @@ src/
 
 Both modes share the same interface, so you can switch without changing UI code.
 
+## Docker
+
+Same base image as backend: `nvcr.io/nvidia/l4t-base:r36.2.0`. Build and run:
+
+```bash
+cd frontend
+docker build -t namu-frontend .
+docker run -p 3000:3000 namu-frontend
+```
+
+The image runs `npm run build` then `npm start` (Next.js on port 3000). For reverse-proxy setups (e.g. [docker compose](../README.md#docker-compose--nginx)), the build uses `NEXT_PUBLIC_API_BASE_URL=/api` so the browser talks to the same origin and nginx proxies `/api` to the backend.
+
 ## Scripts
 
 | Command | Description |
