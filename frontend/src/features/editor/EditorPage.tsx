@@ -2615,7 +2615,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   // Skillset 가져오기 (초기화 시 한 번만)
   const { data: skillsetsResponse } = useQuery({
-    queryKey: ["skillsets"],
+    queryKey: ["skill_sets"],
     queryFn: () => skillsetsApi.list()
   });
 
