@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify
 from werkzeug.exceptions import BadRequest, NotFound, Conflict
 
 from app.services.workflow_service import WorkflowService
+from app.utils.datetime_helpers import run_duration_ms
 
 
 def _utc_timestamp(dt):
@@ -50,9 +51,7 @@ def list_workflows():
                 runs,
                 key=lambda r: _utc_timestamp(r.started_at or r.created_at)
             )
-            duration_ms = None
-            if run.finished_at and run.started_at:
-                duration_ms = int((run.finished_at - run.started_at).total_seconds() * 1000)
+            duration_ms = run_duration_ms(run.started_at, run.finished_at)
             latest_run = {
                 "runId": run.run_id,
                 "workflowId": run.workflow_id,

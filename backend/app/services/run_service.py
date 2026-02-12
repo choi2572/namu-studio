@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
+from app.utils.datetime_helpers import run_duration_ms
 from app.domain.models import (
     Run,
     NodeRun,
@@ -148,11 +149,7 @@ class RunService:
                 "workflowName": workflow.name if workflow else "",
                 "status": run.status.value,
                 "startedAt": run.started_at.isoformat() if run.started_at else None,
-                "durationMs": (
-                    int((run.finished_at - run.started_at).total_seconds() * 1000)
-                    if run.finished_at and run.started_at
-                    else None
-                ),
+                "durationMs": run_duration_ms(run.started_at, run.finished_at),
                 "failureCode": run.failure_code,
                 "failureMessage": run.failure_message,
             },

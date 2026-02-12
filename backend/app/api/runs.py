@@ -3,6 +3,8 @@ import os
 from flask import Blueprint, request, jsonify
 from werkzeug.exceptions import BadRequest, NotFound, Conflict
 
+from app.utils.datetime_helpers import run_duration_ms
+
 from app.services.run_service import RunService
 from app.services.workflow_service import WorkflowService
 from app.repos.registry import (
@@ -72,10 +74,7 @@ def list_runs():
     result = []
     for run in runs:
         workflow = _workflow_repo.get(run.workflow_id)
-        duration_ms = None
-        if run.finished_at and run.started_at:
-            duration_ms = int((run.finished_at - run.started_at).total_seconds() * 1000)
-        
+        duration_ms = run_duration_ms(run.started_at, run.finished_at)
         result.append({
             "runId": run.run_id,
             "workflowId": run.workflow_id,
@@ -122,10 +121,7 @@ def get_run(run_id: str):
         raise NotFound(f"Run {run_id} not found")
     
     workflow = _workflow_repo.get(run.workflow_id)
-    duration_ms = None
-    if run.finished_at and run.started_at:
-        duration_ms = int((run.finished_at - run.started_at).total_seconds() * 1000)
-    
+    duration_ms = run_duration_ms(run.started_at, run.finished_at)
     return jsonify({
         "runId": run.run_id,
         "workflowId": run.workflow_id,
