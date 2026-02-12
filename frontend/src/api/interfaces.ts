@@ -114,6 +114,8 @@ export interface RunsApi {
   getEvents(runId: string, afterSeq: number): Promise<RunEvent[]>;
   /** Start a new run for a published workflow. Returns the new run summary. */
   startRun(workflowId: string, runInput?: Record<string, unknown>): Promise<RunSummary>;
+  /** Cancel a run (backend DB + execution engine). */
+  cancelRun(runId: string): Promise<RunSummary>;
 }
 
 export interface SkillsetsApi {

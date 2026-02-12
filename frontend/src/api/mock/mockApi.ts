@@ -519,6 +519,36 @@ export const mockRunsApi: RunsApi = {
       };
     }
     return delay(deepClone(newRun));
+  },
+
+  async cancelRun(runId: string): Promise<RunSummary> {
+    const run = runSummaries.find((r) => r.runId === runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    if (run.status === RunStatus.SUCCESS || run.status === RunStatus.FAILED || run.status === RunStatus.CANCELED) {
+      return delay(deepClone(run));
+    }
+    run.status = RunStatus.CANCELED;
+    const nodes = nodeStateSnapshots[runId];
+    if (Array.isArray(nodes)) {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].status === NodeStatus.RUNNING || nodes[i].status === NodeStatus.WAITING) {
+          nodes[i] = { ...nodes[i], status: NodeStatus.CANCELED };
+        }
+      }
+    }
+    const events = runEvents[runId] ?? [];
+    const nextSeq = events.length > 0 ? Math.max(...events.map((e) => e.seq)) + 1 : 1;
+    events.push({
+      eventId: `event-cancel-${nextSeq}`,
+      runId,
+      seq: nextSeq,
+      timestamp: new Date().toISOString(),
+      eventType: "RUN_CANCELED",
+      payload: { source: "backend_cancel" }
+    });
+    return delay(deepClone(run));
   }
 };
 

@@ -37,6 +37,10 @@ class ExecutionEngineAdapter(ABC):
         """Resume a waiting node."""
         pass
 
+    def reconcile_stale_run(self, run: Run) -> bool:
+        """If the execution engine is idle but this run is still active, mark it terminal. Returns True if run was reconciled."""
+        return False
+
 
 class DummyExecutionEngineAdapter(ExecutionEngineAdapter):
     """Dummy adapter that simulates execution (DSL v1)."""

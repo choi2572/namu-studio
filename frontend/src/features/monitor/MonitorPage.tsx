@@ -336,7 +336,12 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     try {
       await middlewareApi.runWorkflowCancel();
     } catch (e) {
-      console.error("Cancel request failed", e);
+      console.error("Middleware cancel failed", e);
+    }
+    try {
+      await runsApi.cancelRun(runId);
+    } catch (e) {
+      console.error("Backend cancel failed", e);
     }
     setRunStatus(RunStatus.CANCELED);
     // 즉시 캐시를 terminal로 갱신해서 refetchInterval이 폴링을 멈추도록 함

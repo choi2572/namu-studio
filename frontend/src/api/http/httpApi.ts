@@ -240,5 +240,13 @@ export const httpRunsApi: RunsApi = {
     });
     const created = await handleResponse<{ runId: string; workflowId: string; status: string }>(response);
     return this.get(created.runId);
+  },
+
+  async cancelRun(runId: string): Promise<RunSummary> {
+    const url = getApiUrl(`/runs/${runId}/cancel`);
+    logApiCall("POST", url);
+    const response = await fetch(url, { method: "POST" });
+    await handleResponse<{ runId: string; status: string }>(response);
+    return this.get(runId);
   }
 };

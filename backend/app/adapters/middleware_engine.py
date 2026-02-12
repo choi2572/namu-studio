@@ -140,3 +140,37 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
         """Resume is not implemented for middleware adapter (middleware may support later)."""
         logger.warning("resume_wait not implemented for middleware adapter")
         pass
+
+    def reconcile_stale_run(self, run: Run) -> bool:
+        """If middleware runner_status is idle but run is still RUNNING/WAITING, mark run CANCELED."""
+        try:
+            resp = self.client.get_runner_status()
+            runner_status = (resp.get("runner_status") or "").lower()
+            if runner_status != "idle":
+                return False
+        except Exception as e:
+            logger.warning("Reconcile: get_runner_status failed: %s", e)
+            return False
+        run_id = run.run_id
+        run = self.run_repo.get(run_id)
+        if not run or run.status not in (RunStatus.RUNNING, RunStatus.WAITING):
+            return False
+        run.status = RunStatus.CANCELED
+        run.finished_at = datetime.utcnow()
+        self.run_repo.update(run)
+        import uuid
+        from app.domain.models import RunEvent
+        seq = (self.run_event_repo.get_max_seq(run_id) or 0) + 1
+        self.run_event_repo.create(
+            RunEvent(
+                event_id=str(uuid.uuid4()),
+                run_id=run_id,
+                seq=seq,
+                timestamp=datetime.utcnow(),
+                event_type="RUN_CANCELED",
+                state_name=None,
+                payload_json={"source": "reconcile_stale_run"},
+            )
+        )
+        logger.info("Reconciled stale run %s (middleware idle, marked CANCELED)", run_id)
+        return True

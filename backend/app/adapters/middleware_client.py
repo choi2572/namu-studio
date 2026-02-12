@@ -329,12 +329,20 @@ def _apply_workflow_completed(
     run_repo,
     run_event_repo,
 ) -> None:
-    """Handle workflow_completed: set run SUCCESS, emit RUN_SUCCEEDED."""
+    """Handle workflow_completed / workflow_cancelled: set run SUCCESS or CANCELED, emit event."""
     run = run_repo.get(run_id)
     if not run:
         return
     ts = _parse_ts(payload.get("timestamp")) or datetime.utcnow()
-    run.status = RunStatus.SUCCESS
+    status_str = (payload.get("status") or "succeeded").lower()
+    if status_str in ("cancelled", "canceled"):
+        run.status = RunStatus.CANCELED
+        event_type = "RUN_CANCELED"
+        payload_json = {"source": "workflow_cancelled"}
+    else:
+        run.status = RunStatus.SUCCESS
+        event_type = "RUN_SUCCEEDED"
+        payload_json = payload.get("final_stats") or {}
     run.finished_at = ts
     run_repo.update(run)
     seq = (run_event_repo.get_max_seq(run_id) or 0) + 1
@@ -344,9 +352,9 @@ def _apply_workflow_completed(
             run_id=run_id,
             seq=seq,
             timestamp=ts,
-            event_type="RUN_SUCCEEDED",
+            event_type=event_type,
             state_name=None,
-            payload_json=payload.get("final_stats") or {},
+            payload_json=payload_json,
         )
     )
 
@@ -497,24 +505,34 @@ def run_middleware_monitor_ws(
         try:
             data = json.loads(message)
         except json.JSONDecodeError:
+            logger.warning("Monitor WS run_id=%s: invalid JSON", run_id)
             return
         msg_type = (data.get("type") or "").strip().lower()
-        if msg_type == "initial":
-            persist_initial(data)
-        elif msg_type == "node_status_change":
-            persist_node_change(data)
-        elif msg_type == "workflow_completed":
-            persist_workflow_completed(data)
-            closed.set()
-        elif msg_type == "error":
-            persist_error(data)
-            closed.set()
-        elif msg_type == "feedback":
-            persist_feedback(data)
-        elif msg_type == "graph_patch":
-            persist_graph_patch(data)
-        elif msg_type == "pong":
-            pass
+        logger.debug("Monitor WS run_id=%s type=%s", run_id, msg_type)
+        try:
+            if msg_type == "initial":
+                persist_initial(data)
+            elif msg_type == "node_status_change":
+                persist_node_change(data)
+            elif msg_type == "workflow_completed":
+                persist_workflow_completed(data)
+                closed.set()
+            elif msg_type == "workflow_cancelled":
+                persist_workflow_completed(data)
+                closed.set()
+            elif msg_type == "error":
+                persist_error(data)
+                closed.set()
+            elif msg_type == "feedback":
+                persist_feedback(data)
+            elif msg_type == "graph_patch":
+                persist_graph_patch(data)
+            elif msg_type == "pong":
+                pass
+            else:
+                logger.debug("Monitor WS run_id=%s: unhandled type=%s", run_id, msg_type)
+        except Exception as e:
+            logger.exception("Monitor WS run_id=%s persist type=%s failed: %s", run_id, msg_type, e)
 
     def on_close(ws, close_status_code, close_msg) -> None:
         closed.set()
