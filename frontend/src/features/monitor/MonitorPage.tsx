@@ -532,21 +532,41 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const displayEvents = showReplay ? events.slice(0, replayIndex + 1) : events;
   const displayNodeStates = showReplay ? replayNodeStates : allNodes;
 
-  // 타임라인용: event.stateName(백엔드 state_name)으로 조회 시 현재 DSL 표시명이 나오도록 allNodes + monitorGraph 병합
+  // 타임라인용: 이벤트의 stateName마다 항목을 만들고, 표시명은 항상 현재 워크플로 드래프트 DSL 기준으로 설정
   const timelineNodeStates = useMemo(() => {
+    const labelMap = new Map<string, string>();
+    const dsl = workflowDraft?.dsl_json as { States?: Record<string, { Label?: string }> } | undefined;
+    if (dsl?.States) {
+      for (const [k, v] of Object.entries(dsl.States)) {
+        labelMap.set(k, v?.Label ?? k);
+      }
+    }
+    if (monitorGraph) {
+      monitorGraph.nodes.forEach((n) => labelMap.set(n.apiStateName, n.nodeName));
+    }
     const byState = new Map<string, { stateName: string; nodeName: string; typeLabel?: string }>();
-    allNodes.forEach((n) => byState.set(n.stateName, { stateName: n.stateName, nodeName: n.nodeName }));
+    displayEvents.forEach((e) => {
+      if (!e.stateName) return;
+      byState.set(e.stateName, {
+        stateName: e.stateName,
+        nodeName: labelMap.get(e.stateName) ?? e.stateName
+      });
+    });
     if (monitorGraph) {
       monitorGraph.nodes.forEach((n) => {
-        byState.set(n.apiStateName, {
-          stateName: n.apiStateName,
-          nodeName: n.nodeName,
-          typeLabel: getNodeTypeCategory(n.dslType, n.containerType)
-        });
+        const cur = byState.get(n.apiStateName);
+        if (cur)
+          byState.set(n.apiStateName, { ...cur, typeLabel: getNodeTypeCategory(n.dslType, n.containerType) });
+        else
+          byState.set(n.apiStateName, {
+            stateName: n.apiStateName,
+            nodeName: n.nodeName,
+            typeLabel: getNodeTypeCategory(n.dslType, n.containerType)
+          });
       });
     }
     return Array.from(byState.values());
-  }, [allNodes, monitorGraph]);
+  }, [workflowDraft?.dsl_json, monitorGraph, displayEvents]);
 
   const takenBranchByConditionPathId = useMemo(() => {
     const ev = showReplay ? events.slice(0, replayIndex + 1) : events;
