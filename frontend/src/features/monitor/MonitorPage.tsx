@@ -477,15 +477,13 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       return latestNodeStates;
     }
 
-    // DSL의 모든 state를 노드로 변환. 표시명(nodeName)은 항상 현재 DSL Label 기준으로 유지.
+    // DSL의 모든 state를 노드로 변환
     const dslNodes = Object.entries(dsl.States).map(([stateName, state]) => {
       const existingNode = latestNodeStates.find((n) => n.stateName === stateName);
-      const nodeName = (state.Label as string) || stateName;
-      if (existingNode)
-        return { ...existingNode, nodeName } as NodeStateSnapshot;
+      if (existingNode) return existingNode;
       return {
         stateName,
-        nodeName,
+        nodeName: (state.Label as string) || stateName,
         status: NodeStatus.WAITING,
         durationMs: null
       } as NodeStateSnapshot;
@@ -493,16 +491,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
 
     const nodeMap = new Map<string, NodeStateSnapshot>();
     dslNodes.forEach((node) => nodeMap.set(node.stateName, node));
-    // 스냅샷은 status/durationMs만 반영하고, 표시명은 위에서 쓴 현재 DSL 유지
-    latestNodeStates.forEach((node) => {
-      const existing = nodeMap.get(node.stateName);
-      nodeMap.set(node.stateName, {
-        ...node,
-        nodeName: existing?.nodeName ?? node.nodeName,
-        status: node.status,
-        durationMs: node.durationMs
-      } as NodeStateSnapshot);
-    });
+    latestNodeStates.forEach((node) => nodeMap.set(node.stateName, node));
 
     // VLM 동적 노드: patched graph에만 있는 노드 추가 (플래그 켜진 경우)
     if (ENABLE_DYNAMIC_GRAPH_PATCH && monitorGraph) {
@@ -531,23 +520,6 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   );
   const displayEvents = showReplay ? events.slice(0, replayIndex + 1) : events;
   const displayNodeStates = showReplay ? replayNodeStates : allNodes;
-
-  // 타임라인용: event.stateName(백엔드 state_name)으로 조회 시 현재 DSL 표시명이 나오도록 allNodes + monitorGraph 병합
-  const timelineNodeStates = useMemo(() => {
-    const byState = new Map<string, { stateName: string; nodeName: string; typeLabel?: string }>();
-    allNodes.forEach((n) => byState.set(n.stateName, { stateName: n.stateName, nodeName: n.nodeName }));
-    if (monitorGraph) {
-      monitorGraph.nodes.forEach((n) => {
-        byState.set(n.apiStateName, {
-          stateName: n.apiStateName,
-          nodeName: n.nodeName,
-          typeLabel: getNodeTypeCategory(n.dslType, n.containerType)
-        });
-      });
-    }
-    return Array.from(byState.values());
-  }, [allNodes, monitorGraph]);
-
   const takenBranchByConditionPathId = useMemo(() => {
     const ev = showReplay ? events.slice(0, replayIndex + 1) : events;
     return computeTakenBranches(monitorGraph, ev);
@@ -756,7 +728,18 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               onSelectNode={(stateName) =>
                 setSelectedNode(stateNameToPathId.get(stateName) ?? stateName)
               }
-              nodeStates={timelineNodeStates}
+              nodeStates={
+                monitorGraph
+                  ? monitorGraph.nodes.map((n) => ({
+                      stateName: n.apiStateName,
+                      nodeName: n.nodeName,
+                      typeLabel: getNodeTypeCategory(n.dslType, n.containerType)
+                    }))
+                  : allNodes.map((n) => ({
+                      stateName: n.stateName,
+                      nodeName: n.nodeName
+                    }))
+              }
             />
           </div>
         </Card>
