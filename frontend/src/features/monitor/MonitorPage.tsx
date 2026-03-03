@@ -316,9 +316,20 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return () => clearTimeout(t);
   }, [runId, runStatus, queryClient]);
 
-  // stateName -> durationMs 매핑 (NODE_SUCCEEDED 이벤트 payload 기준, timestamp는 사용하지 않음)
+  // stateName -> durationMs 매핑
+  // 1순위: snapshot.nodeStates / nodeStates 에 저장된 durationMs (DB 기반, 가장 신뢰도 높음)
+  // 2순위: NODE_SUCCEEDED 이벤트 payload.durationMs (middleware가 내려줄 경우 보정용)
   const durationByStateName = useMemo(() => {
     const map = new Map<string, number>();
+
+    // 1) 스냅샷 기반 (RunService.get_run_snapshot → NodeRun.duration_ms)
+    (snapshot?.nodeStates ?? nodeStates).forEach((n) => {
+      if (typeof n.durationMs === "number" && n.durationMs >= 0) {
+        map.set(n.stateName, n.durationMs);
+      }
+    });
+
+    // 2) 이벤트 payload 기반 보정 (middleware가 NODE_SUCCEEDED에 duration_ms를 넣어줄 때)
     events.forEach((ev) => {
       if (ev.eventType !== "NODE_SUCCEEDED" || !ev.stateName) return;
       const payload = ev.payload as { durationMs?: number } | undefined;
@@ -327,8 +338,9 @@ export function MonitorPage({ runId }: MonitorPageProps) {
         map.set(ev.stateName, d);
       }
     });
+
     return map;
-  }, [events]);
+  }, [snapshot?.nodeStates, nodeStates, events]);
 
   // Replay 재생 속도: timestamp는 완전히 무시하고, sequence + durationMs만으로 계산
   const replayDelays = useMemo(() => {
