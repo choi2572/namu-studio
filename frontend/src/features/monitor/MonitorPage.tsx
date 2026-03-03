@@ -316,42 +316,36 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return () => clearTimeout(t);
   }, [runId, runStatus, queryClient]);
 
-  // stateName -> durationMs 매핑 (실제 실행 시간)
+  // stateName -> durationMs 매핑 (NODE_SUCCEEDED 이벤트 payload 기준, timestamp는 사용하지 않음)
   const durationByStateName = useMemo(() => {
     const map = new Map<string, number>();
-    (snapshot?.nodeStates ?? nodeStates).forEach((n) => {
-      if (n.durationMs != null) {
-        map.set(n.stateName, n.durationMs);
+    events.forEach((ev) => {
+      if (ev.eventType !== "NODE_SUCCEEDED" || !ev.stateName) return;
+      const payload = ev.payload as { durationMs?: number } | undefined;
+      const d = payload?.durationMs;
+      if (typeof d === "number" && d >= 0) {
+        map.set(ev.stateName, d);
       }
     });
     return map;
-  }, [snapshot?.nodeStates, nodeStates]);
+  }, [events]);
 
-  // Replay 재생 속도: timestamp는 무시하고, sequence + durationMs로만 계산
+  // Replay 재생 속도: timestamp는 완전히 무시하고, sequence + durationMs만으로 계산
   const replayDelays = useMemo(() => {
     if (events.length === 0) return [] as number[];
-    // 기본 스텝 딜레이 (노드 실행이 없는 구간)
-    const baseDelay = 300;
+    // 기본 스텝 딜레이 (노드 실행이 없는 이벤트들)
+    const baseDelay = 200;
     const delays = new Array<number>(events.length).fill(baseDelay);
-    const lastStartIndexByState = new Map<string, number>();
 
     events.forEach((ev, idx) => {
       const stateName = ev.stateName;
       if (!stateName) return;
-
       if (ev.eventType === "NODE_STARTED") {
-        lastStartIndexByState.set(stateName, idx);
-        return;
-      }
-
-      if (ev.eventType === "NODE_SUCCEEDED") {
-        const startIdx = lastStartIndexByState.get(stateName);
         const duration = durationByStateName.get(stateName);
-        if (startIdx != null && duration != null && idx > startIdx) {
-          // 이 노드의 RUNNING 구간을 duration만큼 재생하기 위해,
-          // SUCCEEDED 직전 스텝의 딜레이를 duration으로 설정
-          const delayIndex = Math.max(idx - 1, 0);
-          delays[delayIndex] = Math.max(delays[delayIndex], duration);
+        if (duration != null) {
+          // 이 노드가 RUNNING 상태로 머무는 시간 = durationMs
+          // NODE_STARTED → 다음 이벤트로 넘어갈 때까지 duration만큼 대기
+          delays[idx] = duration;
         }
       }
     });
