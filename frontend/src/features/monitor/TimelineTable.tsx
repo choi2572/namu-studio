@@ -146,8 +146,6 @@ type TimelineTableProps = {
   selectedStateName?: string | null;
   onSelectNode: (stateName: string) => void;
   nodeStates?: Array<{ stateName: string; nodeName: string; typeLabel?: string }>;
-  /** 있으면 Node 컬럼 표시명을 이걸로만 사용 (DAG와 동일 소스 보장) */
-  getNodeDisplayName?: (stateName: string) => string;
 };
 
 // 이벤트 타입별 색상 (아이콘은 SVG로 대체)
@@ -231,8 +229,7 @@ export function TimelineTable({
   selectedNode,
   selectedStateName = null,
   onSelectNode,
-  nodeStates = [],
-  getNodeDisplayName
+  nodeStates = []
 }: TimelineTableProps) {
   const highlightStateName = selectedStateName ?? selectedNode;
   if (events.length === 0) {
@@ -338,9 +335,7 @@ export function TimelineTable({
                 {event.stateName ? (
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-slate-800">
-                      {getNodeDisplayName
-                        ? getNodeDisplayName(event.stateName)
-                        : nodeInfo?.nodeName || event.stateName}
+                      {nodeInfo?.nodeName || event.stateName}
                     </span>
                     {nodeTypeInfo && (
                       <span
