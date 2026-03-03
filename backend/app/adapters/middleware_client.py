@@ -303,7 +303,14 @@ def _apply_node_status_change(
             )
     elif status == "SUCCESS":
         output = payload.get("output")
-        duration_ms = payload.get("duration_ms")
+        # Middleware spec에는 node_status_change SUCCESS 이벤트에 duration_ms가 없으므로,
+        # 기존 NodeRun.started_at 과 현재 ts 를 이용해서 duration_ms를 계산한다.
+        existing_started_at = existing.started_at if existing else None
+        if existing_started_at:
+            duration_ms = int((ts - existing_started_at).total_seconds() * 1000)
+        else:
+            # started_at이 없으면 duration을 알 수 없으니 None
+            duration_ms = None
         if existing:
             existing.status = NodeStatus.SUCCEEDED
             existing.finished_at = ts
