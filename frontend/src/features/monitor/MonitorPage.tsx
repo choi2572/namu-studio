@@ -316,20 +316,70 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return () => clearTimeout(t);
   }, [runId, runStatus, queryClient]);
 
+  // stateName -> durationMs 매핑 (실제 실행 시간)
+  const durationByStateName = useMemo(() => {
+    const map = new Map<string, number>();
+    (snapshot?.nodeStates ?? nodeStates).forEach((n) => {
+      if (n.durationMs != null) {
+        map.set(n.stateName, n.durationMs);
+      }
+    });
+    return map;
+  }, [snapshot?.nodeStates, nodeStates]);
+
+  // Replay 재생 속도: timestamp는 무시하고, sequence + durationMs로만 계산
+  const replayDelays = useMemo(() => {
+    if (events.length === 0) return [] as number[];
+    // 기본 스텝 딜레이 (노드 실행이 없는 구간)
+    const baseDelay = 300;
+    const delays = new Array<number>(events.length).fill(baseDelay);
+    const lastStartIndexByState = new Map<string, number>();
+
+    events.forEach((ev, idx) => {
+      const stateName = ev.stateName;
+      if (!stateName) return;
+
+      if (ev.eventType === "NODE_STARTED") {
+        lastStartIndexByState.set(stateName, idx);
+        return;
+      }
+
+      if (ev.eventType === "NODE_SUCCEEDED") {
+        const startIdx = lastStartIndexByState.get(stateName);
+        const duration = durationByStateName.get(stateName);
+        if (startIdx != null && duration != null && idx > startIdx) {
+          // 이 노드의 RUNNING 구간을 duration만큼 재생하기 위해,
+          // SUCCEEDED 직전 스텝의 딜레이를 duration으로 설정
+          const delayIndex = Math.max(idx - 1, 0);
+          delays[delayIndex] = Math.max(delays[delayIndex], duration);
+        }
+      }
+    });
+
+    return delays;
+  }, [events, durationByStateName]);
+
   // Replay: advance index on interval when playing
   useEffect(() => {
     if (!replayPlaying || events.length === 0) return;
-    const interval = setInterval(() => {
-      setReplayIndex((i: number) => {
+    if (replayIndex >= events.length - 1) {
+      setReplayPlaying(false);
+      return;
+    }
+
+    const delay = replayDelays[replayIndex] ?? 500;
+    const timeout = setTimeout(() => {
+      setReplayIndex((i) => {
         if (i >= events.length - 1) {
           setReplayPlaying(false);
           return events.length - 1;
         }
         return i + 1;
       });
-    }, 700);
-    return () => clearInterval(interval);
-  }, [replayPlaying, events.length]);
+    }, delay);
+
+    return () => clearTimeout(timeout);
+  }, [replayPlaying, replayIndex, events.length, replayDelays]);
 
   const handleCancel = async () => {
     const startedAt = snapshot?.run.startedAt ?? new Date().toISOString();
@@ -511,7 +561,13 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   }, [latestNodeStates, workflowDraft, monitorGraph]);
 
   const initialReplayNodes = useMemo(
-    () => allNodes.map((n) => ({ ...n, status: NodeStatus.WAITING, durationMs: null })),
+    () =>
+      allNodes.map((n) => ({
+        ...n,
+        // Replay에서는 상태만 WAITING으로 리셋하고, duration은 스냅샷 값(실제 실행 시간)을 기본값으로 유지한다.
+        status: NodeStatus.WAITING,
+        durationMs: n.durationMs
+      })),
     [allNodes]
   );
   const replayNodeStates = useMemo(
