@@ -198,12 +198,11 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     enabled: Boolean(selectedNode && debugStateName)
   });
 
-  // Workflow draft 가져오기 (DSL에서 엣지 정보 추출용 + Monitor graph). 에디터에서 수정 후 돌아왔을 때 최신 반영
+  // Workflow draft 가져오기 (DSL에서 엣지 정보 추출용 + Monitor graph)
   const { data: workflowDraft } = useQuery({
     queryKey: ["workflow-draft", snapshot?.run.workflowId],
     queryFn: () => workflowsApi.getDraft(snapshot!.run.workflowId),
-    enabled: Boolean(snapshot?.run.workflowId),
-    refetchOnWindowFocus: true
+    enabled: Boolean(snapshot?.run.workflowId)
   });
 
   const baseMonitorGraph = useMemo(
@@ -533,41 +532,41 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const displayEvents = showReplay ? events.slice(0, replayIndex + 1) : events;
   const displayNodeStates = showReplay ? replayNodeStates : allNodes;
 
-  // 타임라인용: DAG와 동일하게 monitorGraph에서 표시명 가져옴 (같은 소스 = 같은 이름 보장). graph 없을 때만 DSL fallback
+  // 타임라인용: 이벤트의 stateName마다 항목을 만들고, 표시명은 항상 현재 워크플로 드래프트 DSL 기준으로 설정
   const timelineNodeStates = useMemo(() => {
-    const byState = new Map<string, { stateName: string; nodeName: string; typeLabel?: string }>();
-    const dslLabels = new Map<string, string>();
+    const labelMap = new Map<string, string>();
     const dsl = workflowDraft?.dsl_json as { States?: Record<string, { Label?: string }> } | undefined;
     if (dsl?.States) {
-      Object.entries(dsl.States).forEach(([k, v]) => dslLabels.set(k, v?.Label ?? k));
+      for (const [k, v] of Object.entries(dsl.States)) {
+        labelMap.set(k, v?.Label ?? k);
+      }
     }
+    if (monitorGraph) {
+      monitorGraph.nodes.forEach((n) => labelMap.set(n.apiStateName, n.nodeName));
+    }
+    const byState = new Map<string, { stateName: string; nodeName: string; typeLabel?: string }>();
     displayEvents.forEach((e) => {
       if (!e.stateName) return;
-      const graphNode = monitorGraph?.nodes.find(
-        (n) => n.apiStateName === e.stateName || n.stateName === e.stateName
-      );
-      const nodeName = graphNode?.nodeName ?? dslLabels.get(e.stateName) ?? e.stateName;
       byState.set(e.stateName, {
         stateName: e.stateName,
-        nodeName,
-        typeLabel: graphNode
-          ? getNodeTypeCategory(graphNode.dslType, graphNode.containerType)
-          : undefined
+        nodeName: labelMap.get(e.stateName) ?? e.stateName
       });
     });
     if (monitorGraph) {
       monitorGraph.nodes.forEach((n) => {
-        if (!byState.has(n.apiStateName)) {
+        const cur = byState.get(n.apiStateName);
+        if (cur)
+          byState.set(n.apiStateName, { ...cur, typeLabel: getNodeTypeCategory(n.dslType, n.containerType) });
+        else
           byState.set(n.apiStateName, {
             stateName: n.apiStateName,
             nodeName: n.nodeName,
             typeLabel: getNodeTypeCategory(n.dslType, n.containerType)
           });
-        }
       });
     }
     return Array.from(byState.values());
-  }, [monitorGraph, displayEvents, workflowDraft?.dsl_json]);
+  }, [workflowDraft?.dsl_json, monitorGraph, displayEvents]);
 
   const takenBranchByConditionPathId = useMemo(() => {
     const ev = showReplay ? events.slice(0, replayIndex + 1) : events;
