@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -569,20 +569,6 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return Array.from(byState.values());
   }, [monitorGraph, displayEvents, workflowDraft?.dsl_json]);
 
-  // 타임라인 Node 컬럼: DAG와 완전히 동일한 소스(monitorGraph → draft)로 표시명 조회
-  const getNodeDisplayName = useCallback(
-    (stateName: string): string => {
-      const graphNode = monitorGraph?.nodes.find(
-        (n) => n.apiStateName === stateName || n.stateName === stateName
-      );
-      if (graphNode) return graphNode.nodeName;
-      const dsl = workflowDraft?.dsl_json as { States?: Record<string, { Label?: string }> } | undefined;
-      const label = dsl?.States?.[stateName]?.Label;
-      return label ?? stateName;
-    },
-    [monitorGraph, workflowDraft?.dsl_json]
-  );
-
   const takenBranchByConditionPathId = useMemo(() => {
     const ev = showReplay ? events.slice(0, replayIndex + 1) : events;
     return computeTakenBranches(monitorGraph, ev);
@@ -792,7 +778,6 @@ export function MonitorPage({ runId }: MonitorPageProps) {
                 setSelectedNode(stateNameToPathId.get(stateName) ?? stateName)
               }
               nodeStates={timelineNodeStates}
-              getNodeDisplayName={getNodeDisplayName}
             />
           </div>
         </Card>
