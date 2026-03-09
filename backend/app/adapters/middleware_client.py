@@ -37,6 +37,8 @@ def _middleware_node_status_to_internal(status: str) -> str:
     s = (status or "").upper()
     if s == "SUCCESS":
         return NodeStatus.SUCCEEDED.value
+    if s == "FAILURE":
+        return NodeStatus.FAILED.value
     if s in ("RUNNING", "WAITING", "FAILED", "SKIPPED", "CANCELED"):
         return s
     if s == "IDLE":
@@ -245,6 +247,19 @@ def _apply_initial_to_db(
                         payload_json={"output": output_json, "duration_ms": duration_ms},
                     )
                 )
+            elif status_str == "FAILURE":
+                seq = (run_event_repo.get_max_seq(run_id) or 0) + 1
+                run_event_repo.create(
+                    RunEvent(
+                        event_id=str(uuid.uuid4()),
+                        run_id=run_id,
+                        seq=seq,
+                        timestamp=completed_at or started_at or run.started_at or datetime.utcnow(),
+                        event_type="NODE_FAILED",
+                        state_name=node_name,
+                        payload_json={"duration_ms": duration_ms},
+                    )
+                )
 
 
 def _apply_node_status_change(
@@ -303,13 +318,10 @@ def _apply_node_status_change(
             )
     elif status == "SUCCESS":
         output = payload.get("output")
-        # Middleware spec에는 node_status_change SUCCESS 이벤트에 duration_ms가 없으므로,
-        # 기존 NodeRun.started_at 과 현재 ts 를 이용해서 duration_ms를 계산한다.
         existing_started_at = existing.started_at if existing else None
         if existing_started_at:
             duration_ms = int((ts - existing_started_at).total_seconds() * 1000)
         else:
-            # started_at이 없으면 duration을 알 수 없으니 None
             duration_ms = None
         if existing:
             existing.status = NodeStatus.SUCCEEDED
@@ -328,6 +340,28 @@ def _apply_node_status_change(
                 payload_json={"output": output, "duration_ms": duration_ms},
             )
         )
+    elif status == "FAILURE":
+        existing_started_at = existing.started_at if existing else None
+        if existing_started_at:
+            duration_ms = int((ts - existing_started_at).total_seconds() * 1000)
+        else:
+            duration_ms = None
+        if existing:
+            existing.status = NodeStatus.FAILED
+            existing.finished_at = ts
+            existing.duration_ms = duration_ms
+            node_run_repo.update(existing)
+        run_event_repo.create(
+            RunEvent(
+                event_id=str(uuid.uuid4()),
+                run_id=run_id,
+                seq=seq,
+                timestamp=ts,
+                event_type="NODE_FAILED",
+                state_name=node_name,
+                payload_json={"duration_ms": duration_ms},
+            )
+        )
 
 
 def _apply_workflow_completed(
@@ -336,7 +370,7 @@ def _apply_workflow_completed(
     run_repo,
     run_event_repo,
 ) -> None:
-    """Handle workflow_completed / workflow_cancelled: set run SUCCESS or CANCELED, emit event."""
+    """Handle workflow_completed / workflow_cancelled: set run SUCCESS, FAILED, or CANCELED, emit event."""
     run = run_repo.get(run_id)
     if not run:
         return
@@ -346,6 +380,16 @@ def _apply_workflow_completed(
         run.status = RunStatus.CANCELED
         event_type = "RUN_CANCELED"
         payload_json = {"source": "workflow_cancelled"}
+    elif status_str == "failed":
+        run.status = RunStatus.FAILED
+        run.failure_code = payload.get("error_code") or "WORKFLOW_FAILED"
+        run.failure_message = payload.get("message") or "Workflow failed"
+        event_type = "RUN_FAILED"
+        payload_json = {
+            "source": "workflow_completed",
+            "message": payload.get("message"),
+            "final_stats": payload.get("final_stats") or {},
+        }
     else:
         run.status = RunStatus.SUCCESS
         event_type = "RUN_SUCCEEDED"
