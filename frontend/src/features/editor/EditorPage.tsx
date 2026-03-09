@@ -891,7 +891,8 @@ function buildStateNameMap(nodes: EditorNode[]) {
 type ContainerDslPayload = {
   type: ContainerType;
   repeatCount?: number;
-  body?: { StartAt: string | null; States: Record<string, Record<string, unknown>> };
+  startAt?: string | null;
+  statesArray?: Array<Record<string, Record<string, unknown>>>;
   branches?: Array<{ StartAt: string | null; States: Record<string, Record<string, unknown>> }>;
 };
 
@@ -959,8 +960,9 @@ function buildStateRecords(
       const next = getNext("next");
       state = {
         Type: "Repeat",
-        Count: payload?.repeatCount ?? getRepeatCount(node),
-        Body: payload?.body ?? { StartAt: null, States: {} }
+        RepeatCount: payload?.repeatCount ?? getRepeatCount(node),
+        StartAt: payload?.startAt ?? null,
+        States: payload?.statesArray ?? []
       };
       if (next) {
         state.Next = next;
@@ -1051,13 +1053,12 @@ function buildDslJson(
         containerPayloads,
         skillsetMap
       );
+      const statesArray = Object.entries(bodyStates).map(([key, value]) => ({ [key]: value }));
       containerPayloads.set(container.id, {
         type: "repeat",
         repeatCount: getRepeatCount(container),
-        body: {
-          StartAt: bodyStartNode ? stateNameMap.get(bodyStartNode.id) ?? null : null,
-          States: bodyStates
-        }
+        startAt: bodyStartNode ? stateNameMap.get(bodyStartNode.id) ?? null : null,
+        statesArray
       });
       return;
     }
@@ -1165,6 +1166,9 @@ type DslState = {
   Label?: string;
   Skill?: string;
   Count?: number;
+  RepeatCount?: number;
+  StartAt?: string;
+  States?: Array<Record<string, DslState>>;
   Parameters?: Record<string, unknown>;
   Choices?: Array<Record<string, unknown>>;
   Expressions?: Array<{ operator?: string | null; expression?: string }>;
@@ -1684,8 +1688,11 @@ function parseDslToEditor(
             {} as Record<string, string>
           )
         : {};
-      if (kind === "flow_control.repeat" && typeof state.Count === "number") {
-        params.count = `${state.Count}`;
+      if (kind === "flow_control.repeat") {
+        const repeatCount = typeof state.RepeatCount === "number" ? state.RepeatCount : typeof state.Count === "number" ? state.Count : undefined;
+        if (repeatCount !== undefined) {
+          params.count = `${repeatCount}`;
+        }
       }
       let conditionExpressions: ConditionExpression[] | undefined;
       if (kind === "flow_control.condition") {
@@ -1851,12 +1858,25 @@ function parseDslToEditor(
     Object.entries(groupStates).forEach(([stateName, state]) => {
       const containerId = idByState.get(stateName);
       if (!containerId) return;
-      if (state.Type === "Repeat" && state.Body?.States) {
-        parseStateGroup(state.Body.States, {
-          containerId,
-          containerType: "repeat",
-          branchIndex: 0
-        });
+      if (state.Type === "Repeat") {
+        let bodyStates: Record<string, DslState> | undefined;
+        if (Array.isArray(state.States)) {
+          bodyStates = {};
+          for (const item of state.States) {
+            if (isRecord(item)) {
+              Object.assign(bodyStates, item);
+            }
+          }
+        } else if (state.Body?.States) {
+          bodyStates = state.Body.States;
+        }
+        if (bodyStates && Object.keys(bodyStates).length > 0) {
+          parseStateGroup(bodyStates as Record<string, DslState>, {
+            containerId,
+            containerType: "repeat",
+            branchIndex: 0
+          });
+        }
       }
       if (state.Type === "Parallel" && Array.isArray(state.Branches)) {
         state.Branches.forEach((branch, index) => {

@@ -64,6 +64,9 @@ type DslState = {
   Label?: string;
   Skill?: string;
   Count?: number;
+  RepeatCount?: number;
+  StartAt?: string;
+  States?: Array<Record<string, DslState>>;
   // Condition DSL: If 블록 안/밖 모두 지원 (If.Then / If.Else 또는 루트 Else)
   If?: { Condition?: unknown; Then?: string; Else?: string };
   Else?: string;
@@ -161,19 +164,32 @@ function collectNodesAndEdges(
       });
     }
 
-    if (type === "Repeat" && state.Body?.States && isRecord(state.Body.States)) {
-      const bodyPathPrefix = [...pathPrefix, stateName, NODE_PATH.BODY];
-      const repeatPathId = nodePathId([...pathPrefix, stateName]);
-      collectNodesAndEdges(
-        state.Body.States as Record<string, DslState>,
-        bodyPathPrefix,
-        repeatPathId,
-        "repeat",
-        null,
-        nodes,
-        edges,
-        edgeIdCounter
-      );
+    if (type === "Repeat") {
+      let bodyStates: Record<string, DslState> | undefined;
+      if (Array.isArray(state.States)) {
+        bodyStates = {};
+        for (const item of state.States) {
+          if (isRecord(item)) {
+            Object.assign(bodyStates, item as Record<string, DslState>);
+          }
+        }
+      } else if (state.Body?.States && isRecord(state.Body.States)) {
+        bodyStates = state.Body.States as Record<string, DslState>;
+      }
+      if (bodyStates && Object.keys(bodyStates).length > 0) {
+        const bodyPathPrefix = [...pathPrefix, stateName, NODE_PATH.BODY];
+        const repeatPathId = nodePathId([...pathPrefix, stateName]);
+        collectNodesAndEdges(
+          bodyStates,
+          bodyPathPrefix,
+          repeatPathId,
+          "repeat",
+          null,
+          nodes,
+          edges,
+          edgeIdCounter
+        );
+      }
     }
 
     if (type === "Parallel" && Array.isArray(state.Branches)) {
