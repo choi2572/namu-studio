@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -441,6 +442,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const showReplayControls = isReplayMode || isTerminal;
   const workflowName = snapshot?.workflowName ?? "Loading...";
   const runMeta = snapshot?.run;
+  const workflowId = runMeta?.workflowId;
 
   // UI notes: Cancel button only when RUNNING, Replay controls only when finished
   const showCancel = runStatus === RunStatus.RUNNING && !isReplayMode;
@@ -618,6 +620,30 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             {runStatus && <StatusBadge status={runStatus} />}
             {showCancel && (
               <Button onClick={handleCancel}>Cancel</Button>
+            )}
+            {showReplay && workflowId && (
+              <Link href={`/monitor/workflow/${workflowId}`}>
+                <Button
+                  variant="secondary"
+                  className="inline-flex items-center gap-2"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z"
+                    />
+                  </svg>
+                  Open Workflow
+                </Button>
+              </Link>
             )}
             {showReplay && (
               <Button
