@@ -327,15 +327,16 @@ export type GraphPatchPayload = {
 /**
  * Apply graph_patch payloads in order to a base monitor graph (append-only).
  * Used when ENABLE_DYNAMIC_GRAPH_PATCH is on. Creates synthetic container and nodes under target container_path.
+ * If baseGraph is null but there are payloads, builds a graph from patches only (so DAG can show dynamic nodes).
  */
 export function applyGraphPatches(
   baseGraph: MonitorGraph | null,
   patchPayloads: GraphPatchPayload[]
 ): MonitorGraph | null {
-  if (!baseGraph || patchPayloads.length === 0) return baseGraph;
+  if (patchPayloads.length === 0) return baseGraph;
 
-  const nodes = [...baseGraph.nodes];
-  const edges = [...baseGraph.edges];
+  const nodes = baseGraph ? [...baseGraph.nodes] : [];
+  const edges = baseGraph ? [...baseGraph.edges] : [];
   let edgeIdCounter = Math.max(0, ...edges.map((e) => parseInt(e.id.replace(/\D/g, ""), 10) || 0));
 
   const pathIdsByStateName = new Map<string, string>();

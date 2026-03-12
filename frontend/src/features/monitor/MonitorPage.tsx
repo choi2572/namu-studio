@@ -216,15 +216,15 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return events
       .filter((e) => e.eventType === "GRAPH_PATCH" && e.payload)
       .map((e) => e.payload as GraphPatchPayload)
-      .filter((p) => p && (p.nodes_added != null || p.edges_added != null));
-  }, [events]);
+      .filter((p) => p && (p.nodes_added != null || p.edges_added != null || (p.nodes_removed != null && p.nodes_removed.length > 0)));
+  }, [events, ENABLE_DYNAMIC_GRAPH_PATCH]);
 
   const monitorGraph = useMemo(
     () =>
       ENABLE_DYNAMIC_GRAPH_PATCH && graphPatchPayloads.length > 0
         ? applyGraphPatches(baseMonitorGraph, graphPatchPayloads)
         : baseMonitorGraph,
-    [baseMonitorGraph, graphPatchPayloads]
+    [baseMonitorGraph, graphPatchPayloads, ENABLE_DYNAMIC_GRAPH_PATCH]
   );
 
   const stateNameToPathId = useMemo(

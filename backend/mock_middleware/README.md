@@ -35,7 +35,10 @@ Set `MOCK_VLM_DYNAMIC_PATCH=true` (or `1`) to enable the **VLM dynamic test scen
   - **14s**: append `Place3 → Place4 → Place5` after Pick4 (after “two picks” finish).
   - **17s**: replan — remove Place4, Place5 and add `Pick5 → Pick6 → Place6` after Place3.
 
-Use a workflow that includes a VLM node (e.g. Pass state named `VLMPlanner_1`). The backend persists each as a `GRAPH_PATCH` run event; the frontend applies patches only when `ENABLE_DYNAMIC_GRAPH_PATCH` is on (e.g. `localStorage.setItem("ENABLE_DYNAMIC_GRAPH_PATCH", "true")` and refresh). See `docs/vlm_monitoring.md`.
+Use a workflow that includes a VLM node (e.g. Pass state named `VLMPlanner_1`). The backend persists each as a `GRAPH_PATCH` run event.
+
+**To see dynamic nodes in the DAG view** (not just in the timeline), turn on the frontend flag:  
+`localStorage.setItem("ENABLE_DYNAMIC_GRAPH_PATCH", "true")` then refresh, or set `NEXT_PUBLIC_ENABLE_DYNAMIC_GRAPH_PATCH=true` in `frontend/.env` and restart the dev server. Without this, the timeline will show GRAPH_PATCH events but the graph will not be patched. See `docs/vlm_monitoring.md`.
 
 ## Full test scenario (Run → Monitor → Replay)
 
