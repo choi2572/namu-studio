@@ -318,6 +318,8 @@ export type GraphPatchPayload = {
     parameters?: Record<string, unknown>;
   }>;
   edges_added?: Array<{ from: string; to: string; label?: string }>;
+  /** Optional replanning: remove these node names from the container before applying nodes_added/edges_added. */
+  nodes_removed?: string[];
   start_at?: string;
   rev?: number;
 };
@@ -353,6 +355,31 @@ export function applyGraphPatches(
     const segments = containerPath.split("/").filter(Boolean);
     const vlmNodeName = segments.length >= 2 ? segments[1] : "VLMPlanner_1";
     const parentPathId = nodePathId([NODE_PATH.ROOT, vlmNodeName]);
+
+    // Replanning: remove nodes (and incident edges) before applying additions
+    const toRemove = payload.nodes_removed ?? [];
+    if (toRemove.length > 0) {
+      const pathIdsToRemove = new Set(
+        toRemove.map((name) => `${containerPath}/${name}`)
+      );
+      const filteredNodes = nodes.filter((n) => !pathIdsToRemove.has(n.pathId));
+      nodes.length = 0;
+      nodes.push(...filteredNodes);
+      edges.splice(
+        0,
+        edges.length,
+        ...edges.filter(
+          (e) =>
+            !pathIdsToRemove.has(e.from) && !pathIdsToRemove.has(e.to)
+        )
+      );
+      pathIdsByStateName.clear();
+      nodes.forEach((n) => {
+        pathIdsByStateName.set(n.apiStateName, n.pathId);
+        if (n.containerPathId === null)
+          pathIdsByStateName.set(n.stateName, n.pathId);
+      });
+    }
 
     if (!nodes.some((n) => n.pathId === parentPathId)) {
       nodes.push({

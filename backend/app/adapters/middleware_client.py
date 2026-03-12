@@ -483,6 +483,7 @@ def _apply_graph_patch(
         "target": data.get("target"),
         "nodes_added": data.get("nodes_added") or [],
         "edges_added": data.get("edges_added") or [],
+        "nodes_removed": data.get("nodes_removed") or [],
         "start_at": data.get("start_at"),
         "rev": data.get("rev"),
     }

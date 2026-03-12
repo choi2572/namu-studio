@@ -52,8 +52,12 @@ def _broadcast(data: Dict[str, Any]) -> None:
             _ws_clients.discard(ws)
 
 
+def _vlm_dynamic_patch_enabled() -> bool:
+    return os.environ.get("MOCK_VLM_DYNAMIC_PATCH", "").strip().lower() in ("true", "1")
+
+
 def _build_mock_graph_patch(workflow_id: str, after_node_name: str) -> Dict[str, Any]:
-    """Build a single mock graph_patch (VLM-generated subflow). Emitted only when MOCK_VLM_DYNAMIC_PATCH is on."""
+    """Legacy: single static graph_patch. Used when MOCK_VLM_DYNAMIC_PATCH is on but not using the full scenario."""
     ts = int(datetime.now(timezone.utc).timestamp())
     return {
         "type": "graph_patch",
@@ -82,6 +86,116 @@ def _build_mock_graph_patch(workflow_id: str, after_node_name: str) -> Dict[str,
         ],
         "start_at": "PickBolt_1",
     }
+
+
+# --- VLM dynamic test scenario: real-time workflow generation + replanning ---
+# Timeline: 5s → pick→place→pick→place; 8s → pick→pick after last place;
+#           14s → place→place→place after last pick; 17s → replan: remove 2 places, add pick→pick→place.
+_CONTAINER_PATH = "root/VLMPlanner_1/generated"
+
+
+def _build_vlm_scenario_patch_1(workflow_id: str) -> Dict[str, Any]:
+    """First DAG: Pick1 → Place1 → Pick2 → Place2."""
+    return {
+        "type": "graph_patch",
+        "workflow_id": workflow_id,
+        "timestamp": int(datetime.now(timezone.utc).timestamp()),
+        "rev": 1,
+        "target": {"container_path": _CONTAINER_PATH},
+        "nodes_added": [
+            {"node_name": "Pick1", "node_type": "Skill", "skill": "Pick", "ui": {"x": 80, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
+            {"node_name": "Place1", "node_type": "Skill", "skill": "Place", "ui": {"x": 240, "y": 200}, "parameters": {"destination": "bin_a"}},
+            {"node_name": "Pick2", "node_type": "Skill", "skill": "Pick", "ui": {"x": 400, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
+            {"node_name": "Place2", "node_type": "Skill", "skill": "Place", "ui": {"x": 560, "y": 200}, "parameters": {"destination": "bin_b"}},
+        ],
+        "edges_added": [
+            {"from": "Pick1", "to": "Place1", "label": ""},
+            {"from": "Place1", "to": "Pick2", "label": ""},
+            {"from": "Pick2", "to": "Place2", "label": ""},
+        ],
+        "start_at": "Pick1",
+    }
+
+
+def _build_vlm_scenario_patch_2(workflow_id: str) -> Dict[str, Any]:
+    """Append: Pick3 → Pick4 after Place2 (second pick starting ~)."""
+    return {
+        "type": "graph_patch",
+        "workflow_id": workflow_id,
+        "timestamp": int(datetime.now(timezone.utc).timestamp()),
+        "rev": 2,
+        "target": {"container_path": _CONTAINER_PATH},
+        "nodes_added": [
+            {"node_name": "Pick3", "node_type": "Skill", "skill": "Pick", "ui": {"x": 720, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
+            {"node_name": "Pick4", "node_type": "Skill", "skill": "Pick", "ui": {"x": 880, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
+        ],
+        "edges_added": [
+            {"from": "Place2", "to": "Pick3", "label": ""},
+            {"from": "Pick3", "to": "Pick4", "label": ""},
+        ],
+    }
+
+
+def _build_vlm_scenario_patch_3(workflow_id: str) -> Dict[str, Any]:
+    """After two picks: Place3 → Place4 → Place5."""
+    return {
+        "type": "graph_patch",
+        "workflow_id": workflow_id,
+        "timestamp": int(datetime.now(timezone.utc).timestamp()),
+        "rev": 3,
+        "target": {"container_path": _CONTAINER_PATH},
+        "nodes_added": [
+            {"node_name": "Place3", "node_type": "Skill", "skill": "Place", "ui": {"x": 1040, "y": 200}, "parameters": {"destination": "bin_a"}},
+            {"node_name": "Place4", "node_type": "Skill", "skill": "Place", "ui": {"x": 1200, "y": 200}, "parameters": {"destination": "bin_b"}},
+            {"node_name": "Place5", "node_type": "Skill", "skill": "Place", "ui": {"x": 1360, "y": 200}, "parameters": {"destination": "bin_c"}},
+        ],
+        "edges_added": [
+            {"from": "Pick4", "to": "Place3", "label": ""},
+            {"from": "Place3", "to": "Place4", "label": ""},
+            {"from": "Place4", "to": "Place5", "label": ""},
+        ],
+    }
+
+
+def _build_vlm_scenario_patch_4(workflow_id: str) -> Dict[str, Any]:
+    """Replan: remove Place4, Place5; add Pick5 → Pick6 → Place6 after Place3."""
+    return {
+        "type": "graph_patch",
+        "workflow_id": workflow_id,
+        "timestamp": int(datetime.now(timezone.utc).timestamp()),
+        "rev": 4,
+        "target": {"container_path": _CONTAINER_PATH},
+        "nodes_removed": ["Place4", "Place5"],
+        "nodes_added": [
+            {"node_name": "Pick5", "node_type": "Skill", "skill": "Pick", "ui": {"x": 1200, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
+            {"node_name": "Pick6", "node_type": "Skill", "skill": "Pick", "ui": {"x": 1360, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
+            {"node_name": "Place6", "node_type": "Skill", "skill": "Place", "ui": {"x": 1520, "y": 200}, "parameters": {"destination": "bin_a"}},
+        ],
+        "edges_added": [
+            {"from": "Place3", "to": "Pick5", "label": ""},
+            {"from": "Pick5", "to": "Pick6", "label": ""},
+            {"from": "Pick6", "to": "Place6", "label": ""},
+        ],
+    }
+
+
+def _run_vlm_dynamic_scenario_scheduler(workflow_id: str) -> None:
+    """Emit graph_patch events at 5s, 8s, 14s, 17s from now for monitoring test."""
+    run_start = time.monotonic()
+    patches = [
+        (5.0, lambda: _build_vlm_scenario_patch_1(workflow_id)),
+        (8.0, lambda: _build_vlm_scenario_patch_2(workflow_id)),
+        (14.0, lambda: _build_vlm_scenario_patch_3(workflow_id)),
+        (17.0, lambda: _build_vlm_scenario_patch_4(workflow_id)),
+    ]
+    for delay_s, build in patches:
+        to_wait = delay_s - (time.monotonic() - run_start)
+        if to_wait > 0:
+            time.sleep(to_wait)
+        with _state["lock"]:
+            if _state["cancelled"] or _state["workflow_id"] != workflow_id:
+                return
+        _broadcast(build())
 
 
 def _broadcast_feedback(
@@ -177,11 +291,14 @@ def _run_one_node(
         })
         _state["updated_at"] = started_at
 
+    # 노드 실행 시간: VLM dynamic 시나리오 시 3초, 기본 2초
+    node_duration_s = 3.0 if _vlm_dynamic_patch_enabled() else 2.0
+    duration_ms = int(node_duration_s * 1000)
     # 2Hz로 feedback 전송 (0.5초 간격). 백엔드는 마지막 수신값만 DB에 저장 → replay 시 마지막 스냅샷만 노출.
     feedback_interval_s = 0.5
     elapsed_s = 0.0
     step = 0
-    while elapsed_s < 2.0:
+    while elapsed_s < node_duration_s:
         time.sleep(feedback_interval_s)
         elapsed_s += feedback_interval_s
         with _state["lock"]:
@@ -201,9 +318,8 @@ def _run_one_node(
     _broadcast_feedback(workflow_id, state_name, {
         "message": "completed",
         "step": "final",
-        "elapsed_ms": 2000,
+        "elapsed_ms": duration_ms,
     }, timestamp=completed_at)
-    duration_ms = 2000
     total_duration_ms_ref[0] += duration_ms
     output = {"result": "ok", "state": state_name}
     _broadcast({
@@ -255,7 +371,15 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
     )
     total_duration_ms = 0
     total_duration_ms_ref = [0]
-    graph_patch_emitted = [False]  # mutable so inner loop can set
+
+    # VLM dynamic scenario: schedule 4 graph_patch events at 5s, 8s, 14s, 17s (run in background)
+    if _vlm_dynamic_patch_enabled():
+        scheduler = threading.Thread(
+            target=_run_vlm_dynamic_scenario_scheduler,
+            args=(workflow_id,),
+            daemon=True,
+        )
+        scheduler.start()
 
     cancelled = False
     for state_name, state_def in order:
@@ -373,11 +497,6 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
             continue
 
         _run_one_node(workflow_id, state_name, state_def, total_duration_ms_ref)
-
-        # Optional: emit VLM graph_patch once per run (feature flag OFF by default)
-        if not graph_patch_emitted[0] and os.environ.get("MOCK_VLM_DYNAMIC_PATCH", "").strip().lower() in ("true", "1"):
-            _broadcast(_build_mock_graph_patch(workflow_id, state_name))
-            graph_patch_emitted[0] = True
 
         if state_def.get("End") and state_name == workflow_terminal:
             break
