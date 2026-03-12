@@ -28,6 +28,7 @@ The server listens at **http://localhost:8000**.
 Set `MOCK_VLM_DYNAMIC_PATCH=true` (or `1`) to enable the **VLM dynamic test scenario**:
 
 - Node execution delay is **3 seconds** per node (so you can watch the monitor in real time).
+- The run stays **"running" for 17 seconds** (even after the DSL node finishes) so you can see graph_patch updates in the monitor in real time; then `workflow_completed` is sent.
 - Four `graph_patch` events are emitted on a timer from run start:
   - **5s**: add DAG `Pick1 → Place1 → Pick2 → Place2` under `root/VLMPlanner_1/generated`.
   - **8s**: append `Pick3 → Pick4` after Place2 (second pick “starting” feel).

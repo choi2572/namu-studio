@@ -501,6 +501,20 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         if state_def.get("End") and state_name == workflow_terminal:
             break
 
+    # VLM dynamic scenario: keep run "running" until 17s so monitor UI can show graph_patch at 5/8/14/17s in real time
+    if _vlm_dynamic_patch_enabled() and not cancelled:
+        with _state["lock"]:
+            started_iso = _state.get("started_at")
+        if started_iso:
+            try:
+                start_dt = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
+                elapsed_s = (datetime.now(timezone.utc) - start_dt).total_seconds()
+                wait_s = max(0.0, 17.0 - elapsed_s)
+                if wait_s > 0:
+                    time.sleep(wait_s)
+            except Exception:
+                pass
+
     with _state["lock"]:
         _state["runner_status"] = "idle"
         _state["workflow_id"] = None

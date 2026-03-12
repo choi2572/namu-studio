@@ -45,18 +45,21 @@ class RunService:
         run_input: Optional[Dict[str, Any]] = None
     ) -> Optional[Run]:
         """Start a run."""
+        # Get workflow and published version first (for same-workflow redirect below)
+        workflow = self.workflow_repo.get(workflow_id)
+        if not workflow:
+            return None
+
         # Check for active run; allow adapter to reconcile (e.g. middleware idle but DB still RUNNING)
         active_run = self.run_repo.get_active_run()
         if active_run:
             if self.execution_adapter.reconcile_stale_run(active_run):
                 active_run = self.run_repo.get_active_run()
             if active_run:
+                # Same workflow already running → return it so UI can redirect to its monitor
+                if active_run.workflow_id == workflow_id:
+                    return active_run
                 raise ValueError("Another run is already active. Only one active run allowed at a time.")
-        
-        # Get workflow and published version
-        workflow = self.workflow_repo.get(workflow_id)
-        if not workflow:
-            return None
         
         version_id = workflow.current_published_version_id
         if not version_id:
