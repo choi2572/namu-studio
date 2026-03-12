@@ -24,11 +24,16 @@ function boolRuntime(
   localStorageKey: string,
   defaultValue: boolean
 ): boolean {
+  // .env (NEXT_PUBLIC_*)가 명시되어 있으면 그 값을 우선 (localStorage보다 우선)
+  if (typeof process !== "undefined" && process.env != null) {
+    const v = process.env[envKey];
+    if (v !== undefined && v !== "") return boolEnv(envKey, defaultValue);
+  }
   if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
     const stored = localStorage.getItem(localStorageKey);
     if (stored !== null) return stored.toLowerCase() === "true" || stored === "1";
   }
-  return boolEnv(envKey, defaultValue);
+  return defaultValue;
 }
 
 /** Apply graph_patch events in Run Monitor (dynamic nodes in VLM container). Default: OFF */
