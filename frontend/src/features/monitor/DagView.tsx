@@ -1067,7 +1067,11 @@ export function DagView({
           const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
           const displayStatus = displayNotRun ? "NOT_RUN" : node.status;
           const nodeTypeInfo = getNodeTypeInfoFromDsl(node.dslType, node.containerType);
-          const typeLabel = node.skillName ?? node.dslType;
+          // VLM Planner 컨테이너는 DSL 타입 Repeat 대신 이름으로 표시
+          const typeLabel =
+            node.nodeName === "VLM Planner"
+              ? "VLM Planner"
+              : node.skillName ?? node.dslType;
           const isRunning = node.status === NodeStatus.RUNNING;
           const isCompleted = node.status === NodeStatus.SUCCEEDED;
           const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
