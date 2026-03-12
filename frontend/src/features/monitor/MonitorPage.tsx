@@ -596,7 +596,11 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       const node = monitorGraph.nodes.find((n) => n.pathId === selectedNode);
       if (!node) return null;
       const snap = statesToUse.find((n) => n.stateName === node.apiStateName) ?? statesToUse.find((n) => n.stateName === node.stateName);
-      const typeDisplay = node.skillName ?? node.dslType ?? "Task";
+      // VLM Planner 컨테이너는 DSL 타입 Repeat 대신 이름으로 표시
+      const typeDisplay =
+        node.nodeName === "VLM Planner"
+          ? "VLM Planner"
+          : node.skillName ?? node.dslType ?? "Task";
       return {
         stateName: node.apiStateName,
         nodeName: node.nodeName,
