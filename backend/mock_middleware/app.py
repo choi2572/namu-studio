@@ -179,8 +179,75 @@ def _build_vlm_scenario_patch_4(workflow_id: str) -> Dict[str, Any]:
     }
 
 
+def _broadcast_dynamic_node_status(
+    workflow_id: str,
+    node_name: str,
+    prev_status: str,
+    status: str,
+    duration_ms: Optional[int] = None,
+    output: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Broadcast node_status_change for a dynamic (patched) node and update _state so runner status reflects it."""
+    ts = _now_iso()
+    _broadcast({
+        "type": "node_status_change",
+        "workflow_id": workflow_id,
+        "timestamp": ts,
+        "node_name": node_name,
+        "prev_status": prev_status,
+        "status": status,
+        "input": {},
+        **({"duration_ms": duration_ms} if duration_ms is not None else {}),
+        **({"output": output} if output is not None else {}),
+    })
+    with _state["lock"]:
+        if _state["workflow_id"] != workflow_id or _state["cancelled"]:
+            return
+        _state["updated_at"] = ts
+        if status == "RUNNING":
+            _state["current_node"] = node_name
+            _state["node_history"].append({
+                "node_name": node_name,
+                "status": "RUNNING",
+                "started_at": ts,
+                "completed_at": None,
+                "duration_ms": None,
+                "input": {},
+                "output": None,
+            })
+        else:
+            _state["current_node"] = None
+            for n in _state["node_history"]:
+                if n.get("node_name") == node_name:
+                    n["status"] = status
+                    n["completed_at"] = ts
+                    n["duration_ms"] = duration_ms
+                    n["output"] = output or {}
+                    break
+
+
+def _run_dynamic_nodes_sequence(workflow_id: str, node_names: List[str]) -> None:
+    """Run a sequence of dynamic (patched) nodes: RUNNING then 3s then SUCCESS for each. Runs in background thread."""
+    node_duration_s = 3.0
+    duration_ms = int(node_duration_s * 1000)
+    for node_name in node_names:
+        with _state["lock"]:
+            if _state["cancelled"] or _state["workflow_id"] != workflow_id:
+                return
+        _broadcast_dynamic_node_status(workflow_id, node_name, "IDLE", "RUNNING")
+        time.sleep(node_duration_s)
+        with _state["lock"]:
+            if _state["cancelled"] or _state["workflow_id"] != workflow_id:
+                return
+        _broadcast_dynamic_node_status(
+            workflow_id, node_name, "RUNNING", "SUCCESS",
+            duration_ms=duration_ms,
+            output={"result": "ok", "state": node_name},
+        )
+
+
 def _run_vlm_dynamic_scenario_scheduler(workflow_id: str) -> None:
-    """Emit graph_patch events at 5s, 8s, 14s, 17s from now for monitoring test."""
+    """Emit graph_patch events at 5s, 8s, 14s, 17s from now for monitoring test; then simulate running the patched nodes."""
     run_start = time.monotonic()
     patches = [
         (5.0, lambda: _build_vlm_scenario_patch_1(workflow_id)),
@@ -195,7 +262,17 @@ def _run_vlm_dynamic_scenario_scheduler(workflow_id: str) -> None:
         with _state["lock"]:
             if _state["cancelled"] or _state["workflow_id"] != workflow_id:
                 return
-        _broadcast(build())
+        payload = build()
+        _broadcast(payload)
+        # Run dynamic nodes so monitor shows RUNNING/SUCCESS and auto-focus works
+        nodes_added = payload.get("nodes_added") or []
+        node_names = [n["node_name"] for n in nodes_added if isinstance(n, dict) and n.get("node_name")]
+        if node_names:
+            threading.Thread(
+                target=_run_dynamic_nodes_sequence,
+                args=(workflow_id, node_names),
+                daemon=True,
+            ).start()
 
 
 def _broadcast_feedback(
