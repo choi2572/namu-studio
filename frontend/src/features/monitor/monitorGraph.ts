@@ -382,7 +382,8 @@ export function applyGraphPatches(
       });
     }
 
-    if (!nodes.some((n) => n.pathId === parentPathId)) {
+    const existingParent = nodes.find((n) => n.pathId === parentPathId);
+    if (!existingParent) {
       nodes.push({
         pathId: parentPathId,
         stateName: vlmNodeName,
@@ -395,6 +396,12 @@ export function applyGraphPatches(
         dslType: "Repeat",
         skillName: null
       });
+    } else if (!existingParent.isContainer && (payload.nodes_added?.length ?? 0) > 0) {
+      // Base graph had this as Pass (non-container); upgrade to container so generated children render
+      existingParent.isContainer = true;
+      existingParent.containerType = "repeat";
+      existingParent.nodeName = "VLM Planner";
+      existingParent.dslType = "Repeat";
     }
 
     for (const na of payload.nodes_added ?? []) {
