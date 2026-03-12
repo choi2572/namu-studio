@@ -227,7 +227,7 @@ def _broadcast_dynamic_node_status(
 
 
 def _run_dynamic_nodes_sequence(workflow_id: str, node_names: List[str]) -> None:
-    """Run a sequence of dynamic (patched) nodes: RUNNING then 3s then SUCCESS for each. Runs in background thread."""
+    """Run a sequence of dynamic (patched) nodes: RUNNING then 3s then SUCCESS for each."""
     node_duration_s = 3.0
     duration_ms = int(node_duration_s * 1000)
     for node_name in node_names:
@@ -247,32 +247,33 @@ def _run_dynamic_nodes_sequence(workflow_id: str, node_names: List[str]) -> None
 
 
 def _run_vlm_dynamic_scenario_scheduler(workflow_id: str) -> None:
-    """Emit graph_patch events at 5s, 8s, 14s, 17s from now for monitoring test; then simulate running the patched nodes."""
-    run_start = time.monotonic()
-    patches = [
-        (5.0, lambda: _build_vlm_scenario_patch_1(workflow_id)),
-        (8.0, lambda: _build_vlm_scenario_patch_2(workflow_id)),
-        (14.0, lambda: _build_vlm_scenario_patch_3(workflow_id)),
-        (17.0, lambda: _build_vlm_scenario_patch_4(workflow_id)),
-    ]
-    for delay_s, build in patches:
-        to_wait = delay_s - (time.monotonic() - run_start)
-        if to_wait > 0:
-            time.sleep(to_wait)
+    """Run the VLM dynamic test scenario in a single, ordered timeline.
+
+    Sequence (all nodes 3s each):
+    - VLMPlanner (handled by _run_workflow before calling this)
+    - Patch1 → Pick1 → Place1 → Pick2
+    - Patch2 → Place2 → Pick3 → Pick4
+    - Patch3 → Place3
+    - Patch4 → Pick5 → Pick6 → Place6
+    """
+    # Helper: broadcast patch and then run given dynamic nodes sequentially
+    def apply_patch_and_run_nodes(build_fn, node_names: List[str]) -> None:
         with _state["lock"]:
             if _state["cancelled"] or _state["workflow_id"] != workflow_id:
                 return
-        payload = build()
+        payload = build_fn(workflow_id)
         _broadcast(payload)
-        # Run dynamic nodes so monitor shows RUNNING/SUCCESS and auto-focus works
-        nodes_added = payload.get("nodes_added") or []
-        node_names = [n["node_name"] for n in nodes_added if isinstance(n, dict) and n.get("node_name")]
         if node_names:
-            threading.Thread(
-                target=_run_dynamic_nodes_sequence,
-                args=(workflow_id, node_names),
-                daemon=True,
-            ).start()
+            _run_dynamic_nodes_sequence(workflow_id, node_names)
+
+    # 1st patch: Pick1 → Place1 → Pick2
+    apply_patch_and_run_nodes(_build_vlm_scenario_patch_1, ["Pick1", "Place1", "Pick2"])
+    # 2nd patch: append after Place2, then Place2 → Pick3 → Pick4
+    apply_patch_and_run_nodes(_build_vlm_scenario_patch_2, ["Place2", "Pick3", "Pick4"])
+    # 3rd patch: Place3 (Place4/5 will be created but replaced by patch4 later)
+    apply_patch_and_run_nodes(_build_vlm_scenario_patch_3, ["Place3"])
+    # 4th patch: replan → Pick5 → Pick6 → Place6
+    apply_patch_and_run_nodes(_build_vlm_scenario_patch_4, ["Pick5", "Pick6", "Place6"])
 
 
 def _broadcast_feedback(
@@ -449,15 +450,6 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
     total_duration_ms = 0
     total_duration_ms_ref = [0]
 
-    # VLM dynamic scenario: schedule 4 graph_patch events at 5s, 8s, 14s, 17s (run in background)
-    if _vlm_dynamic_patch_enabled():
-        scheduler = threading.Thread(
-            target=_run_vlm_dynamic_scenario_scheduler,
-            args=(workflow_id,),
-            daemon=True,
-        )
-        scheduler.start()
-
     cancelled = False
     for state_name, state_def in order:
         with _state["lock"]:
@@ -578,19 +570,9 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         if state_def.get("End") and state_name == workflow_terminal:
             break
 
-    # VLM dynamic scenario: keep run "running" until 17s so monitor UI can show graph_patch at 5/8/14/17s in real time
+    # After the DSL workflow completes, run the VLM dynamic scenario (if enabled)
     if _vlm_dynamic_patch_enabled() and not cancelled:
-        with _state["lock"]:
-            started_iso = _state.get("started_at")
-        if started_iso:
-            try:
-                start_dt = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
-                elapsed_s = (datetime.now(timezone.utc) - start_dt).total_seconds()
-                wait_s = max(0.0, 17.0 - elapsed_s)
-                if wait_s > 0:
-                    time.sleep(wait_s)
-            except Exception:
-                pass
+        _run_vlm_dynamic_scenario_scheduler(workflow_id)
 
     with _state["lock"]:
         _state["runner_status"] = "idle"
