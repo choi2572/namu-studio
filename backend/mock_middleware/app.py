@@ -611,7 +611,7 @@ def create_app() -> Flask:
         """Health endpoint for container HEALTHCHECK (same path as main backend)."""
         return jsonify({"status": "healthy", "runtime": {"middleware": "mock", "robot": "simulated"}})
 
-    @app.route("/api/v1/skill-set", methods=["GET"])
+    @app.route("/api/v1/skill-sets", methods=["GET"])
     def skill_set():
         return jsonify(MOCK_SKILL_SET)
 
