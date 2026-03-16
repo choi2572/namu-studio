@@ -40,6 +40,7 @@ type NodeKind =
   | "flow_control.output"
   | "flow_control.repeat"
   | "flow_control.parallel"
+  | "flow_control.retry"
   | "flow_control.vlm"
   | "event.webhook";
 
@@ -139,6 +140,12 @@ type EditorNode = {
   containerType?: ContainerType | null;
   branchIndex?: number | null;
   containerFrame?: ContainerFrameData;
+  /** Retry 스코프 메타데이터 (v0) */
+  retryOwnerId?: string | null;
+  retryScopeType?: "main" | "failure" | null;
+  isRetryScopeEnd?: boolean;
+  /** Retry 노드 전용 색상 테마 키 (예: emerald, indigo 등) */
+  retryThemeColor?: string | null;
 };
 
 type EditorEdge = {
@@ -204,6 +211,19 @@ const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
     paramFields: [],
     outputs: [{ key: "next", label: "Next" }],
     inputEnabled: false
+  },
+  "flow_control.retry": {
+    label: "Retry",
+    category: "flow_control",
+    iconText: "RT",
+    colorClass: "border-emerald-300 bg-emerald-50 text-emerald-700",
+    paramFields: [
+      { key: "maxAttempts", label: "MaxAttempts", placeholder: "2" }
+    ],
+    outputs: [
+      { key: "main", label: "Main" },
+      { key: "failure", label: "On Failure" }
+    ]
   },
   "flow_control.condition": {
     label: "Condition",
@@ -335,6 +355,44 @@ const NODE_METRICS = {
   fieldGap: 8,
   conditionButtonHeight: 28
 };
+
+/** Retry 노드 전용 색상 팔레트 (강한 대비 색상들, 순환 사용) */
+const RETRY_THEME_COLORS: Array<{
+  key: string;
+  border: string;
+  bg: string;
+  text: string;
+  indicator: string;
+}> = [
+  {
+    key: "emerald",
+    border: "border-emerald-300",
+    bg: "bg-emerald-50",
+    text: "text-emerald-700",
+    indicator: "bg-emerald-500"
+  },
+  {
+    key: "indigo",
+    border: "border-indigo-300",
+    bg: "bg-indigo-50",
+    text: "text-indigo-700",
+    indicator: "bg-indigo-500"
+  },
+  {
+    key: "orange",
+    border: "border-orange-300",
+    bg: "bg-orange-50",
+    text: "text-orange-700",
+    indicator: "bg-orange-500"
+  },
+  {
+    key: "rose",
+    border: "border-rose-300",
+    bg: "bg-rose-50",
+    text: "text-rose-700",
+    indicator: "bg-rose-500"
+  }
+];
 
 /** 리본(START/END)이 있을 때 카드 상단에 추가되는 높이 (리본 h-6 + pt-6) */
 const RIBBON_EXTRA_HEIGHT = 20;
@@ -910,8 +968,12 @@ function buildStateRecords(
   edges: EditorEdge[],
   stateNameMap: Map<string, string>,
   containerPayloads?: Map<string, ContainerDslPayload>,
-  skillsetMap?: Map<string, import("@/domain/types").Skillset>
+  skillsetMap?: Map<string, import("@/domain/types").Skillset>,
+  allNodes?: EditorNode[],
+  allEdges?: EditorEdge[]
 ) {
+  const fullNodes = allNodes ?? nodes;
+  const fullEdges = allEdges ?? edges;
   const edgesByFrom = new Map<string, EditorEdge[]>();
   edges.forEach((edge) => {
     if (!stateNameMap.has(edge.from) || !stateNameMap.has(edge.to)) return;
@@ -981,6 +1043,48 @@ function buildStateRecords(
       } else {
         state.End = true;
       }
+    } else if (node.kind === "flow_control.retry") {
+      const next = getNext("next");
+      const onFailureEnabled = node.params.onFailureEnabled !== "false";
+      const containerPayloadsMap = containerPayloads ?? new Map();
+      const mainScope = buildRetryScopeSubflow(
+        node.id,
+        "main",
+        fullNodes,
+        fullEdges,
+        stateNameMap,
+        containerPayloadsMap,
+        skillsetMap
+      );
+      const failureScope = onFailureEnabled
+        ? buildRetryScopeSubflow(
+            node.id,
+            "failure",
+            fullNodes,
+            fullEdges,
+            stateNameMap,
+            containerPayloadsMap,
+            skillsetMap
+          )
+        : null;
+      const maxAttempts = Math.max(
+        1,
+        Number.parseInt(node.params.maxAttempts ?? "2", 10) || 2
+      );
+      state = {
+        Type: "Retry",
+        MaxAttempts: maxAttempts,
+        StartAt: mainScope.startAt ?? undefined,
+        State: mainScope.states
+      };
+      if (next) state.Next = next;
+      else state.End = true;
+      if (
+        failureScope &&
+        Object.keys(failureScope.states).length > 0
+      ) {
+        state.BeforeRetryAfterFailure = failureScope.states;
+      }
     } else if (node.kind === "flow_control.vlm") {
       const next = getNext("next");
       state = { Type: "Pass", Parameters: {} };
@@ -1027,7 +1131,9 @@ function buildDslJson(
   const containerNodes = nodes.filter(isContainerNode);
   const containerIds = new Set(containerNodes.map((node) => node.id));
   const topLevelNodes = nodes.filter(
-    (node) => !node.containerId || !containerIds.has(node.containerId)
+    (node) =>
+      (!node.containerId || !containerIds.has(node.containerId)) &&
+      !node.retryOwnerId
   );
   const topLevelNodeIds = new Set(topLevelNodes.map((node) => node.id));
   const topLevelEdges = edges.filter(
@@ -1100,7 +1206,9 @@ function buildDslJson(
     topLevelEdges,
     stateNameMap,
     containerPayloads,
-    skillsetMap
+    skillsetMap,
+    nodes,
+    edges
   );
   const inputNode = topLevelNodes.find((n) => n.kind === "flow_control.input");
   const inputsRecord: Record<string, { Type: string; Value: number | boolean | string }> = {};
@@ -1222,6 +1330,84 @@ function filterEdgesByContainerRules(nodes: EditorNode[], edges: EditorEdge[]) {
     if (!fromKey && !toKey) return true;
     return fromKey !== null && fromKey === toKey;
   });
+}
+
+/** v0: Retry 스코프 안에 넣을 수 없는 노드 kind */
+const RETRY_SCOPE_FORBIDDEN_KINDS: NodeKind[] = [
+  "flow_control.condition",
+  "flow_control.parallel",
+  "flow_control.repeat",
+  "flow_control.retry"
+];
+
+function isForbiddenInRetryScope(kind: NodeKind): boolean {
+  return RETRY_SCOPE_FORBIDDEN_KINDS.includes(kind);
+}
+
+/** Retry 스코프(메인/실패)의 시작 노드 id: Retry의 main/failure 포트에서 나간 edge의 to */
+function getRetryScopeStartNodeId(
+  retryNodeId: string,
+  portKey: "main" | "failure",
+  edges: EditorEdge[]
+): string | null {
+  const edge = edges.find(
+    (e) => e.from === retryNodeId && e.fromPort === portKey
+  );
+  return edge?.to ?? null;
+}
+
+/** Retry 스코프에 속한 노드 id 집합 (선형: start부터 끝까지) */
+function getRetryScopeNodeIds(
+  retryNodeId: string,
+  scopeType: "main" | "failure",
+  nodes: EditorNode[],
+  edges: EditorEdge[]
+): Set<string> {
+  const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
+  if (!startId) return new Set();
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const outEdges = new Map<string, EditorEdge>();
+  edges.forEach((e) => {
+    if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, e);
+  });
+  const ids = new Set<string>();
+  let current: string | null = startId;
+  while (current) {
+    const node = nodeMap.get(current);
+    if (!node || node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
+    ids.add(current);
+    current = outEdges.get(current)?.to ?? null;
+  }
+  return ids;
+}
+
+/** Retry 한쪽 스코프(메인 또는 실패)의 서브플로우 State 맵과 StartAt 반환 */
+function buildRetryScopeSubflow(
+  retryNodeId: string,
+  scopeType: "main" | "failure",
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  stateNameMap: Map<string, string>,
+  containerPayloads: Map<string, ContainerDslPayload>,
+  skillsetMap?: Map<string, import("@/domain/types").Skillset>
+): { startAt: string | null; states: Record<string, Record<string, unknown>> } {
+  const scopeNodeIds = getRetryScopeNodeIds(retryNodeId, scopeType, nodes, edges);
+  if (scopeNodeIds.size === 0) return { startAt: null, states: {} };
+  const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
+  if (!startId) return { startAt: null, states: {} };
+  const scopeNodes = nodes.filter((n) => scopeNodeIds.has(n.id));
+  const scopeEdges = edges.filter(
+    (e) => scopeNodeIds.has(e.from) && scopeNodeIds.has(e.to)
+  );
+  const states = buildStateRecords(
+    scopeNodes,
+    scopeEdges,
+    stateNameMap,
+    containerPayloads,
+    skillsetMap
+  );
+  const startAt = stateNameMap.get(startId) ?? null;
+  return { startAt, states };
 }
 
 function normalizeContainerAssignments(nodes: EditorNode[]) {
@@ -1940,6 +2126,7 @@ function NodeCard({
   onOutputDragEnd,
   onInputDragOver,
   onInputDrop,
+  onRetryScopeEndChange,
   warningLabel,
   startEndBadge,
   effectiveHeight,
@@ -1984,6 +2171,7 @@ function NodeCard({
   onOutputDragEnd: () => void;
   onInputDragOver: (event: DragEvent<HTMLButtonElement>) => void;
   onInputDrop: (event: DragEvent<HTMLButtonElement>) => void;
+  onRetryScopeEndChange?: (checked: boolean) => void;
   warningLabel?: string | null;
   startEndBadge?: {
     showStart: boolean;
@@ -2019,6 +2207,8 @@ function NodeCard({
 
   // 노드 타입별 색상 (Monitor와 동일)
   const getNodeTypeColors = (category: NodeCategory, kind: NodeKind) => {
+    // Retry 노드는 개별 테마 색상을 사용하므로, 여기서는 기본값만 정의하고
+    // 실제 적용은 아래에서 retryThemeColor를 통해 덮어쓴다.
     if (kind === "flow_control.condition") {
       return {
         border: "border-amber-200",
@@ -2043,7 +2233,7 @@ function NodeCard({
         indicator: "bg-purple-500"
       };
     }
-    // flow_control
+    // flow_control (기본)
     return {
       border: "border-cyan-200",
       bg: "bg-cyan-50",
@@ -2052,7 +2242,18 @@ function NodeCard({
     };
   };
 
-  const nodeTypeColors = getNodeTypeColors(config.category, node.kind);
+  let nodeTypeColors = getNodeTypeColors(config.category, node.kind);
+  if (node.kind === "flow_control.retry" && node.retryThemeColor) {
+    const theme =
+      RETRY_THEME_COLORS.find((t) => t.key === node.retryThemeColor) ??
+      RETRY_THEME_COLORS[0];
+    nodeTypeColors = {
+      border: theme.border,
+      bg: theme.bg,
+      text: theme.text,
+      indicator: theme.indicator
+    };
+  }
   const nodeTypeLabel = node.kind === "flow_control.condition" 
     ? "Condition" 
     : NODE_CATEGORY_LABELS[config.category];
@@ -2214,11 +2415,17 @@ function NodeCard({
             <span
               className={cn(
                 "h-2 w-2 rounded-full",
-                output.isActive
-                  ? "bg-slate-900"
-                  : output.isConnected
-                    ? "bg-slate-600"
-                    : "bg-slate-400"
+                node.kind === "flow_control.retry" && output.key === "failure"
+                  ? output.isActive
+                    ? "bg-rose-700"
+                    : output.isConnected
+                      ? "bg-rose-500"
+                      : "bg-rose-400"
+                  : output.isActive
+                    ? "bg-slate-900"
+                    : output.isConnected
+                      ? "bg-slate-600"
+                      : "bg-slate-400"
               )}
             />
           </button>
@@ -2277,7 +2484,7 @@ function NodeCard({
             )}
           </div>
           
-          {/* 노드 타입 배지 */}
+          {/* 노드 타입 배지 + Retry 스코프 배지 */}
           <div className="flex items-center gap-2 mb-1">
             <span
               className={cn(
@@ -2289,6 +2496,33 @@ function NodeCard({
             >
               {nodeTypeLabel}
             </span>
+            {node.retryScopeType && node.retryOwnerId && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold border",
+                  node.retryScopeType === "main"
+                    ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                    : "border-rose-500 bg-rose-50 text-rose-700"
+                )}
+                title={
+                  node.retryScopeType === "main"
+                    ? "Retry main scope member"
+                    : "Retry failure scope member"
+                }
+              >
+                {node.retryScopeType === "main" ? (
+                  <>
+                    <span className="text-[10px]">↻</span>
+                    <span>Main Retry</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[10px]">!</span>
+                    <span>On Failure</span>
+                  </>
+                )}
+              </span>
+            )}
           </div>
 
           {/* Skill 노드: 펼쳤을 때 타입을 namespace.name 형태로 노출 */}
@@ -2579,6 +2813,34 @@ function NodeCard({
             ))}
           </div>
         )}
+      {node.isExpanded && node.kind === "flow_control.retry" && (
+        <div className="mt-3 space-y-2 text-xs text-slate-600">
+          <label className="inline-flex items-center gap-2" data-no-drag>
+            <input
+              type="checkbox"
+              className="h-3 w-3 rounded border-slate-300 text-slate-700"
+              checked={node.params.onFailureEnabled !== "false"}
+              onChange={(event) => {
+                onParamChange("onFailureEnabled", event.target.checked ? "true" : "false");
+              }}
+            />
+            <span className="text-[11px] text-slate-600">On Failure</span>
+          </label>
+          {(node.retryScopeType === "main" || node.retryScopeType === "failure") && (
+            <label className="mt-1 inline-flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1">
+              <input
+                type="checkbox"
+                className="h-3 w-3 rounded border-slate-300 text-slate-700"
+                checked={Boolean(node.isRetryScopeEnd)}
+                onChange={(e) => onRetryScopeEndChange?.(e.target.checked)}
+              />
+              <span className="text-[11px] text-slate-600">
+                {node.retryScopeType === "main" ? "End Retry Scope" : "End Failure Scope"}
+              </span>
+            </label>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2620,6 +2882,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const nextEdgeIndex = useRef(1);
   const nextConditionIndex = useRef(1);
   const nextVariableRowIndex = useRef(1);
+  const nextRetryThemeIndex = useRef(0);
   const loadedWorkflowId = useRef<string | null>(null);
 
   const { data: draft } = useQuery({
@@ -2673,6 +2936,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       "flow_control.output",
       "flow_control.repeat",
       "flow_control.parallel",
+      "flow_control.retry",
       "event.webhook"
     ];
     if (ENABLE_VLM_NODES) {
@@ -3100,9 +3364,46 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     });
   }, [nodes, nodeTypeConfig, effectiveNodeHeightMap]);
 
+  const retryValidationErrors = useMemo<ValidationError[]>(() => {
+    const errs: ValidationError[] = [];
+    nodes.forEach((node) => {
+      if (node.kind !== "flow_control.retry") return;
+      for (const scopeType of ["main", "failure"] as const) {
+        const scopeIds = getRetryScopeNodeIds(
+          node.id,
+          scopeType,
+          nodes,
+          edges
+        );
+        scopeIds.forEach((nid) => {
+          const n = nodes.find((x) => x.id === nid);
+          if (!n) return;
+          if (isForbiddenInRetryScope(n.kind)) {
+            errs.push({
+              id: `retry-forbidden-${node.id}-${scopeType}-${nid}`,
+              message: `Retry ${scopeType} scope cannot contain Branch/Parallel/Merge/Retry nodes (v0).`,
+              nodeId: n.id
+            });
+          }
+        });
+      }
+    });
+    return errs;
+  }, [nodes, edges]);
+
   const allValidationErrors = useMemo(
-    () => [...validationErrors, ...containerWarnings, ...startEndValidationErrors],
-    [containerWarnings, validationErrors, startEndValidationErrors]
+    () => [
+      ...validationErrors,
+      ...containerWarnings,
+      ...startEndValidationErrors,
+      ...retryValidationErrors
+    ],
+    [
+      containerWarnings,
+      validationErrors,
+      startEndValidationErrors,
+      retryValidationErrors
+    ]
   );
 
   const hasErrors = allValidationErrors.length > 0;
@@ -3460,13 +3761,22 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const buildDefaultParams = useCallback((kind: NodeKind) => {
     const config = nodeTypeConfig[kind];
     if (!config) return {};
-    return config.paramFields.reduce(
+    const base = config.paramFields.reduce(
       (acc, field) => ({
         ...acc,
         [field.key]: ""
       }),
       {} as Record<string, string>
     );
+    if (kind === "flow_control.retry") {
+      if (!base.maxAttempts) {
+        base.maxAttempts = "2";
+      }
+      if (base.onFailureEnabled === undefined) {
+        base.onFailureEnabled = "true";
+      }
+    }
+    return base;
   }, [nodeTypeConfig]);
 
   const createConditionExpression = useCallback(
@@ -3537,6 +3847,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 : {})
             }
           : undefined;
+      let retryThemeColor: string | null = null;
+      if (kind === "flow_control.retry") {
+        const theme = RETRY_THEME_COLORS[nextRetryThemeIndex.current % RETRY_THEME_COLORS.length];
+        retryThemeColor = theme.key;
+        nextRetryThemeIndex.current += 1;
+      }
+
       const baseNode: EditorNode = {
         id,
         name,
@@ -3556,7 +3873,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         containerId: null,
         containerType: null,
         branchIndex: null,
-        containerFrame
+        containerFrame,
+        retryOwnerId: null,
+        retryScopeType: null,
+        isRetryScopeEnd: false,
+        retryThemeColor
       };
       setNodes((prev) => {
         const assignment =
@@ -3676,17 +3997,63 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     }
   };
 
+  const handleRetryScopeEndChange = (nodeId: string, checked: boolean) => {
+    setNodes((prev) => {
+      const node = prev.find((n) => n.id === nodeId);
+      const ownerId = node?.retryOwnerId;
+      const scopeType = node?.retryScopeType;
+      return prev.map((n) => {
+        if (n.id === nodeId) return { ...n, isRetryScopeEnd: checked };
+        if (
+          checked &&
+          ownerId &&
+          scopeType &&
+          n.retryOwnerId === ownerId &&
+          n.retryScopeType === scopeType &&
+          n.isRetryScopeEnd
+        )
+          return { ...n, isRetryScopeEnd: false };
+        return n;
+      });
+    });
+    setHasUnsavedChanges(true);
+  };
+
   const handleParamChange = (nodeId: string, key: string, value: string) => {
-    setNodes((prev) =>
-      prev.map((node) =>
-        node.id === nodeId
-          ? (() => {
-              setHasUnsavedChanges(true);
-              return { ...node, params: { ...node.params, [key]: value } };
-            })()
-          : node
-      )
-    );
+    setNodes((prev) => {
+      const retryNode = prev.find((n) => n.id === nodeId);
+      const isRetryTurningOffFailure =
+        retryNode?.kind === "flow_control.retry" &&
+        key === "onFailureEnabled" &&
+        value === "false";
+      return prev.map((node) => {
+        if (node.id === nodeId) {
+          setHasUnsavedChanges(true);
+          return { ...node, params: { ...node.params, [key]: value } };
+        }
+        if (
+          isRetryTurningOffFailure &&
+          node.retryOwnerId === nodeId &&
+          node.retryScopeType === "failure"
+        ) {
+          return {
+            ...node,
+            retryOwnerId: null,
+            retryScopeType: null,
+            isRetryScopeEnd: false
+          };
+        }
+        return node;
+      });
+    });
+    if (key === "onFailureEnabled" && value === "false") {
+      const node = nodes.find((n) => n.id === nodeId);
+      if (node?.kind === "flow_control.retry") {
+        setEdges((prev) =>
+          prev.filter((e) => !(e.from === nodeId && e.fromPort === "failure"))
+        );
+      }
+    }
   };
 
   const handleConditionExpressionFieldChange = (
@@ -3892,9 +4259,20 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const isContainer = prev.some(
         (node) => node.id === nodeId && isContainerNode(node)
       );
+      const isRetryNode = prev.some(
+        (node) => node.id === nodeId && node.kind === "flow_control.retry"
+      );
       const nextNodes = prev
         .filter((node) => node.id !== nodeId)
         .map((node) => {
+          if (isRetryNode && node.retryOwnerId === nodeId) {
+            return {
+              ...node,
+              retryOwnerId: null,
+              retryScopeType: null,
+              isRetryScopeEnd: false
+            };
+          }
           if (!isContainer) return node;
           if (node.containerId !== nodeId) return node;
           return {
@@ -3924,7 +4302,28 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleDeleteEdge = (edgeId: string) => {
-    setEdges((prev) => prev.filter((edge) => edge.id !== edgeId));
+    const edge = edges.find((e) => e.id === edgeId);
+    const fromNode = edge ? nodeMap.get(edge.from) : null;
+    const isRetryScopeStartEdge =
+      fromNode?.kind === "flow_control.retry" &&
+      (edge?.fromPort === "main" || edge?.fromPort === "failure");
+    if (isRetryScopeStartEdge && edge) {
+      const ownerId = edge.from;
+      const scopeType = edge.fromPort as "main" | "failure";
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.retryOwnerId === ownerId && n.retryScopeType === scopeType
+            ? {
+                ...n,
+                retryOwnerId: null,
+                retryScopeType: null,
+                isRetryScopeEnd: false
+              }
+            : n
+        )
+      );
+    }
+    setEdges((prev) => prev.filter((e) => e.id !== edgeId));
     setSelectedEdgeId((prev) => (prev === edgeId ? null : prev));
     setHasUnsavedChanges(true);
   };
@@ -4016,6 +4415,65 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       if (!isEdgeAllowed(fromNode, toNode)) {
         showEdgeError("Edges cannot cross container boundaries.");
         return;
+      }
+
+      const retryScopeError =
+        "Branch/Parallel/Merge/Retry nodes are not allowed inside Retry scopes (v0).";
+      if (
+        fromNode.kind === "flow_control.retry" &&
+        (fromPort === "main" || fromPort === "failure")
+      ) {
+        if (isForbiddenInRetryScope(toNode.kind)) {
+          showEdgeError(retryScopeError);
+          return;
+        }
+        if (toNode.retryOwnerId && toNode.retryOwnerId !== fromNodeId) {
+          showEdgeError("Target node already belongs to another Retry scope.");
+          return;
+        }
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === toNodeId
+              ? {
+                  ...n,
+                  retryOwnerId: fromNodeId,
+                  retryScopeType: fromPort === "main" ? "main" : "failure",
+                  isRetryScopeEnd: true
+                }
+              : n
+          )
+        );
+      } else if (
+        fromNode.retryOwnerId &&
+        fromNode.isRetryScopeEnd &&
+        (fromNode.retryScopeType === "main" || fromNode.retryScopeType === "failure")
+      ) {
+        if (isForbiddenInRetryScope(toNode.kind)) {
+          showEdgeError(retryScopeError);
+          return;
+        }
+        if (
+          toNode.retryOwnerId &&
+          toNode.retryOwnerId !== fromNode.retryOwnerId
+        ) {
+          showEdgeError("Target node already belongs to another Retry scope.");
+          return;
+        }
+        const ownerId = fromNode.retryOwnerId;
+        const scopeType = fromNode.retryScopeType;
+        setNodes((prev) =>
+          prev.map((n) => {
+            if (n.id === fromNodeId) return { ...n, isRetryScopeEnd: false };
+            if (n.id === toNodeId)
+              return {
+                ...n,
+                retryOwnerId: ownerId,
+                retryScopeType: scopeType,
+                isRetryScopeEnd: true
+              };
+            return n;
+          })
+        );
       }
 
       setEdges((prev) => [
@@ -4492,7 +4950,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   {visibleNodes.map((node) => {
                     const config = nodeTypeConfig[node.kind];
                     if (!config) return null;
-                    const outputStates = config.outputs.map((output) => ({
+                    const outputs =
+                      node.kind === "flow_control.retry" &&
+                      node.params.onFailureEnabled === "false"
+                        ? config.outputs.filter((o) => o.key !== "failure")
+                        : config.outputs;
+                    const outputStates = outputs.map((output) => ({
                       key: output.key,
                       label: output.label,
                       isConnected: outgoingEdges.has(`${node.id}:${output.key}`),
@@ -4593,6 +5056,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onOutputDragEnd={handleOutputDragEnd}
                           onInputDragOver={handleInputDragOver}
                           onInputDrop={(event) => handleInputDrop(event, node.id)}
+                          onRetryScopeEndChange={
+                            node.retryScopeType
+                              ? (checked) =>
+                                  handleRetryScopeEndChange(node.id, checked)
+                              : undefined
+                          }
                         />
                       </div>
                     );
@@ -4646,7 +5115,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       if (!fromNode || !toNode) return null;
                       const fromConfig = nodeTypeConfig[fromNode.kind];
                       if (!fromConfig) return null;
-                      const outputs = fromConfig.outputs;
+                      const outputs =
+                        fromNode.kind === "flow_control.retry" &&
+                        fromNode.params.onFailureEnabled === "false"
+                          ? fromConfig.outputs.filter((o) => o.key !== "failure")
+                          : fromConfig.outputs;
                       const outputIndex = outputs.findIndex(
                         (output) => output.key === edge.fromPort
                       );
@@ -4678,6 +5151,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                         strokeColor = selectedEdgeId === edge.id ? "#059669" : "#10b981";
                         markerId = "arrow-true";
                       } else if (isConditionNode && isFalseEdge) {
+                        strokeColor = selectedEdgeId === edge.id ? "#dc2626" : "#ef4444";
+                        markerId = "arrow-false";
+                      } else if (fromNode.kind === "flow_control.retry" && edge.fromPort === "failure") {
                         strokeColor = selectedEdgeId === edge.id ? "#dc2626" : "#ef4444";
                         markerId = "arrow-false";
                       }
