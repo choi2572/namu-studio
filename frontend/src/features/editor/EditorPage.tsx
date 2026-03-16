@@ -474,6 +474,16 @@ function getExpandedContentHeight(
 
   const config = nodeTypeConfig[node.kind];
   if (!config) return 0;
+  if (node.kind === "flow_control.retry") {
+    const paramHeight =
+      config.paramFields.length > 0
+        ? NODE_METRICS.expandedTopPadding +
+          config.paramFields.length * NODE_METRICS.fieldHeight +
+          Math.max(0, config.paramFields.length - 1) * NODE_METRICS.fieldGap
+        : NODE_METRICS.expandedTopPadding;
+    const onFailureRow = NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
+    return paramHeight + onFailureRow;
+  }
   const fieldCount = config.paramFields.length;
   if (fieldCount === 0) return 0;
   // 기본 파라미터 필드 높이
@@ -486,6 +496,11 @@ function getExpandedContentHeight(
   // 그만큼 여유 높이를 조금 더 준다.
   if (node.kind.startsWith("skill.")) {
     height += NODE_METRICS.fieldGap + 12;
+  }
+
+  // Retry 스코프 멤버 노드는 "End Retry Scope" 체크박스 한 줄 추가
+  if (node.retryScopeType === "main" || node.retryScopeType === "failure") {
+    height += NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
   }
 
   return height;
@@ -2511,15 +2526,9 @@ function NodeCard({
                 }
               >
                 {node.retryScopeType === "main" ? (
-                  <>
-                    <span className="text-[10px]">↻</span>
-                    <span>Main Retry</span>
-                  </>
+                  <span className="text-[10px]">↻</span>
                 ) : (
-                  <>
-                    <span className="text-[10px]">!</span>
-                    <span>On Failure</span>
-                  </>
+                  <span className="text-[10px]">!</span>
                 )}
               </span>
             )}
@@ -2814,33 +2823,36 @@ function NodeCard({
           </div>
         )}
       {node.isExpanded && node.kind === "flow_control.retry" && (
-        <div className="mt-3 space-y-2 text-xs text-slate-600">
+        <div className="mt-3 space-y-2 text-xs text-slate-600 min-w-0">
           <label className="inline-flex items-center gap-2" data-no-drag>
             <input
               type="checkbox"
-              className="h-3 w-3 rounded border-slate-300 text-slate-700"
+              className="h-3 w-3 shrink-0 rounded border-slate-300 text-slate-700"
               checked={node.params.onFailureEnabled !== "false"}
               onChange={(event) => {
                 onParamChange("onFailureEnabled", event.target.checked ? "true" : "false");
               }}
             />
-            <span className="text-[11px] text-slate-600">On Failure</span>
+            <span className="text-[11px] text-slate-600 truncate">On Failure</span>
           </label>
-          {(node.retryScopeType === "main" || node.retryScopeType === "failure") && (
-            <label className="mt-1 inline-flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1">
+        </div>
+      )}
+      {node.isExpanded &&
+        (node.retryScopeType === "main" || node.retryScopeType === "failure") && (
+          <div className="mt-3 min-w-0" data-no-drag>
+            <label className="inline-flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1">
               <input
                 type="checkbox"
-                className="h-3 w-3 rounded border-slate-300 text-slate-700"
+                className="h-3 w-3 shrink-0 rounded border-slate-300 text-slate-700"
                 checked={Boolean(node.isRetryScopeEnd)}
                 onChange={(e) => onRetryScopeEndChange?.(e.target.checked)}
               />
-              <span className="text-[11px] text-slate-600">
+              <span className="text-[11px] text-slate-600 truncate">
                 {node.retryScopeType === "main" ? "End Retry Scope" : "End Failure Scope"}
               </span>
             </label>
-          )}
-        </div>
-      )}
+          </div>
+        )}
     </div>
   );
 }
