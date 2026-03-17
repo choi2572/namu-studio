@@ -561,7 +561,15 @@ function getExpandedContentHeight(
           Math.max(0, config.paramFields.length - 1) * NODE_METRICS.fieldGap
         : NODE_METRICS.expandedTopPadding;
     const onFailureRow = NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
-    return paramHeight + onFailureRow;
+
+    // main scope end 입력 한 줄
+    let extra = NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
+    // failure scope end 입력 한 줄 (onFailureEnabled !== "false" 일 때만)
+    if (node.params.onFailureEnabled !== "false") {
+      extra += NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
+    }
+
+    return paramHeight + onFailureRow + extra;
   }
   const fieldCount = config.paramFields.length;
   if (fieldCount === 0) return 0;
