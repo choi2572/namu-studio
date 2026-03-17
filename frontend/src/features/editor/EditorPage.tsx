@@ -6111,18 +6111,19 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 </button>
               </div>
               <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
+                {/* 전체 Failure drawer 기준 안내 텍스트 (엔트리만 있을 때) */}
+                {failureGraph.nodes.length <= 1 && (
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500 z-0">
+                    <p className="font-medium">
+                      Define what should happen when the workflow fails.
+                    </p>
+                    <p className="mt-1">
+                      Drag nodes from the palette into this area to build your
+                      failure handling flow.
+                    </p>
+                  </div>
+                )}
                 <div className="relative mx-4 my-4">
-                  {failureGraph.nodes.length <= 1 && (
-                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500">
-                      <p className="font-medium">
-                        Define what should happen when the workflow fails.
-                      </p>
-                      <p className="mt-1">
-                        Drag nodes from the palette into this area to build your
-                        failure handling flow.
-                      </p>
-                    </div>
-                  )}
                   <div
                     className="relative rounded-md bg-slate-100"
                     data-failure-canvas
@@ -6132,7 +6133,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       minWidth: FAILURE_CANVAS_BASE.width,
                       minHeight: FAILURE_CANVAS_BASE.height
                     }}
-                    onClick={() => {
+                    onMouseDown={(e) => {
+                      // Failure 캔버스 배경 클릭 시 메인 선택만 해제
+                      if (e.button !== 0) return;
+                      e.stopPropagation();
                       setSelectedNode(null);
                       setSelectedEdgeId(null);
                     }}
