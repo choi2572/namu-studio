@@ -3264,8 +3264,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           id: entryId,
           name: "On Workflow Failure",
           kind: "system.on_failure_entry",
+          // 실패 캔버스 기준 중앙 상단
           position: {
-            x: CANVAS_DEFAULT.width / 2 - NODE_METRICS.width / 2,
+            x: FAILURE_CANVAS_BASE.width / 2 - NODE_METRICS.width / 2,
             y: 40
           },
           isExpanded: true,
@@ -5507,7 +5508,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         {failureGraph.enabled && !failureGraph.drawerOpen && (
           <button
             type="button"
-            className="absolute right-0 top-1/2 z-10 flex h-10 w-5 -translate-y-1/2 items-center justify-center rounded-l-md bg-slate-900 text-xs font-semibold text-white shadow-lg hover:bg-slate-800"
+            className="absolute right-0 top-1/2 z-10 flex h-10 w-6 -translate-y-1/2 items-center justify-center rounded-l-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700"
             onClick={() => setFailureGraph((prev) => ({ ...prev, drawerOpen: true }))}
             aria-label="Open Failure Handling Flow"
           >
@@ -5887,7 +5888,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 </div>
               </div>
             </div>
-            <div className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
+            <div className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10px] text-slate-600 shadow">
               <button
                 type="button"
                 className="cursor-pointer rounded px-1 text-slate-600 hover:text-slate-900"
@@ -5933,7 +5934,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             >
               <button
                 type="button"
-                className="absolute -left-5 top-1/2 z-30 flex h-10 w-5 -translate-y-1/2 items-center justify-center rounded-l-md bg-slate-900 text-xs font-semibold text-white shadow-lg hover:bg-slate-800 pointer-events-auto"
+                className="absolute -left-5 top-1/2 z-30 flex h-10 w-6 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700 pointer-events-auto"
                 onClick={() =>
                   setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
                 }
@@ -5960,9 +5961,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 >
                   <span className="text-sm font-bold">✕</span>
                 </button>
-              </div>
-              <div className="shrink-0 border-b border-slate-100 px-4 py-2 text-center text-[11px] text-slate-400">
-                Basic flow templates (coming soon)
               </div>
               <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
                 <div
@@ -6041,71 +6039,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           portLayout="vertical"
                           onSelect={() => {}}
                           onToggleExpand={() => {}}
-                          onDragStart={(ev) => {
-                            if (isEntry) return;
-                            ev.preventDefault();
-                            const rect = (
-                              ev.currentTarget as HTMLElement
-                            ).getBoundingClientRect();
-                            const offsetX = ev.clientX - rect.left;
-                            const offsetY = ev.clientY - rect.top;
-                            const onMove = (e: PointerEvent) => {
-                              const parent = (
-                                ev.currentTarget as HTMLElement
-                              ).closest(
-                                "[style*='width: 800px']"
-                              ) as HTMLElement | null;
-                              if (!parent) return;
-                              const pr = parent.getBoundingClientRect();
-                              const nx =
-                                e.clientX - pr.left - offsetX;
-                              const ny =
-                                e.clientY - pr.top - offsetY;
-                              setFailureGraph((prev) => ({
-                                ...prev,
-                                nodes: prev.nodes.map((n) =>
-                                  n.id === node.id
-                                    ? {
-                                        ...n,
-                                        position: {
-                                          x: Math.max(
-                                            0,
-                                            Math.min(
-                                              FAILURE_CANVAS_BASE.width -
-                                                NODE_METRICS.width,
-                                              nx
-                                            )
-                                          ),
-                                          y: Math.max(
-                                            0,
-                                            Math.min(
-                                              FAILURE_CANVAS_BASE.height -
-                                                (getNodeHeight(n, nodeTypeConfig) ?? 80),
-                                              ny
-                                            )
-                                          )
-                                        }
-                                      }
-                                    : n
-                                )
-                              }));
-                            };
-                            const onUp = () => {
-                              window.removeEventListener(
-                                "pointermove",
-                                onMove
-                              );
-                              window.removeEventListener(
-                                "pointerup",
-                                onUp
-                              );
-                            };
-                            window.addEventListener(
-                              "pointermove",
-                              onMove
-                            );
-                            window.addEventListener("pointerup", onUp);
-                          }}
+                          // v0: 실패 플로우 노드는 아직 드래그 이동 미지원 (버그 방지를 위해 비활성화)
+                          onDragStart={() => {}}
                           onStartConnect={(portKey) =>
                             handleFailureStartConnect(node.id, portKey)
                           }
