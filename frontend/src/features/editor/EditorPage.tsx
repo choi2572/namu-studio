@@ -4087,6 +4087,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       }
       return prev.map((n) => {
         if (n.id === nodeId) return { ...n, isRetryScopeEnd: checked };
+        if (checked && downstreamIds.has(n.id))
+          return { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false };
         if (
           checked &&
           n.retryOwnerId === ownerId &&
@@ -4094,8 +4096,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           n.isRetryScopeEnd
         )
           return { ...n, isRetryScopeEnd: false };
-        if (checked && downstreamIds.has(n.id))
-          return { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false };
         if (!checked && nextNodeIdToAdd && n.id === nextNodeIdToAdd)
           return {
             ...n,
