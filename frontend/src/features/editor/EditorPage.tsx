@@ -4899,6 +4899,23 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleDeleteNode = (nodeId: string) => {
+    // Failure flow 캔버스에 존재하는 노드인 경우 별도 처리
+    if (failureGraph.nodes.some((n) => n.id === nodeId)) {
+      // entry 노드는 삭제 불가
+      if (nodeId === failureGraph.entryNodeId) {
+        return;
+      }
+      setFailureGraph((prev) => ({
+        ...prev,
+        nodes: prev.nodes.filter((n) => n.id !== nodeId),
+        edges: prev.edges.filter(
+          (e) => e.from !== nodeId && e.to !== nodeId
+        )
+      }));
+      setHasUnsavedChanges(true);
+      return;
+    }
+
     const connectedEdgeIds = edges
       .filter((edge) => edge.from === nodeId || edge.to === nodeId)
       .map((edge) => edge.id);
@@ -6095,6 +6112,17 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               </div>
               <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
                 <div className="relative mx-4 my-4">
+                  {failureGraph.nodes.length <= 1 && (
+                    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500">
+                      <p className="font-medium">
+                        Define what should happen when the workflow fails.
+                      </p>
+                      <p className="mt-1">
+                        Drag nodes from the palette into this area to build your
+                        failure handling flow.
+                      </p>
+                    </div>
+                  )}
                   <div
                     className="relative rounded-md bg-slate-100"
                     data-failure-canvas
@@ -6103,6 +6131,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       height: FAILURE_CANVAS_BASE.height,
                       minWidth: FAILURE_CANVAS_BASE.width,
                       minHeight: FAILURE_CANVAS_BASE.height
+                    }}
+                    onClick={() => {
+                      setSelectedNode(null);
+                      setSelectedEdgeId(null);
                     }}
                     onDragOver={(e) => {
                       e.preventDefault();
@@ -6125,14 +6157,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       });
                     }}
                   >
-                    {failureGraph.nodes.length <= 1 && (
-                      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500">
-                        <p className="font-medium">Define what should happen when the workflow fails.</p>
-                        <p className="mt-1">
-                          Drag nodes from the palette into this area to build your failure handling flow.
-                        </p>
-                      </div>
-                    )}
                     {failureGraph.nodes.map((node) => {
                       const config = nodeTypeConfig[node.kind];
                       if (!config) return null;
@@ -6166,7 +6190,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           <NodeCard
                             node={node}
                             config={config}
-                            isSelected={false}
+                            isSelected={selectedNode === node.id}
                             inputConnected={failureGraph.edges.some(
                               (e) => e.to === node.id
                             )}
@@ -6178,7 +6202,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                             stateNameMap={new Map()}
                             skillsetMap={skillsetMap}
                             portLayout="vertical"
-                            onSelect={() => {}}
+                            onSelect={() => {
+                              setSelectedNode(node.id);
+                              setSelectedEdgeId(null);
+                            }}
                             onToggleExpand={() =>
                               handleFailureToggleExpand(node.id)
                             }
