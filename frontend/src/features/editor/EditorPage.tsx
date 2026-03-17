@@ -5308,8 +5308,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         </div>
       )}
 
-      <div className="flex shrink-0 items-start justify-between">
-        <div>
+      <div className="flex shrink-0 items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
           <p className="text-xs text-slate-500">Workflow Editor</p>
           <div className="flex items-center gap-2">
             {isNewWorkflow && isEditingWorkflowName ? (
@@ -5407,21 +5407,22 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             })()}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button variant="secondary" onClick={handleAutoLayout}>
             Auto Layout
           </Button>
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               type="button"
               onClick={() => setShowWorkflowMenu((prev) => !prev)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border-2 border-slate-300 bg-slate-100 text-slate-700 hover:border-slate-400 hover:bg-slate-200"
               aria-label="Workflow menu"
+              title="Workflow menu (Save, Publish, Failure Handling)"
             >
               <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
-                <circle cx="10" cy="5" r="1.5" />
-                <circle cx="10" cy="10" r="1.5" />
-                <circle cx="10" cy="15" r="1.5" />
+                <circle cx="10" cy="5" r="2" />
+                <circle cx="10" cy="10" r="2" />
+                <circle cx="10" cy="15" r="2" />
               </svg>
             </button>
             {showWorkflowMenu && (
