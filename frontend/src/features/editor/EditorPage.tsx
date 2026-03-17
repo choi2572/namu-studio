@@ -3514,6 +3514,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           nodes: parsed.failure?.nodes ?? prev.nodes,
           edges: parsed.failure?.edges ?? prev.edges
         }));
+        // Failure 노드 id(failure-node-*) 기반으로 nextFailureNodeIndex 갱신
+        nextFailureNodeIndex.current = getNextIndexFromIds(
+          parsed.failure.nodes.map((node) => node.id),
+          "failure-node"
+        );
       } else {
         // view_json에 failure 정보가 없으면 DSL의 OnFailure 유무를 기준으로 enabled만 복원
         setFailureGraph((prev) => ({
