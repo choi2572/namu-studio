@@ -1087,8 +1087,14 @@ function parseEditorView(
       };
     });
 
+    // 실패 플로우는 system.on_failure_entry 노드를 포함하므로,
+    // 메인 캔버스 nodeTypes에 이 kind가 없으면 추가해서 검증한다.
+    const failureNodeTypes = nodeTypes.includes("system.on_failure_entry" as NodeKind)
+      ? nodeTypes
+      : ([...nodeTypes, "system.on_failure_entry"] as NodeKind[]);
+
     const isValidFailureNodes = normalizedFailureNodes.every((node) =>
-      isValidEditorNode(node, nodeTypes)
+      isValidEditorNode(node, failureNodeTypes)
     );
     const isValidFailureEdges = rawFailureEdges.every(isValidEditorEdge);
 
