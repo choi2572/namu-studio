@@ -529,6 +529,9 @@ const CANVAS_DEFAULT = {
   height: 600
 };
 
+/** 실패 처리 캔버스 기본 크기 (상하 플로우용) */
+const FAILURE_CANVAS_BASE = { width: 800, height: 1200 };
+
 const ZOOM_LIMITS = {
   min: 0.6,
   max: 1.6,
@@ -2437,7 +2440,8 @@ function NodeCard({
   nodes,
   edges,
   stateNameMap,
-  skillsetMap
+  skillsetMap,
+  portLayout = "horizontal"
 }: {
   node: EditorNode;
   config: NodeTypeConfig;
@@ -2483,6 +2487,8 @@ function NodeCard({
   } | null;
   /** 리본이 있을 때 포함한 전체 높이. 미전달 시 getNodeHeight만 사용(과거 동작) */
   effectiveHeight?: number;
+  /** 실패 캔버스: 위(입력) / 아래(출력). 기본은 좌(입력) / 우(출력) */
+  portLayout?: "horizontal" | "vertical";
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
   skillset?: import("@/domain/types").Skillset;
   nodes: EditorNode[];
@@ -2492,6 +2498,8 @@ function NodeCard({
 }) {
   const nodeHeight = getNodeHeight(node, nodeTypeConfig);
   const displayHeight = effectiveHeight ?? nodeHeight;
+  const isVertical = portLayout === "vertical";
+  const outputOffsetsVertical = getPortOffsets(NODE_METRICS.width, outputs.length);
   const availableVariables = useMemo(
     () =>
       getAvailableVariables(
@@ -2673,10 +2681,15 @@ function NodeCard({
         <button
           type="button"
           className={cn(
-            "cursor-pointer absolute left-0 flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
-            inputConnected ? "border-slate-400" : "border-slate-200"
+            "cursor-pointer absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
+            inputConnected ? "border-slate-400" : "border-slate-200",
+            isVertical ? "left-1/2" : "left-0"
           )}
-          style={{ top: displayHeight / 2 }}
+          style={
+            isVertical
+              ? { top: 0 }
+              : { top: displayHeight / 2 }
+          }
           title={inputConnected ? "Input connected" : "Input"}
           onDragOver={(event) => {
             event.stopPropagation();
@@ -2701,10 +2714,8 @@ function NodeCard({
       )}
 
       {outputs.map((output, index) => {
-        // Output port 툴팁 내용 생성
         let outputTooltip = `Output: ${output.label}`;
         if (skillset) {
-          // skill 노드의 경우 모든 outputs 정보를 표시
           if (output.key === "next" && Object.keys(skillset.outputs).length > 0) {
             const outputEntries = Object.entries(skillset.outputs);
             outputTooltip = outputEntries
@@ -2713,17 +2724,28 @@ function NodeCard({
               })
               .join("\n\n");
           } else if (skillset.outputs[output.key]) {
-            // 특정 output 키가 있는 경우
             const outputInfo = skillset.outputs[output.key];
             outputTooltip = `${output.key}\nType: ${outputInfo.type}${outputInfo.description ? `\n${outputInfo.description}` : ""}`;
           }
         }
-        
+        const style = isVertical
+          ? {
+              left: outputOffsetsVertical[index],
+              top: displayHeight,
+              transform: "translate(-50%, 50%)"
+            }
+          : {
+              top: outputOffsets[index],
+              transform: "translate(50%, -50%)"
+            };
         return (
           <div
             key={output.key}
-            className="absolute right-0 flex items-center gap-1.5 z-20"
-            style={{ top: outputOffsets[index], transform: "translate(50%, -50%)" }}
+            className={cn(
+              "absolute flex items-center gap-1.5 z-20",
+              isVertical ? "justify-center" : "right-0"
+            )}
+            style={style}
           >
             <button
               type="button"
@@ -2737,37 +2759,37 @@ function NodeCard({
                     : "border-slate-200"
               )}
               title={outputTooltip}
-            onDragStart={(event) => {
-              event.stopPropagation();
-              onOutputDragStart(event, output.key);
-            }}
-            onDragEnd={(event) => {
-              event.stopPropagation();
-              onOutputDragEnd();
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              onStartConnect(output.key);
-            }}
-          >
-            <span
-              className={cn(
-                "h-2 w-2 rounded-full",
-                node.kind === "flow_control.retry" && output.key === "failure"
-                  ? output.isActive
-                    ? "bg-rose-700"
-                    : output.isConnected
-                      ? "bg-rose-500"
-                      : "bg-rose-400"
-                  : output.isActive
-                    ? "bg-slate-900"
-                    : output.isConnected
-                      ? "bg-slate-600"
-                      : "bg-slate-400"
-              )}
-            />
-          </button>
-        </div>
+              onDragStart={(event) => {
+                event.stopPropagation();
+                onOutputDragStart(event, output.key);
+              }}
+              onDragEnd={(event) => {
+                event.stopPropagation();
+                onOutputDragEnd();
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                onStartConnect(output.key);
+              }}
+            >
+              <span
+                className={cn(
+                  "h-2 w-2 rounded-full",
+                  node.kind === "flow_control.retry" && output.key === "failure"
+                    ? output.isActive
+                      ? "bg-rose-700"
+                      : output.isConnected
+                        ? "bg-rose-500"
+                        : "bg-rose-400"
+                    : output.isActive
+                      ? "bg-slate-900"
+                      : output.isConnected
+                        ? "bg-slate-600"
+                        : "bg-slate-400"
+                )}
+              />
+            </button>
+          </div>
         );
       })}
 
@@ -3263,7 +3285,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const nextConditionIndex = useRef(1);
   const nextVariableRowIndex = useRef(1);
   const nextRetryThemeIndex = useRef(0);
+  const nextFailureNodeIndex = useRef(1);
   const loadedWorkflowId = useRef<string | null>(null);
+
+  /** 실패 캔버스에서 연결 시작 중인 (nodeId, portKey). null이면 메인 캔버스 연결. */
+  const [failureConnectingFrom, setFailureConnectingFrom] = useState<{
+    nodeId: string;
+    portKey: string;
+  } | null>(null);
 
   const { data: draft } = useQuery({
     queryKey: ["workflow-draft", workflowId],
@@ -4332,6 +4361,61 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     publishMutation.mutate();
   };
 
+  /** 실패 캔버스에 팔레트에서 드롭한 노드 추가 */
+  const addFailureNode = useCallback(
+    (kind: NodeKind, position: { x: number; y: number }) => {
+      if (kind === "system.on_failure_entry") return;
+      const config = nodeTypeConfig[kind];
+      const index = nextFailureNodeIndex.current++;
+      const id = `failure-node-${index}`;
+      const name = config ? `${config.label} ${index}` : `${kind} ${index}`;
+      const params = buildDefaultParams(kind);
+      if (kind === "flow_control.repeat" && !params.count) params.count = "1";
+      const newNode: EditorNode = {
+        id,
+        name,
+        kind,
+        position: { x: position.x, y: position.y },
+        isExpanded: true,
+        params
+      };
+      setFailureGraph((prev) => ({
+        ...prev,
+        nodes: [...prev.nodes, newNode]
+      }));
+      setHasUnsavedChanges(true);
+    },
+    [nodeTypeConfig, buildDefaultParams]
+  );
+
+  /** 실패 캔버스에서 아웃풋 포트 클릭 시 연결 시작 */
+  const handleFailureStartConnect = useCallback((nodeId: string, portKey: string) => {
+    setFailureConnectingFrom({ nodeId, portKey });
+  }, []);
+
+  /** 실패 캔버스에서 인풋에 드롭 시 엣지 추가 */
+  const handleFailureInputDrop = useCallback(
+    (toNodeId: string) => {
+      if (!failureConnectingFrom) return;
+      const edgeId = `failure-edge-${failureGraph.edges.length + 1}`;
+      setFailureGraph((prev) => ({
+        ...prev,
+        edges: [
+          ...prev.edges,
+          {
+            id: edgeId,
+            from: failureConnectingFrom.nodeId,
+            fromPort: failureConnectingFrom.portKey,
+            to: toNodeId
+          }
+        ]
+      }));
+      setFailureConnectingFrom(null);
+      setHasUnsavedChanges(true);
+    },
+    [failureConnectingFrom, failureGraph.edges.length]
+  );
+
   const handleToggleExpand = (nodeId: string) => {
     const target = nodes.find((node) => node.id === nodeId);
     const isContainer = target ? isContainerNode(target) : false;
@@ -5327,16 +5411,108 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           <Button variant="secondary" onClick={handleAutoLayout}>
             Auto Layout
           </Button>
-          <Button variant="secondary" onClick={handleSave}>
-            Save
-          </Button>
-          <Button onClick={handlePublish} disabled={hasErrors}>
-            Publish
-          </Button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowWorkflowMenu((prev) => !prev)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              aria-label="Workflow menu"
+            >
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
+                <circle cx="10" cy="5" r="1.5" />
+                <circle cx="10" cy="10" r="1.5" />
+                <circle cx="10" cy="15" r="1.5" />
+              </svg>
+            </button>
+            {showWorkflowMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  aria-hidden
+                  onClick={() => setShowWorkflowMenu(false)}
+                />
+                <div className="absolute right-0 top-full z-20 mt-1 w-52 rounded-md border border-slate-200 bg-white py-2 shadow-lg">
+                  <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Workflow
+                  </p>
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={() => {
+                      setShowWorkflowMenu(false);
+                      handleSave();
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                    onClick={() => {
+                      if (hasErrors) return;
+                      setShowWorkflowMenu(false);
+                      handlePublish();
+                    }}
+                    disabled={hasErrors}
+                  >
+                    Publish
+                  </button>
+                  <div className="mt-1 border-t border-slate-100 pt-1">
+                    <button
+                      type="button"
+                      className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                      onClick={() => {
+                        setFailureGraph((prev) => ({
+                          ...prev,
+                          enabled: !prev.enabled,
+                          drawerOpen: prev.enabled ? false : prev.drawerOpen
+                        }));
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        readOnly
+                        checked={failureGraph.enabled}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-slate-700"
+                      />
+                      <span>Failure Handling</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        "flex w-full cursor-pointer items-center px-6 py-1.5 text-left text-sm",
+                        failureGraph.enabled
+                          ? "text-slate-700 hover:bg-slate-50"
+                          : "cursor-not-allowed text-slate-300"
+                      )}
+                      onClick={() => {
+                        if (!failureGraph.enabled) return;
+                        setFailureGraph((prev) => ({ ...prev, drawerOpen: true }));
+                        setShowWorkflowMenu(false);
+                      }}
+                      disabled={!failureGraph.enabled}
+                    >
+                      Edit Flow
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {failureGraph.enabled && !failureGraph.drawerOpen && (
+          <button
+            type="button"
+            className="absolute right-0 top-1/2 z-10 flex h-10 w-5 -translate-y-1/2 items-center justify-center rounded-l-md bg-slate-900 text-xs font-semibold text-white shadow-lg hover:bg-slate-800"
+            onClick={() => setFailureGraph((prev) => ({ ...prev, drawerOpen: true }))}
+            aria-label="Open Failure Handling Flow"
+          >
+            &lt;
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowPalette((prev) => !prev)}
@@ -5746,6 +5922,288 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             </div>
           </div>
         </Card>
+
+        {/* Failure Handling 드로어: enabled이고 drawerOpen일 때만 표시 */}
+        {failureGraph.enabled && failureGraph.drawerOpen && (
+          <div className="absolute inset-0 flex justify-end pointer-events-none z-20">
+            <div
+              className="pointer-events-auto flex h-full flex-col border-l border-slate-200 bg-white shadow-xl"
+              style={{ width: "33%" }}
+            >
+              <button
+                type="button"
+                className="absolute -left-5 top-1/2 z-30 flex h-10 w-5 -translate-y-1/2 items-center justify-center rounded-l-md bg-slate-900 text-xs font-semibold text-white shadow-lg hover:bg-slate-800 pointer-events-auto"
+                onClick={() =>
+                  setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
+                }
+                aria-label="Close Failure Handling Flow"
+              >
+                &gt;
+              </button>
+              <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-4 py-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800">
+                    Failure Handling Flow
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Runs when the workflow fails
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-600"
+                  onClick={() =>
+                    setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
+                  }
+                  aria-label="Close"
+                >
+                  <span className="text-sm font-bold">✕</span>
+                </button>
+              </div>
+              <div className="shrink-0 border-b border-slate-100 px-4 py-2 text-center text-[11px] text-slate-400">
+                Basic flow templates (coming soon)
+              </div>
+              <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
+                <div
+                  className="relative mx-4 my-4 rounded-md bg-slate-100"
+                  style={{
+                    width: FAILURE_CANVAS_BASE.width,
+                    height: FAILURE_CANVAS_BASE.height,
+                    minWidth: FAILURE_CANVAS_BASE.width,
+                    minHeight: FAILURE_CANVAS_BASE.height
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "copy";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const kind = e.dataTransfer.getData(
+                      "application/x-node-kind"
+                    ) as NodeKind | "";
+                    if (!kind || kind === "system.on_failure_entry") return;
+                    const rect = (
+                      e.currentTarget as HTMLDivElement
+                    ).getBoundingClientRect();
+                    const x = e.clientX - rect.left - NODE_METRICS.width / 2;
+                    const y = e.clientY - rect.top - 24;
+                    addFailureNode(kind, {
+                      x: Math.max(0, x),
+                      y: Math.max(0, y)
+                    });
+                  }}
+                >
+                  {failureGraph.nodes.map((node) => {
+                    const config = nodeTypeConfig[node.kind];
+                    if (!config) return null;
+                    const isEntry =
+                      node.id === failureGraph.entryNodeId;
+                    const failureOutgoing = new Map(
+                      failureGraph.edges
+                        .filter((e) => e.from === node.id)
+                        .map((e) => [e.fromPort, e])
+                    );
+                    const outputStates = config.outputs.map((output) => ({
+                      key: output.key,
+                      label: output.label,
+                      isConnected: failureOutgoing.has(output.key),
+                      isActive:
+                        failureConnectingFrom?.nodeId === node.id &&
+                        failureConnectingFrom?.portKey === output.key
+                    }));
+                    const skillset = node.kind.startsWith("skill.")
+                      ? skillsetMap.get(node.kind)
+                      : undefined;
+                    return (
+                      <div
+                        key={node.id}
+                        className="absolute"
+                        style={{
+                          left: node.position.x,
+                          top: node.position.y
+                        }}
+                      >
+                        <NodeCard
+                          node={node}
+                          config={config}
+                          isSelected={false}
+                          inputConnected={failureGraph.edges.some(
+                            (e) => e.to === node.id
+                          )}
+                          outputs={outputStates}
+                          nodeTypeConfig={nodeTypeConfig}
+                          skillset={skillset}
+                          nodes={failureGraph.nodes}
+                          edges={failureGraph.edges}
+                          stateNameMap={new Map()}
+                          skillsetMap={skillsetMap}
+                          portLayout="vertical"
+                          onSelect={() => {}}
+                          onToggleExpand={() => {}}
+                          onDragStart={(ev) => {
+                            if (isEntry) return;
+                            ev.preventDefault();
+                            const rect = (
+                              ev.currentTarget as HTMLElement
+                            ).getBoundingClientRect();
+                            const offsetX = ev.clientX - rect.left;
+                            const offsetY = ev.clientY - rect.top;
+                            const onMove = (e: PointerEvent) => {
+                              const parent = (
+                                ev.currentTarget as HTMLElement
+                              ).closest(
+                                "[style*='width: 800px']"
+                              ) as HTMLElement | null;
+                              if (!parent) return;
+                              const pr = parent.getBoundingClientRect();
+                              const nx =
+                                e.clientX - pr.left - offsetX;
+                              const ny =
+                                e.clientY - pr.top - offsetY;
+                              setFailureGraph((prev) => ({
+                                ...prev,
+                                nodes: prev.nodes.map((n) =>
+                                  n.id === node.id
+                                    ? {
+                                        ...n,
+                                        position: {
+                                          x: Math.max(
+                                            0,
+                                            Math.min(
+                                              FAILURE_CANVAS_BASE.width -
+                                                NODE_METRICS.width,
+                                              nx
+                                            )
+                                          ),
+                                          y: Math.max(
+                                            0,
+                                            Math.min(
+                                              FAILURE_CANVAS_BASE.height -
+                                                (getNodeHeight(n, nodeTypeConfig) ?? 80),
+                                              ny
+                                            )
+                                          )
+                                        }
+                                      }
+                                    : n
+                                )
+                              }));
+                            };
+                            const onUp = () => {
+                              window.removeEventListener(
+                                "pointermove",
+                                onMove
+                              );
+                              window.removeEventListener(
+                                "pointerup",
+                                onUp
+                              );
+                            };
+                            window.addEventListener(
+                              "pointermove",
+                              onMove
+                            );
+                            window.addEventListener("pointerup", onUp);
+                          }}
+                          onStartConnect={(portKey) =>
+                            handleFailureStartConnect(node.id, portKey)
+                          }
+                          onCompleteConnect={() =>
+                            setFailureConnectingFrom(null)
+                          }
+                          onParamChange={() => {}}
+                          onConditionExpressionFieldChange={() => {}}
+                          onAddConditionExpression={() => {}}
+                          onRemoveConditionExpression={() => {}}
+                          onVariableRowChange={() => {}}
+                          onAddVariableRow={() => {}}
+                          onRemoveVariableRow={() => {}}
+                          onNameChange={() => {}}
+                          isEditingName={false}
+                          onStartEditName={() => {}}
+                          onFinishEditName={() => {}}
+                          onOutputDragStart={() => {}}
+                          onOutputDragEnd={() => {}}
+                          onInputDragOver={() => {}}
+                          onInputDrop={() =>
+                            handleFailureInputDrop(node.id)
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                  {failureGraph.edges.length > 0 && (
+                    <svg
+                      className="absolute inset-0 pointer-events-none"
+                      width={FAILURE_CANVAS_BASE.width}
+                      height={FAILURE_CANVAS_BASE.height}
+                      viewBox={`0 0 ${FAILURE_CANVAS_BASE.width} ${FAILURE_CANVAS_BASE.height}`}
+                    >
+                      <defs>
+                        <marker
+                          id="failure-arrow"
+                          markerWidth="10"
+                          markerHeight="10"
+                          refX="8"
+                          refY="5"
+                          orient="auto"
+                          markerUnits="strokeWidth"
+                        >
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+                        </marker>
+                      </defs>
+                      {failureGraph.edges.map((edge) => {
+                        const fromNode = failureGraph.nodes.find(
+                          (n) => n.id === edge.from
+                        );
+                        const toNode = failureGraph.nodes.find(
+                          (n) => n.id === edge.to
+                        );
+                        if (!fromNode || !toNode) return null;
+                        const configFrom = nodeTypeConfig[fromNode.kind];
+                        const outputs =
+                          configFrom?.outputs ?? [];
+                        const outIdx = outputs.findIndex(
+                          (o) => o.key === edge.fromPort
+                        );
+                        const fromH = getNodeHeight(
+                          fromNode,
+                          nodeTypeConfig
+                        );
+                        const outXOffsets = getPortOffsets(
+                          NODE_METRICS.width,
+                          outputs.length
+                        );
+                        const start = {
+                          x:
+                            fromNode.position.x +
+                            (outIdx >= 0 ? outXOffsets[outIdx] : NODE_METRICS.width / 2),
+                          y: fromNode.position.y + fromH
+                        };
+                        const end = {
+                          x: toNode.position.x + NODE_METRICS.width / 2,
+                          y: toNode.position.y
+                        };
+                        const curve = 40;
+                        const path = `M ${start.x} ${start.y} C ${start.x} ${start.y + curve}, ${end.x} ${end.y - curve}, ${end.x} ${end.y}`;
+                        return (
+                          <path
+                            key={edge.id}
+                            d={path}
+                            stroke="#94a3b8"
+                            strokeWidth="2"
+                            fill="none"
+                            markerEnd="url(#failure-arrow)"
+                          />
+                        );
+                      })}
+                    </svg>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {hasErrors && (
