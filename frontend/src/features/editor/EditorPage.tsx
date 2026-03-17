@@ -2732,7 +2732,8 @@ function NodeCard({
           ? {
               left: outputOffsetsVertical[index],
               top: displayHeight,
-              transform: "translate(-50%, 50%)"
+              // 경계선에 걸치도록 중앙을 경계선에 맞춤
+              transform: "translate(-50%, -50%)"
             }
           : {
               top: outputOffsets[index],
@@ -5961,6 +5962,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 >
                   <span className="text-sm font-bold">✕</span>
                 </button>
+                <button
+                  type="button"
+                  className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-slate-100 text-[11px] font-semibold text-slate-600 shadow-sm hover:bg-slate-200 hover:text-slate-700"
+                  onClick={() =>
+                    setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
+                  }
+                  aria-label="Collapse Failure Handling Drawer"
+                >
+                  &gt;
+                </button>
               </div>
               <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
                 <div
@@ -6042,6 +6053,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onToggleExpand={() => {}}
                           onDragStart={(ev) => {
                             if (isEntry) return;
+                            ev.preventDefault();
+                            ev.stopPropagation();
                             const target = ev.currentTarget as HTMLElement;
                             const parent = target.closest(
                               "[data-failure-canvas]"
