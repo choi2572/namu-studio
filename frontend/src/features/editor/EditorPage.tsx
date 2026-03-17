@@ -3479,6 +3479,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setHasUnsavedChanges(false);
       return;
     }
+    // DSL에 OnFailure 블록이 있는지 여부 (view_json에 failure 정보가 없을 때 enabled 플래그 복원용)
+    const hasOnFailure =
+      draftToApply.dsl_json &&
+      typeof draftToApply.dsl_json === "object" &&
+      draftToApply.dsl_json !== null &&
+      Object.prototype.hasOwnProperty.call(
+        draftToApply.dsl_json as Record<string, unknown>,
+        "OnFailure"
+      );
+
     const parsed = parseEditorView(draftToApply.view_json, nodeTypes);
     let loadedNodes: EditorNode[] = [];
     let loadedEdges: EditorEdge[] = [];
@@ -3499,10 +3509,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           edges: parsed.failure?.edges ?? prev.edges
         }));
       } else {
-        // view_json에 failure 정보가 없으면 enabled만 false로 리셋 (기존 워크플로우 호환)
+        // view_json에 failure 정보가 없으면 DSL의 OnFailure 유무를 기준으로 enabled만 복원
         setFailureGraph((prev) => ({
           ...prev,
-          enabled: false,
+          enabled: hasOnFailure,
           drawerOpen: false
         }));
       }
