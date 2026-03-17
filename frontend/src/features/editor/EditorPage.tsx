@@ -117,6 +117,56 @@ type VariableRow = {
   valueType: VariableValueType;
 };
 
+type SearchableNodeDropdownProps = {
+  nodes: EditorNode[];
+  selectedId: string;
+  placeholder?: string;
+  onChange: (id: string) => void;
+};
+
+function SearchableNodeDropdown({
+  nodes,
+  selectedId,
+  placeholder,
+  onChange
+}: SearchableNodeDropdownProps) {
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(
+    () =>
+      nodes.filter((n) =>
+        (n.name ?? "").toLowerCase().includes(query.toLowerCase())
+      ),
+    [nodes, query]
+  );
+  const selected = nodes.find((n) => n.id === selectedId) ?? null;
+
+  return (
+    <div className="space-y-1">
+      <input
+        data-no-drag
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search..."
+        className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-700 focus:border-slate-400 focus:outline-none"
+      />
+      <select
+        data-no-drag
+        className="w-full cursor-pointer rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-slate-400 focus:outline-none"
+        value={selected?.id ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">{placeholder ?? "Select node"}</option>
+        {filtered.map((n) => (
+          <option key={n.id} value={n.id}>
+            {n.name || n.id}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 type NodeTypeConfig = {
   label: string;
   category: NodeCategory;
@@ -497,12 +547,6 @@ function getExpandedContentHeight(
   if (node.kind.startsWith("skill.")) {
     height += NODE_METRICS.fieldGap + 12;
   }
-
-  // Retry 스코프 멤버 노드는 "End Retry Scope" 체크박스 한 줄 추가
-  if (node.retryScopeType === "main" || node.retryScopeType === "failure") {
-    height += NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
-  }
-
   return height;
 }
 
@@ -1396,7 +1440,10 @@ function getRetryScopeNodeIds(
   let current: string | null = startId;
   while (current) {
     const node = nodeMap.get(current);
-    if (!node || node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
+    if (!node) break;
+    // flow_control 노드는 스코프 계산에서 제외하고, 중간에 만나면 그 전까지만 포함
+    if (node.kind.startsWith("flow_control.")) break;
+    if (node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
     ids.add(current);
     if (node.isRetryScopeEnd) break;
     current = outEdges.get(current)?.to ?? null;
@@ -1422,7 +1469,10 @@ function getRetryScopeEndNodeId(
   let last: string | null = startId;
   while (current) {
     const node = nodeMap.get(current);
-    if (!node || node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
+    if (!node) break;
+    // flow_control 노드는 스코프 계산에서 제외하고, 중간에 만나면 그 전까지만 포함
+    if (node.kind.startsWith("flow_control.")) break;
+    if (node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
     last = current;
     if (node.isRetryScopeEnd) break;
     current = outEdges.get(current)?.to ?? null;
@@ -2320,6 +2370,42 @@ function NodeCard({
     Boolean(startEndBadge?.showStart && startEndBadge?.showEnd && !startEndBadge?.startError);
   const hasRibbon = showStartRibbon || showEndRibbon || showStartEndRibbon;
 
+  const getRetryScopeCandidates = useCallback(
+    (scopeType: "main" | "failure"): EditorNode[] => {
+      if (node.kind !== "flow_control.retry") return [];
+      const startId = getRetryScopeStartNodeId(node.id, scopeType, edges);
+      if (!startId) return [];
+      const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+      const outEdges = new Map<string, EditorEdge>();
+      edges.forEach((e) => {
+        if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, e);
+      });
+      const result: EditorNode[] = [];
+      let current: string | null = startId;
+      while (current) {
+        const currentNode = nodeMap.get(current);
+        if (!currentNode) break;
+        // flow_control 노드를 만나면 그 전까지만 후보로 사용
+        if (currentNode.kind.startsWith("flow_control.")) break;
+        result.push(currentNode);
+        const next = outEdges.get(current)?.to ?? null;
+        if (!next) break;
+        current = next;
+      }
+      return result;
+    },
+    [node.id, node.kind, nodes, edges]
+  );
+
+  const mainScopeCandidates = useMemo(
+    () => getRetryScopeCandidates("main"),
+    [getRetryScopeCandidates]
+  );
+  const failureScopeCandidates = useMemo(
+    () => getRetryScopeCandidates("failure"),
+    [getRetryScopeCandidates]
+  );
+
   return (
     <div
       className={cn(
@@ -2884,29 +2970,31 @@ function NodeCard({
               <span className="text-xs text-slate-600">Run on-failure flow before retry</span>
             </div>
           </label>
+          {/* Main retry scope end 선택 */}
+          <div className="mt-2 space-y-1" data-no-drag>
+            <span className="text-[10px] text-slate-500">Main scope end</span>
+            <SearchableNodeDropdown
+              nodes={mainScopeCandidates}
+              selectedId={node.params.mainScopeEndId ?? ""}
+              placeholder="Select main scope end"
+              onChange={(id) => onParamChange("mainScopeEndId", id)}
+            />
+          </div>
+
+          {/* Failure scope end 선택 (onFailureEnabled = true 일 때만) */}
+          {node.params.onFailureEnabled !== "false" && (
+            <div className="mt-2 space-y-1" data-no-drag>
+              <span className="text-[10px] text-slate-500">Failure scope end</span>
+              <SearchableNodeDropdown
+                nodes={failureScopeCandidates}
+                selectedId={node.params.failureScopeEndId ?? ""}
+                placeholder="Select failure scope end"
+                onChange={(id) => onParamChange("failureScopeEndId", id)}
+              />
+            </div>
+          )}
         </div>
       )}
-      {node.isExpanded &&
-        (node.retryScopeType === "main" || node.retryScopeType === "failure") && (
-          <div className="mt-3 space-y-2 text-xs text-slate-600" data-no-drag>
-            <label className="block">
-              <span className="text-[10px] text-slate-500">
-                {node.retryScopeType === "main" ? "End retry scope" : "End failure scope"}
-              </span>
-              <div className="mt-1 flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-slate-400"
-                  checked={Boolean(node.isRetryScopeEnd)}
-                  onChange={(e) => onRetryScopeEndChange?.(e.target.checked)}
-                />
-                <span className="text-xs text-slate-600">
-                  This node is the last in this scope
-                </span>
-              </div>
-            </label>
-          </div>
-        )}
     </div>
   );
 }
@@ -3841,6 +3929,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       if (base.onFailureEnabled === undefined) {
         base.onFailureEnabled = "true";
       }
+      if (base.mainScopeEndId === undefined) {
+        base.mainScopeEndId = "";
+      }
+      if (base.failureScopeEndId === undefined) {
+        base.failureScopeEndId = "";
+      }
     }
     return base;
   }, [nodeTypeConfig]);
@@ -4585,17 +4679,24 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           showEdgeError("Target node already belongs to another Retry scope.");
           return;
         }
+        const scopeType = fromPort === "main" ? "main" : "failure";
+        const endKey = scopeType === "main" ? "mainScopeEndId" : "failureScopeEndId";
         setNodes((prev) =>
-          prev.map((n) =>
-            n.id === toNodeId
-              ? {
+          prev.map((n) => {
+            if (n.id === fromNodeId) {
+              const currentEnd = n.params[endKey];
+              if (!currentEnd) {
+                return {
                   ...n,
-                  retryOwnerId: fromNodeId,
-                  retryScopeType: fromPort === "main" ? "main" : "failure",
-                  isRetryScopeEnd: true
-                }
-              : n
-          )
+                  params: {
+                    ...n.params,
+                    [endKey]: toNodeId
+                  }
+                };
+              }
+            }
+            return n;
+          })
         );
       } else if (
         fromNode.retryOwnerId &&
