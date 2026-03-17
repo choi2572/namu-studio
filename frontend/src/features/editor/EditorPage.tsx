@@ -2545,27 +2545,39 @@ function NodeCard({
             >
               {nodeTypeLabel}
             </span>
-            {node.retryScopeType && node.retryOwnerId && (
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold border",
-                  node.retryScopeType === "main"
-                    ? "border-emerald-500 bg-emerald-50 text-emerald-700"
-                    : "border-rose-500 bg-rose-50 text-rose-700"
-                )}
-                title={
-                  node.retryScopeType === "main"
-                    ? "Retry main scope member"
-                    : "Retry failure scope member"
-                }
-              >
-                {node.retryScopeType === "main" ? (
-                  <span className="text-[10px]">↻</span>
-                ) : (
-                  <span className="text-[10px]">!</span>
-                )}
-              </span>
-            )}
+            {node.retryScopeType && node.retryOwnerId && (() => {
+              const ownerNode = nodes.find((n) => n.id === node.retryOwnerId);
+              const mainTheme =
+                node.retryScopeType === "main" && ownerNode?.retryThemeColor
+                  ? RETRY_THEME_COLORS.find((t) => t.key === ownerNode.retryThemeColor) ??
+                    RETRY_THEME_COLORS[0]
+                  : null;
+              const badgeClass =
+                node.retryScopeType === "main"
+                  ? mainTheme
+                    ? `${mainTheme.border} ${mainTheme.bg} ${mainTheme.text}`
+                    : "border-emerald-500 bg-emerald-50 text-emerald-700"
+                  : "border-rose-500 bg-rose-50 text-rose-700";
+              return (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold border",
+                    badgeClass
+                  )}
+                  title={
+                    node.retryScopeType === "main"
+                      ? "Retry main scope member"
+                      : "Retry failure scope member"
+                  }
+                >
+                  {node.retryScopeType === "main" ? (
+                    <span className="text-[10px]">↻</span>
+                  ) : (
+                    <span className="text-[10px]">!</span>
+                  )}
+                </span>
+              );
+            })()}
           </div>
 
           {/* Skill 노드: 펼쳤을 때 타입을 namespace.name 형태로 노출 */}
