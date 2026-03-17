@@ -4378,7 +4378,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         name,
         kind,
         position: { x: position.x, y: position.y },
-        isExpanded: true,
+        // Failure 캔버스에 새로 추가되는 노드는 기본 folded 상태
+        isExpanded: false,
         params
       };
       setFailureGraph((prev) => ({
@@ -4389,6 +4390,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     },
     [nodeTypeConfig, buildDefaultParams]
   );
+
+  const handleFailureToggleExpand = useCallback((nodeId: string) => {
+    setFailureGraph((prev) => ({
+      ...prev,
+      nodes: prev.nodes.map((n) =>
+        n.id === nodeId ? { ...n, isExpanded: !n.isExpanded } : n
+      )
+    }));
+    setHasUnsavedChanges(true);
+  }, []);
 
   /** 실패 캔버스에서 아웃풋 포트 클릭 시 연결 시작 */
   const handleFailureStartConnect = useCallback((nodeId: string, portKey: string) => {
@@ -5962,48 +5973,50 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 >
                   <span className="text-sm font-bold">✕</span>
                 </button>
-                <button
-                  type="button"
-                  className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-slate-100 text-[11px] font-semibold text-slate-600 shadow-sm hover:bg-slate-200 hover:text-slate-700"
-                  onClick={() =>
-                    setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
-                  }
-                  aria-label="Collapse Failure Handling Drawer"
-                >
-                  &gt;
-                </button>
               </div>
               <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
-                <div
-                  className="relative mx-4 my-4 rounded-md bg-slate-100"
-                  data-failure-canvas
-                  style={{
-                    width: FAILURE_CANVAS_BASE.width,
-                    height: FAILURE_CANVAS_BASE.height,
-                    minWidth: FAILURE_CANVAS_BASE.width,
-                    minHeight: FAILURE_CANVAS_BASE.height
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "copy";
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const kind = e.dataTransfer.getData(
-                      "application/x-node-kind"
-                    ) as NodeKind | "";
-                    if (!kind || kind === "system.on_failure_entry") return;
-                    const rect = (
-                      e.currentTarget as HTMLDivElement
-                    ).getBoundingClientRect();
-                    const x = e.clientX - rect.left - NODE_METRICS.width / 2;
-                    const y = e.clientY - rect.top - 24;
-                    addFailureNode(kind, {
-                      x: Math.max(0, x),
-                      y: Math.max(0, y)
-                    });
-                  }}
-                >
+                {/* Failure 캔버스 전체 래퍼: 여기 기준으로 좌측 중앙에 > 버튼 배치 */}
+                <div className="relative mx-4 my-4">
+                  <button
+                    type="button"
+                    className="absolute left-0 top-1/2 z-20 flex h-10 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700"
+                    onClick={() =>
+                      setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
+                    }
+                    aria-label="Collapse Failure Handling Drawer"
+                  >
+                    &gt;
+                  </button>
+                  <div
+                    className="relative rounded-md bg-slate-100"
+                    data-failure-canvas
+                    style={{
+                      width: FAILURE_CANVAS_BASE.width,
+                      height: FAILURE_CANVAS_BASE.height,
+                      minWidth: FAILURE_CANVAS_BASE.width,
+                      minHeight: FAILURE_CANVAS_BASE.height
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "copy";
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const kind = e.dataTransfer.getData(
+                        "application/x-node-kind"
+                      ) as NodeKind | "";
+                      if (!kind || kind === "system.on_failure_entry") return;
+                      const rect = (
+                        e.currentTarget as HTMLDivElement
+                      ).getBoundingClientRect();
+                      const x = e.clientX - rect.left - NODE_METRICS.width / 2;
+                      const y = e.clientY - rect.top - 24;
+                      addFailureNode(kind, {
+                        x: Math.max(0, x),
+                        y: Math.max(0, y)
+                      });
+                    }}
+                  >
                   {failureGraph.nodes.map((node) => {
                     const config = nodeTypeConfig[node.kind];
                     if (!config) return null;
@@ -6050,7 +6063,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           skillsetMap={skillsetMap}
                           portLayout="vertical"
                           onSelect={() => {}}
-                          onToggleExpand={() => {}}
+                          onToggleExpand={() => handleFailureToggleExpand(node.id)}
                           onDragStart={(ev) => {
                             if (isEntry) return;
                             ev.preventDefault();
