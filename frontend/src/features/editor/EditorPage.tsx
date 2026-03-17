@@ -143,6 +143,8 @@ function SearchableNodeDropdown({
   );
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
 
+  const [open, setOpen] = useState(false);
+
   // selectedId가 외부에서 바뀐 경우 input 표시 값 동기화
   useEffect(() => {
     const next = nodes.find((n) => n.id === selectedId);
@@ -152,17 +154,24 @@ function SearchableNodeDropdown({
   }, [nodes, selectedId]);
 
   return (
-    <div className="relative">
+    <div className="relative space-y-1">
       <input
         data-no-drag
         type="text"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
         placeholder={placeholder ?? "Select node"}
         className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-700 focus:border-slate-400 focus:outline-none"
       />
-      {filtered.length > 0 && query.length > 0 && (
-        <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-md border border-slate-200 bg-white text-[11px] text-slate-700 shadow-lg">
+      {open && filtered.length > 0 && query.length > 0 && (
+        <div
+          className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-md border border-slate-200 bg-white text-[11px] text-slate-700 shadow-lg"
+          onMouseDown={(e) => e.preventDefault()}
+        >
           {filtered.map((n) => (
             <button
               key={n.id}
@@ -175,6 +184,7 @@ function SearchableNodeDropdown({
               onClick={() => {
                 setQuery(n.name ?? "");
                 onChange(n.id);
+                setOpen(false);
               }}
             >
               {n.name || n.id}
@@ -4793,7 +4803,24 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             }
             return n;
           });
-          nextNodes = recomputeRetryScopeMembership(nextNodes, fromNodeId, scopeType, edges);
+
+          // 이 시점에는 아직 setEdges가 적용되기 전이므로,
+          // 새로 추가될 edge를 포함한 가상의 edge 리스트로 스코프를 재계산한다.
+          const virtualEdges: EditorEdge[] = [
+            ...edges,
+            {
+              id: "__virtual_retry_scope_edge__",
+              from: fromNodeId,
+              fromPort,
+              to: toNodeId
+            }
+          ];
+          nextNodes = recomputeRetryScopeMembership(
+            nextNodes,
+            fromNodeId,
+            scopeType,
+            virtualEdges
+          );
           return nextNodes;
         });
       } else if (
