@@ -6094,18 +6094,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 </button>
               </div>
               <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
-                {/* Failure 캔버스 전체 래퍼: 여기 기준으로 좌측 중앙에 > 버튼 배치 */}
                 <div className="relative mx-4 my-4">
-                  <button
-                    type="button"
-                    className="absolute left-0 top-1/2 z-20 flex h-10 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700"
-                    onClick={() =>
-                      setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
-                    }
-                    aria-label="Collapse Failure Handling Drawer"
-                  >
-                    &gt;
-                  </button>
                   <div
                     className="relative rounded-md bg-slate-100"
                     data-failure-canvas
@@ -6136,6 +6125,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       });
                     }}
                   >
+                    {failureGraph.nodes.length <= 1 && (
+                      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500">
+                        <p className="font-medium">Define what should happen when the workflow fails.</p>
+                        <p className="mt-1">
+                          Drag nodes from the palette into this area to build your failure handling flow.
+                        </p>
+                      </div>
+                    )}
                     {failureGraph.nodes.map((node) => {
                       const config = nodeTypeConfig[node.kind];
                       if (!config) return null;
