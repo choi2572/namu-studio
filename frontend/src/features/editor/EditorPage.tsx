@@ -6080,6 +6080,17 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               className="relative pointer-events-auto flex h-full flex-col border-l border-slate-200 bg-white shadow-xl"
               style={{ width: "33%" }}
             >
+              {/* Failure drawer 닫기 버튼: 메인 캔버스 < 버튼과 동일한 vertical center 기준 */}
+              <button
+                type="button"
+                className="absolute -left-4 top-1/2 z-30 flex h-10 w-6 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700"
+                onClick={() =>
+                  setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
+                }
+                aria-label="Close Failure Handling Flow"
+              >
+                &gt;
+              </button>
               <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-4 py-3">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-800">
@@ -6114,16 +6125,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   </div>
                 )}
                 <div className="relative mx-4 my-4">
-                  <button
-                    type="button"
-                    className="absolute -left-4 top-1/2 z-30 flex h-10 w-6 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700"
-                    onClick={() =>
-                      setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
-                    }
-                    aria-label="Close Failure Handling Flow"
-                  >
-                    &gt;
-                  </button>
                   <div
                     className="relative rounded-md bg-slate-100"
                     data-failure-canvas
