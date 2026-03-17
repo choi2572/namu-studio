@@ -6083,7 +6083,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               {/* Failure drawer 닫기 버튼: 메인 캔버스 < 버튼과 동일한 vertical center 기준 */}
               <button
                 type="button"
-                className="absolute -left-4 top-1/2 z-30 flex h-10 w-6 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700"
+                className="absolute -left-4 top-1/2 z-30 flex h-10 w-6 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700"
                 onClick={() =>
                   setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
                 }
