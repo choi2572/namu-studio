@@ -5433,7 +5433,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   aria-hidden
                   onClick={() => setShowWorkflowMenu(false)}
                 />
-                <div className="absolute right-0 top-full z-20 mt-1 w-52 rounded-md border border-slate-200 bg-white py-2 shadow-lg">
+                <div className="absolute right-0 top-full z-30 mt-1 w-52 rounded-md border border-slate-200 bg-white py-2 shadow-lg">
                   <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                     Workflow
                   </p>
@@ -5927,7 +5927,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
         {/* Failure Handling 드로어: enabled이고 drawerOpen일 때만 표시 */}
         {failureGraph.enabled && failureGraph.drawerOpen && (
-          <div className="absolute inset-0 flex justify-end pointer-events-none z-20">
+          <div className="absolute inset-0 flex justify-end pointer-events-none z-10">
             <div
               className="pointer-events-auto flex h-full flex-col border-l border-slate-200 bg-white shadow-xl"
               style={{ width: "33%" }}
@@ -5965,6 +5965,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
                 <div
                   className="relative mx-4 my-4 rounded-md bg-slate-100"
+                  data-failure-canvas
                   style={{
                     width: FAILURE_CANVAS_BASE.width,
                     height: FAILURE_CANVAS_BASE.height,
@@ -6039,13 +6040,67 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           portLayout="vertical"
                           onSelect={() => {}}
                           onToggleExpand={() => {}}
-                          // v0: 실패 플로우 노드는 아직 드래그 이동 미지원 (버그 방지를 위해 비활성화)
-                          onDragStart={() => {}}
+                          onDragStart={(ev) => {
+                            if (isEntry) return;
+                            const target = ev.currentTarget as HTMLElement;
+                            const parent = target.closest(
+                              "[data-failure-canvas]"
+                            ) as HTMLElement | null;
+                            if (!parent) return;
+                            const targetRect = target.getBoundingClientRect();
+                            const parentRect = parent.getBoundingClientRect();
+                            const offsetX = ev.clientX - targetRect.left;
+                            const offsetY = ev.clientY - targetRect.top;
+                            const onMove = (e: PointerEvent) => {
+                              const nx = e.clientX - parentRect.left - offsetX;
+                              const ny = e.clientY - parentRect.top - offsetY;
+                              setFailureGraph((prev) => ({
+                                ...prev,
+                                nodes: prev.nodes.map((n) =>
+                                  n.id === node.id
+                                    ? {
+                                        ...n,
+                                        position: {
+                                          x: Math.max(
+                                            0,
+                                            Math.min(
+                                              FAILURE_CANVAS_BASE.width -
+                                                NODE_METRICS.width,
+                                              nx
+                                            )
+                                          ),
+                                          y: Math.max(
+                                            0,
+                                            Math.min(
+                                              FAILURE_CANVAS_BASE.height -
+                                                getNodeHeight(n, nodeTypeConfig),
+                                              ny
+                                            )
+                                          )
+                                        }
+                                      }
+                                    : n
+                                )
+                              }));
+                            };
+                            const onUp = () => {
+                              window.removeEventListener(
+                                "pointermove",
+                                onMove
+                              );
+                              window.removeEventListener(
+                                "pointerup",
+                                onUp
+                              );
+                            };
+                            window.addEventListener("pointermove", onMove);
+                            window.addEventListener("pointerup", onUp);
+                          }}
                           onStartConnect={(portKey) =>
                             handleFailureStartConnect(node.id, portKey)
                           }
                           onCompleteConnect={() =>
-                            setFailureConnectingFrom(null)
+                            handleFailureInputDrop(node.id)
                           }
                           onParamChange={() => {}}
                           onConditionExpressionFieldChange={() => {}}
