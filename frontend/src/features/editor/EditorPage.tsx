@@ -5930,13 +5930,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 type="button"
                 className="cursor-pointer rounded px-1 text-slate-500 hover:text-slate-900"
                 onClick={() => setZoom(1)}
-              >
+                >
                 Reset
               </button>
             </div>
           </div>
         </Card>
-
         {/* Failure Handling 드로어: enabled이고 drawerOpen일 때만 표시 */}
         {failureGraph.enabled && failureGraph.drawerOpen && (
           <div className="absolute inset-0 flex justify-end pointer-events-none z-10">
@@ -6017,241 +6016,251 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       });
                     }}
                   >
-                  {failureGraph.nodes.map((node) => {
-                    const config = nodeTypeConfig[node.kind];
-                    if (!config) return null;
-                    const isEntry =
-                      node.id === failureGraph.entryNodeId;
-                    const failureOutgoing = new Map(
-                      failureGraph.edges
-                        .filter((e) => e.from === node.id)
-                        .map((e) => [e.fromPort, e])
-                    );
-                    const outputStates = config.outputs.map((output) => ({
-                      key: output.key,
-                      label: output.label,
-                      isConnected: failureOutgoing.has(output.key),
-                      isActive:
-                        failureConnectingFrom?.nodeId === node.id &&
-                        failureConnectingFrom?.portKey === output.key
-                    }));
-                    const skillset = node.kind.startsWith("skill.")
-                      ? skillsetMap.get(node.kind)
-                      : undefined;
-                    return (
-                      <div
-                        key={node.id}
-                        className="absolute"
-                        style={{
-                          left: node.position.x,
-                          top: node.position.y
-                        }}
-                      >
-                        <NodeCard
-                          node={node}
-                          config={config}
-                          isSelected={false}
-                          inputConnected={failureGraph.edges.some(
-                            (e) => e.to === node.id
-                          )}
-                          outputs={outputStates}
-                          nodeTypeConfig={nodeTypeConfig}
-                          skillset={skillset}
-                          nodes={failureGraph.nodes}
-                          edges={failureGraph.edges}
-                          stateNameMap={new Map()}
-                          skillsetMap={skillsetMap}
-                          portLayout="vertical"
-                          onSelect={() => {}}
-                          onToggleExpand={() => handleFailureToggleExpand(node.id)}
-                          onDragStart={(ev) => {
-                            if (isEntry) return;
-                            ev.preventDefault();
-                            ev.stopPropagation();
-                            const target = ev.currentTarget as HTMLElement;
-                            const parent = target.closest(
-                              "[data-failure-canvas]"
-                            ) as HTMLElement | null;
-                            if (!parent) return;
-                            const targetRect = target.getBoundingClientRect();
-                            const parentRect = parent.getBoundingClientRect();
-                            const offsetX = ev.clientX - targetRect.left;
-                            const offsetY = ev.clientY - targetRect.top;
-                            const onMove = (e: PointerEvent) => {
-                              const nx = e.clientX - parentRect.left - offsetX;
-                              const ny = e.clientY - parentRect.top - offsetY;
-                              setFailureGraph((prev) => ({
-                                ...prev,
-                                nodes: prev.nodes.map((n) =>
-                                  n.id === node.id
-                                    ? {
-                                        ...n,
-                                        position: {
-                                          x: Math.max(
-                                            0,
-                                            Math.min(
-                                              FAILURE_CANVAS_BASE.width -
-                                                NODE_METRICS.width,
-                                              nx
-                                            )
-                                          ),
-                                          y: Math.max(
-                                            0,
-                                            Math.min(
-                                              FAILURE_CANVAS_BASE.height -
-                                                getNodeHeight(n, nodeTypeConfig),
-                                              ny
-                                            )
-                                          )
-                                        }
-                                      }
-                                    : n
-                                )
-                              }));
-                            };
-                            const onUp = () => {
-                              window.removeEventListener(
-                                "pointermove",
-                                onMove
-                              );
-                              window.removeEventListener(
-                                "pointerup",
-                                onUp
-                              );
-                            };
-                            window.addEventListener("pointermove", onMove);
-                            window.addEventListener("pointerup", onUp);
+                    {failureGraph.nodes.map((node) => {
+                      const config = nodeTypeConfig[node.kind];
+                      if (!config) return null;
+                      const isEntry =
+                        node.id === failureGraph.entryNodeId;
+                      const failureOutgoing = new Map(
+                        failureGraph.edges
+                          .filter((e) => e.from === node.id)
+                          .map((e) => [e.fromPort, e])
+                      );
+                      const outputStates = config.outputs.map((output) => ({
+                        key: output.key,
+                        label: output.label,
+                        isConnected: failureOutgoing.has(output.key),
+                        isActive:
+                          failureConnectingFrom?.nodeId === node.id &&
+                          failureConnectingFrom?.portKey === output.key
+                      }));
+                      const skillset = node.kind.startsWith("skill.")
+                        ? skillsetMap.get(node.kind)
+                        : undefined;
+                      return (
+                        <div
+                          key={node.id}
+                          className="absolute"
+                          style={{
+                            left: node.position.x,
+                            top: node.position.y
                           }}
-                          onStartConnect={(portKey) =>
-                            handleFailureStartConnect(node.id, portKey)
-                          }
-                          onCompleteConnect={() =>
-                            handleFailureInputDrop(node.id)
-                          }
-                          onParamChange={() => {}}
-                          onConditionExpressionFieldChange={() => {}}
-                          onAddConditionExpression={() => {}}
-                          onRemoveConditionExpression={() => {}}
-                          onVariableRowChange={() => {}}
-                          onAddVariableRow={() => {}}
-                          onRemoveVariableRow={() => {}}
-                          onNameChange={() => {}}
-                          isEditingName={false}
-                          onStartEditName={() => {}}
-                          onFinishEditName={() => {}}
-                          onOutputDragStart={() => {}}
-                          onOutputDragEnd={() => {}}
-                          onInputDragOver={() => {}}
-                          onInputDrop={() =>
-                            handleFailureInputDrop(node.id)
-                          }
-                        />
-                      </div>
-                    );
-                  })}
-                  {failureGraph.edges.length > 0 && (
-                    <svg
-                      className="absolute inset-0 pointer-events-none"
-                      width={FAILURE_CANVAS_BASE.width}
-                      height={FAILURE_CANVAS_BASE.height}
-                      viewBox={`0 0 ${FAILURE_CANVAS_BASE.width} ${FAILURE_CANVAS_BASE.height}`}
-                    >
-                      <defs>
-                        <marker
-                          id="failure-arrow"
-                          markerWidth="10"
-                          markerHeight="10"
-                          refX="8"
-                          refY="5"
-                          orient="auto"
-                          markerUnits="strokeWidth"
                         >
-                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
-                        </marker>
-                      </defs>
-                      {failureGraph.edges.map((edge) => {
-                        const fromNode = failureGraph.nodes.find(
-                          (n) => n.id === edge.from
-                        );
-                        const toNode = failureGraph.nodes.find(
-                          (n) => n.id === edge.to
-                        );
-                        if (!fromNode || !toNode) return null;
-                        const configFrom = nodeTypeConfig[fromNode.kind];
-                        const outputs =
-                          configFrom?.outputs ?? [];
-                        const outIdx = outputs.findIndex(
-                          (o) => o.key === edge.fromPort
-                        );
-                        const fromH = getNodeHeight(
-                          fromNode,
-                          nodeTypeConfig
-                        );
-                        const outXOffsets = getPortOffsets(
-                          NODE_METRICS.width,
-                          outputs.length
-                        );
-                        const start = {
-                          x:
-                            fromNode.position.x +
-                            (outIdx >= 0 ? outXOffsets[outIdx] : NODE_METRICS.width / 2),
-                          y: fromNode.position.y + fromH
-                        };
-                        const end = {
-                          x: toNode.position.x + NODE_METRICS.width / 2,
-                          y: toNode.position.y
-                        };
-                        const curve = 40;
-                        const path = `M ${start.x} ${start.y} C ${start.x} ${start.y + curve}, ${end.x} ${end.y - curve}, ${end.x} ${end.y}`;
-                        return (
-                          <path
-                            key={edge.id}
-                            d={path}
-                            stroke="#94a3b8"
-                            strokeWidth="2"
-                            fill="none"
-                            markerEnd="url(#failure-arrow)"
+                          <NodeCard
+                            node={node}
+                            config={config}
+                            isSelected={false}
+                            inputConnected={failureGraph.edges.some(
+                              (e) => e.to === node.id
+                            )}
+                            outputs={outputStates}
+                            nodeTypeConfig={nodeTypeConfig}
+                            skillset={skillset}
+                            nodes={failureGraph.nodes}
+                            edges={failureGraph.edges}
+                            stateNameMap={new Map()}
+                            skillsetMap={skillsetMap}
+                            portLayout="vertical"
+                            onSelect={() => {}}
+                            onToggleExpand={() =>
+                              handleFailureToggleExpand(node.id)
+                            }
+                            onDragStart={(ev) => {
+                              if (isEntry) return;
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              const target = ev.currentTarget as HTMLElement;
+                              const parent = target.closest(
+                                "[data-failure-canvas]"
+                              ) as HTMLElement | null;
+                              if (!parent) return;
+                              const targetRect = target.getBoundingClientRect();
+                              const parentRect = parent.getBoundingClientRect();
+                              const offsetX = ev.clientX - targetRect.left;
+                              const offsetY = ev.clientY - targetRect.top;
+                              const onMove = (e: PointerEvent) => {
+                                const nx =
+                                  e.clientX - parentRect.left - offsetX;
+                                const ny =
+                                  e.clientY - parentRect.top - offsetY;
+                                setFailureGraph((prev) => ({
+                                  ...prev,
+                                  nodes: prev.nodes.map((n) =>
+                                    n.id === node.id
+                                      ? {
+                                          ...n,
+                                          position: {
+                                            x: Math.max(
+                                              0,
+                                              Math.min(
+                                                FAILURE_CANVAS_BASE.width -
+                                                  NODE_METRICS.width,
+                                                nx
+                                              )
+                                            ),
+                                            y: Math.max(
+                                              0,
+                                              Math.min(
+                                                FAILURE_CANVAS_BASE.height -
+                                                  getNodeHeight(
+                                                    n,
+                                                    nodeTypeConfig
+                                                  ),
+                                                ny
+                                              )
+                                            )
+                                          }
+                                        }
+                                      : n
+                                  )
+                                }));
+                              };
+                              const onUp = () => {
+                                window.removeEventListener(
+                                  "pointermove",
+                                  onMove
+                                );
+                                window.removeEventListener(
+                                  "pointerup",
+                                  onUp
+                                );
+                              };
+                              window.addEventListener("pointermove", onMove);
+                              window.addEventListener("pointerup", onUp);
+                            }}
+                            onStartConnect={(portKey) =>
+                              handleFailureStartConnect(node.id, portKey)
+                            }
+                            onCompleteConnect={() =>
+                              handleFailureInputDrop(node.id)
+                            }
+                            onParamChange={() => {}}
+                            onConditionExpressionFieldChange={() => {}}
+                            onAddConditionExpression={() => {}}
+                            onRemoveConditionExpression={() => {}}
+                            onVariableRowChange={() => {}}
+                            onAddVariableRow={() => {}}
+                            onRemoveVariableRow={() => {}}
+                            onNameChange={() => {}}
+                            isEditingName={false}
+                            onStartEditName={() => {}}
+                            onFinishEditName={() => {}}
+                            onOutputDragStart={() => {}}
+                            onOutputDragEnd={() => {}}
+                            onInputDragOver={() => {}}
+                            onInputDrop={() =>
+                              handleFailureInputDrop(node.id)
+                            }
                           />
-                        );
-                      })}
-                    </svg>
-                  )}
+                        </div>
+                      );
+                    })}
+                    {failureGraph.edges.length > 0 && (
+                      <svg
+                        className="absolute inset-0 pointer-events-none"
+                        width={FAILURE_CANVAS_BASE.width}
+                        height={FAILURE_CANVAS_BASE.height}
+                        viewBox={`0 0 ${FAILURE_CANVAS_BASE.width} ${FAILURE_CANVAS_BASE.height}`}
+                      >
+                        <defs>
+                          <marker
+                            id="failure-arrow"
+                            markerWidth="10"
+                            markerHeight="10"
+                            refX="8"
+                            refY="5"
+                            orient="auto"
+                            markerUnits="strokeWidth"
+                          >
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+                          </marker>
+                        </defs>
+                        {failureGraph.edges.map((edge) => {
+                          const fromNode = failureGraph.nodes.find(
+                            (n) => n.id === edge.from
+                          );
+                          const toNode = failureGraph.nodes.find(
+                            (n) => n.id === edge.to
+                          );
+                          if (!fromNode || !toNode) return null;
+                          const configFrom = nodeTypeConfig[fromNode.kind];
+                          const outputs = configFrom?.outputs ?? [];
+                          const outIdx = outputs.findIndex(
+                            (o) => o.key === edge.fromPort
+                          );
+                          const fromH = getNodeHeight(
+                            fromNode,
+                            nodeTypeConfig
+                          );
+                          const outXOffsets = getPortOffsets(
+                            NODE_METRICS.width,
+                            outputs.length
+                          );
+                          const start = {
+                            x:
+                              fromNode.position.x +
+                              (outIdx >= 0
+                                ? outXOffsets[outIdx]
+                                : NODE_METRICS.width / 2),
+                            y: fromNode.position.y + fromH
+                          };
+                          const end = {
+                            x: toNode.position.x + NODE_METRICS.width / 2,
+                            y: toNode.position.y
+                          };
+                          const curve = 40;
+                          const path = `M ${start.x} ${start.y} C ${start.x} ${
+                            start.y + curve
+                          }, ${end.x} ${end.y - curve}, ${end.x} ${end.y}`;
+                          return (
+                            <path
+                              key={edge.id}
+                              d={path}
+                              stroke="#94a3b8"
+                              strokeWidth="2"
+                              fill="none"
+                              markerEnd="url(#failure-arrow)"
+                            />
+                          );
+                        })}
+                      </svg>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         )}
+        {hasErrors && (
+          <div className="fixed bottom-6 right-6 z-20">
+            <button
+              type="button"
+              className="cursor-pointer flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-lg"
+              onClick={() => setShowValidation((prev) => !prev)}
+            >
+              {allValidationErrors.length} Validation Errors
+            </button>
+            {showValidation && (
+              <div className="mt-3 w-72 rounded-lg border border-red-200 bg-white p-3 text-xs text-slate-700 shadow-lg">
+                <p className="font-semibold text-red-600">Errors</p>
+                <ul className="mt-2 space-y-2">
+                  {allValidationErrors.map((error: ValidationError, index) => (
+                    <li key={`${error.id}-${index}`}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedNode(error.nodeId ?? null)}
+                        className="cursor-pointer text-left text-slate-700 hover:text-slate-900"
+                      >
+                        {error.message}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
-
-      {hasErrors && (
-        <div className="fixed bottom-6 right-6 z-20">
-          <button
-            type="button"
-            className="cursor-pointer flex items-center gap-2 rounded-full bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-lg"
-            onClick={() => setShowValidation((prev) => !prev)}
-          >
-            {allValidationErrors.length} Validation Errors
-          </button>
-          {showValidation && (
-            <div className="mt-3 w-72 rounded-lg border border-red-200 bg-white p-3 text-xs text-slate-700 shadow-lg">
-              <p className="font-semibold text-red-600">Errors</p>
-              <ul className="mt-2 space-y-2">
-                {allValidationErrors.map((error: ValidationError, index) => (
-                  <li key={`${error.id}-${index}`}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedNode(error.nodeId ?? null)}
-                      className="cursor-pointer text-left text-slate-700 hover:text-slate-900"
-                    >
-                      {error.message}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
