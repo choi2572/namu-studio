@@ -42,7 +42,8 @@ type NodeKind =
   | "flow_control.parallel"
   | "flow_control.retry"
   | "flow_control.vlm"
-  | "event.webhook";
+  | "event.webhook"
+  | "system.on_failure_entry";
 
 type NodeCategory = "skill" | "flow_control" | "event";
 
@@ -241,6 +242,14 @@ type EditorViewJson = {
   canvas?: { width: number; height: number; zoom: number };
 };
 
+type FailureHandlingGraph = {
+  enabled: boolean;
+  drawerOpen: boolean;
+  nodes: EditorNode[];
+  edges: EditorEdge[];
+  entryNodeId: string;
+};
+
 type DragState = {
   nodeId: string;
   offsetX: number;
@@ -282,6 +291,15 @@ const NODE_CATEGORY_LABELS: Record<NodeCategory, string> = {
 
 // 정적 노드 타입 설정 (flow_control, event)
 const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
+  "system.on_failure_entry": {
+    label: "On Workflow Failure",
+    category: "flow_control",
+    iconText: "WF",
+    colorClass: "border-slate-300 bg-slate-100 text-slate-700",
+    paramFields: [],
+    outputs: [{ key: "next", label: "Next" }],
+    inputEnabled: false
+  },
   "flow_control.input": {
     label: "Input",
     category: "flow_control",
@@ -1226,7 +1244,8 @@ function buildStateRecords(
 function buildDslJson(
   nodes: EditorNode[],
   edges: EditorEdge[],
-  skillsetMap?: Map<string, import("@/domain/types").Skillset>
+  skillsetMap?: Map<string, import("@/domain/types").Skillset>,
+  failureGraph?: FailureHandlingGraph
 ) {
   if (nodes.length === 0) {
     return {};
@@ -1339,10 +1358,88 @@ function buildDslJson(
     inputsRecord[name.trim()] = { Type, Value };
   });
   const hasInputs = Object.keys(inputsRecord).length > 0;
-  return {
+  const baseDsl: Record<string, unknown> = {
     Comment: "Generated from editor",
     StartAt: startNode ? stateNameMap.get(startNode.id) : undefined,
     ...(hasInputs ? { Inputs: inputsRecord } : {}),
+    States: states
+  };
+
+  if (!failureGraph || !failureGraph.enabled) {
+    return baseDsl;
+  }
+
+  const onFailure = buildOnFailureDsl(failureGraph, stateNameMap);
+  if (!onFailure) {
+    return baseDsl;
+  }
+
+  return {
+    ...baseDsl,
+    OnFailure: onFailure
+  };
+}
+
+function buildOnFailureDsl(
+  failureGraph: FailureHandlingGraph,
+  stateNameMap: Map<string, string>
+) {
+  const { nodes, edges, entryNodeId } = failureGraph;
+  if (!nodes.length) return null;
+
+  const entry = nodes.find((n) => n.id === entryNodeId);
+  if (!entry) return null;
+
+  const firstEdge = edges.find((e) => e.from === entry.id);
+  if (!firstEdge) {
+    // enable 되었지만 유저 정의 노드가 하나도 없는 경우: OnFailure 직렬화 생략
+    return null;
+  }
+
+  const startNode = nodes.find((n) => n.id === firstEdge.to);
+  if (!startNode) return null;
+
+  const failureNodes = nodes.filter((n) => n.id !== entry.id);
+  const failureNodeIds = new Set(failureNodes.map((n) => n.id));
+  const failureEdges = edges.filter(
+    (e) => failureNodeIds.has(e.from) && failureNodeIds.has(e.to)
+  );
+
+  const failureStateNameMap = new Map<string, string>();
+  Array.from(failureNodeIds).forEach((id, index) => {
+    const existing = stateNameMap.get(id);
+    failureStateNameMap.set(id, existing ?? `OnFailure_${index + 1}`);
+  });
+
+  const states = buildStateRecords(
+    failureNodes,
+    failureEdges,
+    failureStateNameMap,
+    new Map(),
+    undefined
+  );
+
+  const startStateName = failureStateNameMap.get(startNode.id);
+  if (!startStateName) return null;
+
+  const visited = new Set<string>();
+  let currentName: string | undefined | null = startStateName;
+  let lastName: string | null = null;
+  while (currentName && !visited.has(currentName)) {
+    visited.add(currentName);
+    lastName = currentName;
+    const state = states[currentName];
+    if (!state || !state.Next) break;
+    currentName = state.Next;
+  }
+  if (lastName && states[lastName]) {
+    if (!states[lastName].Next) {
+      states[lastName].End = true;
+    }
+  }
+
+  return {
+    StartAt: startStateName,
     States: states
   };
 }
@@ -3109,6 +3206,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const isNewWorkflow = workflowId === "new";
+  const [showWorkflowMenu, setShowWorkflowMenu] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -3133,6 +3231,28 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [publishToast, setPublishToast] = useState(false);
+  const [failureGraph, setFailureGraph] = useState<FailureHandlingGraph>(() => {
+    const entryId = "failure-entry-1";
+    return {
+      enabled: false,
+      drawerOpen: false,
+      entryNodeId: entryId,
+      nodes: [
+        {
+          id: entryId,
+          name: "On Workflow Failure",
+          kind: "system.on_failure_entry",
+          position: {
+            x: CANVAS_DEFAULT.width / 2 - NODE_METRICS.width / 2,
+            y: 40
+          },
+          isExpanded: true,
+          params: {}
+        }
+      ],
+      edges: []
+    };
+  });
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -4169,7 +4289,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const handleSave = async () => {
     const view_json = buildViewJson(nodes, validEdges, canvasBase, zoom);
-    const dsl_json = buildDslJson(nodes, validEdges, skillsetMap);
+    const dsl_json = buildDslJson(nodes, validEdges, skillsetMap, failureGraph);
     const updatedAt = new Date().toISOString();
 
     if (isNewWorkflow) {
