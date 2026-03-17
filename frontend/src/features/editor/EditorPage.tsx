@@ -6082,7 +6082,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             >
               <button
                 type="button"
-                className="absolute -left-5 top-1/2 z-30 flex h-10 w-6 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700 pointer-events-auto"
+                className="absolute left-0 top-1/2 z-30 flex h-10 w-6 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700 pointer-events-auto"
                 onClick={() =>
                   setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
                 }
@@ -6113,7 +6113,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               <div className="relative flex-1 min-h-0 overflow-auto bg-slate-50">
                 {/* 전체 Failure drawer 기준 안내 텍스트 (엔트리만 있을 때) */}
                 {failureGraph.nodes.length <= 1 && (
-                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500 z-0">
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500 z-20">
                     <p className="font-medium">
                       Define what should happen when the workflow fails.
                     </p>
