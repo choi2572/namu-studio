@@ -240,6 +240,16 @@ type EditorViewJson = {
   nodes: EditorNode[];
   edges: EditorEdge[];
   canvas?: { width: number; height: number; zoom: number };
+  /**
+   * 실패 핸들링 에디터 전용 상태
+   * - 런타임 DSL(`dsl_json`)에는 영향을 주지 않고, 에디터에서만 사용
+   */
+  failure?: {
+    enabled: boolean;
+    entryNodeId: string;
+    nodes: EditorNode[];
+    edges: EditorEdge[];
+  };
 };
 
 type FailureHandlingGraph = {
@@ -1027,11 +1037,77 @@ function parseEditorView(
         zoom: typeof rawCanvas.zoom === "number" ? rawCanvas.zoom : 1
       }
     : undefined;
+
+  // 실패 핸들링용 failure 그래프 복원 (있으면)
+  const rawFailure = isRecord((viewJson as { failure?: unknown }).failure)
+    ? ((viewJson as { failure?: unknown }).failure as Record<string, unknown>)
+    : null;
+
+  let failure: EditorViewJson["failure"] | undefined;
+  if (rawFailure) {
+    const enabled =
+      typeof rawFailure.enabled === "boolean" ? rawFailure.enabled : false;
+    const entryNodeId =
+      typeof rawFailure.entryNodeId === "string"
+        ? rawFailure.entryNodeId
+        : "failure-entry-1";
+    const rawFailureNodes = Array.isArray(rawFailure.nodes)
+      ? rawFailure.nodes
+      : [];
+    const rawFailureEdges = Array.isArray(rawFailure.edges)
+      ? rawFailure.edges
+      : [];
+
+    const normalizedFailureNodes = rawFailureNodes.map((node) => {
+      if (!isRecord(node)) return node;
+      const conditionExpressions = node.conditionExpressions;
+      const conditionPart =
+        Array.isArray(conditionExpressions)
+          ? {
+              conditionExpressions: conditionExpressions.map((expr) =>
+                normalizeConditionExpressionFromView(
+                  isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
+                )
+              )
+            }
+          : {};
+      const rawRows = (node as { variableRows?: unknown }).variableRows;
+      const variableRowsPart =
+        Array.isArray(rawRows)
+          ? {
+              variableRows: rawRows
+                .map(normalizeVariableRowFromView)
+                .filter((row): row is VariableRow => row !== null)
+            }
+          : {};
+      return {
+        ...node,
+        ...conditionPart,
+        ...variableRowsPart
+      };
+    });
+
+    const isValidFailureNodes = normalizedFailureNodes.every((node) =>
+      isValidEditorNode(node, nodeTypes)
+    );
+    const isValidFailureEdges = rawFailureEdges.every(isValidEditorEdge);
+
+    if (isValidFailureNodes && isValidFailureEdges) {
+      failure = {
+        enabled,
+        entryNodeId,
+        nodes: normalizedFailureNodes as EditorNode[],
+        edges: rawFailureEdges as EditorEdge[]
+      };
+    }
+  }
+
   return {
     version: "v1",
     nodes: normalizedNodes as EditorNode[],
     edges: rawEdges as EditorEdge[],
-    canvas
+    canvas,
+    failure
   };
 }
 
@@ -1451,7 +1527,8 @@ function buildViewJson(
   nodes: EditorNode[],
   edges: EditorEdge[],
   canvasBase: { width: number; height: number },
-  zoom: number
+  zoom: number,
+  failureGraph: FailureHandlingGraph
 ): EditorViewJson {
   return {
     version: "v1",
@@ -1461,6 +1538,12 @@ function buildViewJson(
       width: canvasBase.width,
       height: canvasBase.height,
       zoom
+    },
+    failure: {
+      enabled: failureGraph.enabled,
+      entryNodeId: failureGraph.entryNodeId,
+      nodes: failureGraph.nodes,
+      edges: failureGraph.edges
     }
   };
 }
@@ -3407,6 +3490,22 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       );
       loadedNodes = normalizedNodes;
       loadedEdges = filterEdgesByContainerRules(normalizedNodes, parsed.edges);
+      if (parsed.failure) {
+        setFailureGraph((prev) => ({
+          enabled: parsed.failure?.enabled ?? false,
+          drawerOpen: false,
+          entryNodeId: parsed.failure?.entryNodeId ?? prev.entryNodeId,
+          nodes: parsed.failure?.nodes ?? prev.nodes,
+          edges: parsed.failure?.edges ?? prev.edges
+        }));
+      } else {
+        // view_json에 failure 정보가 없으면 enabled만 false로 리셋 (기존 워크플로우 호환)
+        setFailureGraph((prev) => ({
+          ...prev,
+          enabled: false,
+          drawerOpen: false
+        }));
+      }
     } else {
       const imported = parseDslToEditor(draftToApply.dsl_json, nodeTypeConfig);
       if (imported) {
@@ -4319,7 +4418,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   );
 
   const handleSave = async () => {
-    const view_json = buildViewJson(nodes, validEdges, canvasBase, zoom);
+    const view_json = buildViewJson(nodes, validEdges, canvasBase, zoom, failureGraph);
     const dsl_json = buildDslJson(nodes, validEdges, skillsetMap, failureGraph);
     const updatedAt = new Date().toISOString();
 
