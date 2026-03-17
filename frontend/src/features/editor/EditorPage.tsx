@@ -130,7 +130,10 @@ function SearchableNodeDropdown({
   placeholder,
   onChange
 }: SearchableNodeDropdownProps) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => {
+    const selected = nodes.find((n) => n.id === selectedId);
+    return selected?.name ?? "";
+  });
   const filtered = useMemo(
     () =>
       nodes.filter((n) =>
@@ -140,29 +143,45 @@ function SearchableNodeDropdown({
   );
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
 
+  // selectedId가 외부에서 바뀐 경우 input 표시 값 동기화
+  useEffect(() => {
+    const next = nodes.find((n) => n.id === selectedId);
+    if (next) {
+      setQuery(next.name ?? "");
+    }
+  }, [nodes, selectedId]);
+
   return (
-    <div className="space-y-1">
+    <div className="relative">
       <input
         data-no-drag
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search..."
+        placeholder={placeholder ?? "Select node"}
         className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-700 focus:border-slate-400 focus:outline-none"
       />
-      <select
-        data-no-drag
-        className="w-full cursor-pointer rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-slate-400 focus:outline-none"
-        value={selected?.id ?? ""}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">{placeholder ?? "Select node"}</option>
-        {filtered.map((n) => (
-          <option key={n.id} value={n.id}>
-            {n.name || n.id}
-          </option>
-        ))}
-      </select>
+      {filtered.length > 0 && query.length > 0 && (
+        <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-md border border-slate-200 bg-white text-[11px] text-slate-700 shadow-lg">
+          {filtered.map((n) => (
+            <button
+              key={n.id}
+              type="button"
+              data-no-drag
+              className={cn(
+                "flex w-full cursor-pointer items-center px-2 py-1 text-left hover:bg-slate-100",
+                n.id === selected?.id ? "bg-slate-100 font-semibold" : ""
+              )}
+              onClick={() => {
+                setQuery(n.name ?? "");
+                onChange(n.id);
+              }}
+            >
+              {n.name || n.id}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1408,6 +1427,75 @@ const RETRY_SCOPE_FORBIDDEN_KINDS: NodeKind[] = [
 
 function isForbiddenInRetryScope(kind: NodeKind): boolean {
   return RETRY_SCOPE_FORBIDDEN_KINDS.includes(kind);
+}
+
+function recomputeRetryScopeMembership(
+  prevNodes: EditorNode[],
+  retryNodeId: string,
+  scopeType: "main" | "failure",
+  edges: EditorEdge[]
+): EditorNode[] {
+  const retryNode = prevNodes.find(
+    (n) => n.id === retryNodeId && n.kind === "flow_control.retry"
+  );
+  if (!retryNode) return prevNodes;
+
+  const endKey = scopeType === "main" ? "mainScopeEndId" : "failureScopeEndId";
+  const endId = retryNode.params[endKey] || null;
+
+  const nodeMap = new Map(prevNodes.map((n) => [n.id, n]));
+  const outEdges = new Map<string, string>();
+  edges.forEach((e) => {
+    if (nodeMap.has(e.from) && nodeMap.has(e.to)) {
+      outEdges.set(e.from, e.to);
+    }
+  });
+
+  const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
+  if (!startId) {
+    // 시작점이 없으면 해당 스코프 멤버십 전부 제거
+    return prevNodes.map((n) =>
+      n.retryOwnerId === retryNodeId && n.retryScopeType === scopeType
+        ? { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false }
+        : n
+    );
+  }
+
+  const scopeIds = new Set<string>();
+  let current: string | null = startId;
+  while (current) {
+    const node = nodeMap.get(current);
+    if (!node) break;
+    // flow_control 노드를 만나면 그 전까지만 포함
+    if (node.kind.startsWith("flow_control.")) break;
+    scopeIds.add(current);
+    if (endId && current === endId) break;
+    const next = outEdges.get(current) ?? null;
+    if (!next) break;
+    current = next;
+  }
+
+  return prevNodes.map((n) => {
+    const inScope = scopeIds.has(n.id);
+    const wasInScope = n.retryOwnerId === retryNodeId && n.retryScopeType === scopeType;
+    if (!inScope && wasInScope) {
+      return {
+        ...n,
+        retryOwnerId: null,
+        retryScopeType: null,
+        isRetryScopeEnd: false
+      };
+    }
+    if (inScope) {
+      return {
+        ...n,
+        retryOwnerId: retryNodeId,
+        retryScopeType: scopeType,
+        isRetryScopeEnd: endId ? n.id === endId : false
+      };
+    }
+    return n;
+  });
 }
 
 /** Retry 스코프(메인/실패)의 시작 노드 id: Retry의 main/failure 포트에서 나간 edge의 to */
@@ -4218,11 +4306,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const handleParamChange = (nodeId: string, key: string, value: string) => {
     setNodes((prev) => {
       const retryNode = prev.find((n) => n.id === nodeId);
+      const isRetryNode = retryNode?.kind === "flow_control.retry";
       const isRetryTurningOffFailure =
-        retryNode?.kind === "flow_control.retry" &&
-        key === "onFailureEnabled" &&
-        value === "false";
-      return prev.map((node) => {
+        isRetryNode && key === "onFailureEnabled" && value === "false";
+
+      let nextNodes = prev.map((node) => {
         if (node.id === nodeId) {
           setHasUnsavedChanges(true);
           return { ...node, params: { ...node.params, [key]: value } };
@@ -4241,6 +4329,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         }
         return node;
       });
+
+      // main / failure scope end 변경 시 멤버십 재계산
+      if (isRetryNode && (key === "mainScopeEndId" || key === "failureScopeEndId")) {
+        const scopeType = key === "mainScopeEndId" ? "main" : "failure";
+        nextNodes = recomputeRetryScopeMembership(nextNodes, nodeId, scopeType, edges);
+      }
+
+      return nextNodes;
     });
     if (key === "onFailureEnabled" && value === "false") {
       const node = nodes.find((n) => n.id === nodeId);
@@ -4681,8 +4777,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         }
         const scopeType = fromPort === "main" ? "main" : "failure";
         const endKey = scopeType === "main" ? "mainScopeEndId" : "failureScopeEndId";
-        setNodes((prev) =>
-          prev.map((n) => {
+        setNodes((prev) => {
+          let nextNodes = prev.map((n) => {
             if (n.id === fromNodeId) {
               const currentEnd = n.params[endKey];
               if (!currentEnd) {
@@ -4696,8 +4792,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               }
             }
             return n;
-          })
-        );
+          });
+          nextNodes = recomputeRetryScopeMembership(nextNodes, fromNodeId, scopeType, edges);
+          return nextNodes;
+        });
       } else if (
         fromNode.retryOwnerId &&
         !fromNode.isRetryScopeEnd &&
