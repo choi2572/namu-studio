@@ -2840,6 +2840,7 @@ function NodeCard({
             <button
               type="button"
               draggable
+              data-no-drag
               className={cn(
                 "cursor-pointer flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
                 output.isActive
@@ -2890,11 +2891,7 @@ function NodeCard({
         )}
         onPointerDown={(event) => {
           const target = event.target as HTMLElement;
-          if (
-            target.closest("input") ||
-            target.closest("button") ||
-            target.closest("[data-no-drag]")
-          ) {
+          if (target.closest("[data-no-drag]")) {
             return;
           }
           event.stopPropagation();
@@ -2925,6 +2922,7 @@ function NodeCard({
                 className="cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700 flex-1 min-w-0"
                 onDoubleClick={(event) => {
                   event.stopPropagation();
+                  if (!node.isExpanded) return;
                   onStartEditName();
                 }}
                 title="Double click to rename"
