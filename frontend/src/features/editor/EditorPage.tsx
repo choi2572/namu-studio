@@ -1059,9 +1059,16 @@ function buildStateRecords(
         state.End = true;
       }
     } else if (node.kind === "flow_control.retry") {
-      const next = getNext("next");
       const onFailureEnabled = node.params.onFailureEnabled !== "false";
       const containerPayloadsMap = containerPayloads ?? new Map();
+      const mainScopeIds = getRetryScopeNodeIds(node.id, "main", fullNodes, fullEdges);
+      const mainScopeEndId = getRetryScopeEndNodeId(node.id, "main", fullNodes, fullEdges);
+      let next: string | null = null;
+      if (mainScopeEndId) {
+        const outEdge = fullEdges.find((e) => e.from === mainScopeEndId);
+        if (outEdge && !mainScopeIds.has(outEdge.to))
+          next = stateNameMap.get(outEdge.to) ?? null;
+      }
       const mainScope = buildRetryScopeSubflow(
         node.id,
         "main",
@@ -1371,7 +1378,7 @@ function getRetryScopeStartNodeId(
   return edge?.to ?? null;
 }
 
-/** Retry 스코프에 속한 노드 id 집합 (선형: start부터 끝까지) */
+/** Retry 스코프에 속한 노드 id 집합 (선형: start부터 scope end까지. isRetryScopeEnd인 노드에서 순회 중단) */
 function getRetryScopeNodeIds(
   retryNodeId: string,
   scopeType: "main" | "failure",
@@ -1391,9 +1398,36 @@ function getRetryScopeNodeIds(
     const node = nodeMap.get(current);
     if (!node || node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
     ids.add(current);
+    if (node.isRetryScopeEnd) break;
     current = outEdges.get(current)?.to ?? null;
   }
   return ids;
+}
+
+/** Retry 스코프에서 scope end 노드 id (체인 순서상 마지막 노드) */
+function getRetryScopeEndNodeId(
+  retryNodeId: string,
+  scopeType: "main" | "failure",
+  nodes: EditorNode[],
+  edges: EditorEdge[]
+): string | null {
+  const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
+  if (!startId) return null;
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const outEdges = new Map<string, EditorEdge>();
+  edges.forEach((e) => {
+    if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, e);
+  });
+  let current: string | null = startId;
+  let last: string | null = startId;
+  while (current) {
+    const node = nodeMap.get(current);
+    if (!node || node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
+    last = current;
+    if (node.isRetryScopeEnd) break;
+    current = outEdges.get(current)?.to ?? null;
+  }
+  return last;
 }
 
 /** Retry 한쪽 스코프(메인 또는 실패)의 서브플로우 State 맵과 StartAt 반환 */
@@ -2823,33 +2857,41 @@ function NodeCard({
           </div>
         )}
       {node.isExpanded && node.kind === "flow_control.retry" && (
-        <div className="mt-3 space-y-2 text-xs text-slate-600 min-w-0">
-          <label className="inline-flex items-center gap-2" data-no-drag>
-            <input
-              type="checkbox"
-              className="h-3 w-3 shrink-0 rounded border-slate-300 text-slate-700"
-              checked={node.params.onFailureEnabled !== "false"}
-              onChange={(event) => {
-                onParamChange("onFailureEnabled", event.target.checked ? "true" : "false");
-              }}
-            />
-            <span className="text-[11px] text-slate-600 truncate">On Failure</span>
+        <div className="mt-3 space-y-2 text-xs text-slate-600">
+          <label className="block" data-no-drag>
+            <span className="text-[10px] text-slate-500">On Failure</span>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-slate-400"
+                checked={node.params.onFailureEnabled !== "false"}
+                onChange={(event) => {
+                  onParamChange("onFailureEnabled", event.target.checked ? "true" : "false");
+                }}
+              />
+              <span className="text-xs text-slate-600">Run on-failure flow before retry</span>
+            </div>
           </label>
         </div>
       )}
       {node.isExpanded &&
         (node.retryScopeType === "main" || node.retryScopeType === "failure") && (
-          <div className="mt-3 min-w-0" data-no-drag>
-            <label className="inline-flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1">
-              <input
-                type="checkbox"
-                className="h-3 w-3 shrink-0 rounded border-slate-300 text-slate-700"
-                checked={Boolean(node.isRetryScopeEnd)}
-                onChange={(e) => onRetryScopeEndChange?.(e.target.checked)}
-              />
-              <span className="text-[11px] text-slate-600 truncate">
-                {node.retryScopeType === "main" ? "End Retry Scope" : "End Failure Scope"}
+          <div className="mt-3 space-y-2 text-xs text-slate-600" data-no-drag>
+            <label className="block">
+              <span className="text-[10px] text-slate-500">
+                {node.retryScopeType === "main" ? "End retry scope" : "End failure scope"}
               </span>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-slate-400"
+                  checked={Boolean(node.isRetryScopeEnd)}
+                  onChange={(e) => onRetryScopeEndChange?.(e.target.checked)}
+                />
+                <span className="text-xs text-slate-600">
+                  This node is the last in this scope
+                </span>
+              </div>
             </label>
           </div>
         )}
@@ -4014,17 +4056,53 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const node = prev.find((n) => n.id === nodeId);
       const ownerId = node?.retryOwnerId;
       const scopeType = node?.retryScopeType;
+      if (!ownerId || !scopeType) return prev;
+      const edgesLocal = edges;
+      const nodeMap = new Map(prev.map((n) => [n.id, n]));
+      const outEdges = new Map<string, { to: string }>();
+      edgesLocal.forEach((e) => {
+        if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, { to: e.to });
+      });
+      const downstreamIds = new Set<string>();
+      let current: string | null = nodeId;
+      while (current) {
+        const nextId = outEdges.get(current)?.to;
+        if (!nextId) break;
+        const nextNode = nodeMap.get(nextId);
+        if (!nextNode || nextNode.retryOwnerId !== ownerId || nextNode.retryScopeType !== scopeType) break;
+        downstreamIds.add(nextId);
+        current = nextId;
+      }
+      // End retry scope 해제(checked=false) 시: 이미 연결된 다음 노드가 스코프 밖이면 스코프에 넣고 새 end로 설정
+      let nextNodeIdToAdd: string | null = null;
+      if (!checked) {
+        const immediateNextId = outEdges.get(nodeId)?.to ?? null;
+        if (immediateNextId) {
+          const immediateNext = nodeMap.get(immediateNextId);
+          const alreadyInScope =
+            immediateNext?.retryOwnerId === ownerId && immediateNext?.retryScopeType === scopeType;
+          if (!alreadyInScope && immediateNext && !isForbiddenInRetryScope(immediateNext.kind))
+            nextNodeIdToAdd = immediateNextId;
+        }
+      }
       return prev.map((n) => {
         if (n.id === nodeId) return { ...n, isRetryScopeEnd: checked };
         if (
           checked &&
-          ownerId &&
-          scopeType &&
           n.retryOwnerId === ownerId &&
           n.retryScopeType === scopeType &&
           n.isRetryScopeEnd
         )
           return { ...n, isRetryScopeEnd: false };
+        if (checked && downstreamIds.has(n.id))
+          return { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false };
+        if (!checked && nextNodeIdToAdd && n.id === nextNodeIdToAdd)
+          return {
+            ...n,
+            retryOwnerId: ownerId,
+            retryScopeType: scopeType,
+            isRetryScopeEnd: true
+          };
         return n;
       });
     });
@@ -4267,6 +4345,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const connectedEdgeIds = edges
       .filter((edge) => edge.from === nodeId || edge.to === nodeId)
       .map((edge) => edge.id);
+    const trimmedEdgesForDelete = edges.filter(
+      (e) => e.from !== nodeId && e.to !== nodeId
+    );
     setNodes((prev) => {
       const isContainer = prev.some(
         (node) => node.id === nodeId && isContainerNode(node)
@@ -4274,7 +4355,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const isRetryNode = prev.some(
         (node) => node.id === nodeId && node.kind === "flow_control.retry"
       );
-      const nextNodes = prev
+      const deletedNode = prev.find((n) => n.id === nodeId);
+      const deletedInScopeOwnerId = deletedNode?.retryOwnerId ?? null;
+      const deletedInScopeType = deletedNode?.retryScopeType ?? null;
+
+      let nextNodes = prev
         .filter((node) => node.id !== nodeId)
         .map((node) => {
           if (isRetryNode && node.retryOwnerId === nodeId) {
@@ -4294,6 +4379,51 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             branchIndex: null
           };
         });
+
+      if (deletedInScopeOwnerId && deletedInScopeType) {
+        const startId = getRetryScopeStartNodeId(
+          deletedInScopeOwnerId,
+          deletedInScopeType,
+          trimmedEdgesForDelete
+        );
+        const reachable = new Set<string>();
+        if (startId) {
+          const nodeMap = new Map(nextNodes.map((n) => [n.id, n]));
+          const outEdges = new Map<string, string>();
+          trimmedEdgesForDelete.forEach((e) => {
+            if (nodeMap.has(e.from) && nodeMap.has(e.to))
+              outEdges.set(e.from, e.to);
+          });
+          let current: string | null = startId;
+          while (current) {
+            const node = nodeMap.get(current);
+            if (
+              !node ||
+              node.retryOwnerId !== deletedInScopeOwnerId ||
+              node.retryScopeType !== deletedInScopeType
+            )
+              break;
+            reachable.add(current);
+            if (node.isRetryScopeEnd) break;
+            current = outEdges.get(current) ?? null;
+          }
+        }
+        nextNodes = nextNodes.map((n) => {
+          if (
+            n.retryOwnerId === deletedInScopeOwnerId &&
+            n.retryScopeType === deletedInScopeType &&
+            !reachable.has(n.id)
+          )
+            return {
+              ...n,
+              retryOwnerId: null,
+              retryScopeType: null,
+              isRetryScopeEnd: false
+            };
+          return n;
+        });
+      }
+
       setEdges((prevEdges) => {
         const trimmed = prevEdges.filter(
           (edge) => edge.from !== nodeId && edge.to !== nodeId
@@ -4457,9 +4587,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         );
       } else if (
         fromNode.retryOwnerId &&
-        fromNode.isRetryScopeEnd &&
+        !fromNode.isRetryScopeEnd &&
         (fromNode.retryScopeType === "main" || fromNode.retryScopeType === "failure")
       ) {
+        // 스코프 끝이 아닌 노드에서 연결 → 스코프 확장 (End retry scope 해제 후 다음 노드를 스코프에 포함)
         if (isForbiddenInRetryScope(toNode.kind)) {
           showEdgeError(retryScopeError);
           return;
@@ -4475,7 +4606,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         const scopeType = fromNode.retryScopeType;
         setNodes((prev) =>
           prev.map((n) => {
-            if (n.id === fromNodeId) return { ...n, isRetryScopeEnd: false };
             if (n.id === toNodeId)
               return {
                 ...n,
@@ -4487,6 +4617,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           })
         );
       }
+      // 스코프 끝 노드(isRetryScopeEnd === true)에서 나간 연결은 스코프 확장 없음 → toNode는 Retry flow 다음 순서 노드
 
       setEdges((prev) => [
         ...prev,
