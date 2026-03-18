@@ -2886,8 +2886,8 @@ function NodeCard({
 
       <div
         className={cn(
-          // 헤더 전체를 넉넉한 패딩과 함께 드래그 핸들로 사용
-          "flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing pl-3 pr-3 py-3",
+          // 기존 디자인 유지 (얇은 패딩)
+          "flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing pl-1",
           hasRibbon && "pt-6"
         )}
         onPointerDown={(event) => {
