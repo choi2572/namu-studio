@@ -2710,6 +2710,8 @@ function NodeCard({
     <div
       className={cn(
         "relative rounded-lg border-2 bg-white p-3 shadow-sm overflow-visible",
+        // 접힌 상태에서는 카드 전체(바깥 패딩 영역 포함)를 드래그 핸들처럼 보이도록 커서 표시
+        !node.isExpanded && "cursor-grab active:cursor-grabbing",
         isSelected ? "border-slate-900 ring-4 ring-slate-400 ring-offset-2" : "border-slate-200"
       )}
       data-node-card
@@ -2718,6 +2720,21 @@ function NodeCard({
         height: displayHeight
       }}
       onClick={onSelect}
+      onPointerDown={(event) => {
+        // 접힌 상태에서만 카드 바깥 패딩 영역도 드래그 시작점으로 사용
+        if (node.isExpanded) return;
+        const target = event.target as HTMLElement;
+        if (
+          target.closest("input") ||
+          target.closest("button") ||
+          target.closest("[data-no-drag]")
+        ) {
+          return;
+        }
+        event.stopPropagation();
+        event.preventDefault();
+        onDragStart(event);
+      }}
       title={tooltipContent}
     >
       {/* Start/End 헤더 리본: 줌 아웃에서도 한눈에 구분. start+end 동시면 사선 구획 리본 */}
