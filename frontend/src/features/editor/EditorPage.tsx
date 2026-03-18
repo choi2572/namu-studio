@@ -2891,9 +2891,24 @@ function NodeCard({
         )}
         onPointerDown={(event) => {
           const target = event.target as HTMLElement;
-          if (target.closest("[data-no-drag]")) {
-            return;
+
+          // 펼쳐진 상태에서는 기존처럼 input / button / data-no-drag 영역은 드래그 제외
+          if (node.isExpanded) {
+            if (
+              target.closest("input") ||
+              target.closest("button") ||
+              target.closest("[data-no-drag]")
+            ) {
+              return;
+            }
+          } else {
+            // 접힌 상태에서는 unfold 버튼/포트 등 data-no-drag 만 제외하고
+            // 이름/패딩 포함 헤더 전체를 드래그 영역으로 사용
+            if (target.closest("[data-no-drag]")) {
+              return;
+            }
           }
+
           event.stopPropagation();
           event.preventDefault();
           onDragStart(event);
