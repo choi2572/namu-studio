@@ -2933,8 +2933,19 @@ function NodeCard({
             ) : (
               <button
                 type="button"
-                data-no-drag
-                className="cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700 flex-1 min-w-0"
+                // 펼쳐진 상태에서만 이름 더블클릭으로 리네임 가능 + 드래그 제외
+                // 접힌 상태에서는 data-no-drag / cursor-pointer 를 제거해서
+                // 헤더 전체(이름 영역 포함)가 드래그 핸들이 되도록 함
+                {...(node.isExpanded
+                  ? {
+                      "data-no-drag": true,
+                      className:
+                        "cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700 flex-1 min-w-0"
+                    }
+                  : {
+                      className:
+                        "truncate text-left text-sm font-semibold text-slate-800 flex-1 min-w-0"
+                    })}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   if (!node.isExpanded) return;
