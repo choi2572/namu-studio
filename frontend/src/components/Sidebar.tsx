@@ -6,10 +6,13 @@ import { useState, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
 
-const NAV_ITEMS = [
+type NavItem = { label: string; href: string; exactMatch?: boolean };
+
+const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", href: "/" },
   { label: "Workflow Editor", href: "/editor/new" },
-  { label: "Run History", href: "/history" }
+  { label: "Run History", href: "/history" },
+  { label: "Monitor", href: "/monitor", exactMatch: true }
 ];
 
 export function Sidebar() {
@@ -49,8 +52,9 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 space-y-2 px-4">
         {NAV_ITEMS.map((item) => {
-          const isActive =
-            item.href === "/"
+          const isActive = item.exactMatch
+            ? pathname === item.href || pathname === `${item.href}/`
+            : item.href === "/"
               ? pathname === "/"
               : pathname.startsWith(item.href);
 

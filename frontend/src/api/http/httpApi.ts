@@ -51,6 +51,13 @@ export const httpMiddlewareApi: MiddlewareApi = {
     return handleResponse<RunnerStatusResponse>(response);
   },
 
+  async getWorkflowDslJson(workflowId: string): Promise<Record<string, unknown>> {
+    const url = getApiUrl(`/v1/workflows/${encodeURIComponent(workflowId)}/json`);
+    logApiCall("GET", url);
+    const response = await fetch(url);
+    return handleResponse<Record<string, unknown>>(response);
+  },
+
   async runWorkflowStart(workflowJson: Record<string, unknown>): Promise<WorkflowRunResponse> {
     const url = getApiUrl("/v1/workflows/run");
     logApiCall("POST", url, { request_type: "start" });

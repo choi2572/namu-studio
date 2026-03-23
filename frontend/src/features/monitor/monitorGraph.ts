@@ -307,6 +307,67 @@ export function buildMonitorGraph(dslJson: Record<string, unknown> | null | unde
   };
 }
 
+/** Flat edges for DagView when not using monitorGraph-internal edges only (matches MonitorPage DSL extraction). */
+export type MonitorDslEdge = { id: string; from: string; to: string };
+
+export function extractMonitorEdgesFromDsl(
+  dslJson: Record<string, unknown> | null | undefined
+): MonitorDslEdge[] {
+  if (!dslJson || !isRecord(dslJson)) return [];
+
+  const dsl = dslJson as {
+    States?: Record<
+      string,
+      {
+        Next?: string;
+        Choices?: Array<{ Next?: string }>;
+        End?: boolean;
+        Type?: string;
+      }
+    >;
+  };
+
+  if (!dsl.States) return [];
+
+  const edgeMap = new Map<string, { from: string; to: string }>();
+  let edgeIndex = 0;
+
+  Object.entries(dsl.States).forEach(([stateName, state]) => {
+    if (!isRecord(state)) return;
+    if (state.Next && typeof state.Next === "string") {
+      const edgeKey = `${stateName}-${state.Next}`;
+      if (!edgeMap.has(edgeKey)) {
+        edgeMap.set(edgeKey, { from: stateName, to: state.Next });
+      }
+    }
+    if (state.Choices && Array.isArray(state.Choices)) {
+      state.Choices.forEach((choice) => {
+        if (typeof choice === "object" && choice !== null && "Next" in choice) {
+          const c = choice as { Next?: string };
+          if (c.Next && typeof c.Next === "string") {
+            const edgeKey = `${stateName}-${c.Next}`;
+            if (!edgeMap.has(edgeKey)) {
+              edgeMap.set(edgeKey, { from: stateName, to: c.Next });
+            }
+          }
+        }
+      });
+    }
+    if (state.Type === "Condition" && state.Next && typeof state.Next === "string") {
+      const edgeKey = `${stateName}-${state.Next}`;
+      if (!edgeMap.has(edgeKey)) {
+        edgeMap.set(edgeKey, { from: stateName, to: state.Next });
+      }
+    }
+  });
+
+  return Array.from(edgeMap.values()).map((edge) => ({
+    id: `edge-${edgeIndex++}`,
+    from: edge.from,
+    to: edge.to
+  }));
+}
+
 /** VLM graph_patch payload (from RunEvent GRAPH_PATCH). */
 export type GraphPatchPayload = {
   target?: { container_path?: string };

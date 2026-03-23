@@ -34,3 +34,11 @@ def workflows_run():
     body = request.get_json(force=True, silent=True) or {}
     data = client.workflows_run(body)
     return jsonify(data)
+
+
+@bp.route("/workflows/<workflow_id>/json", methods=["GET"])
+def get_workflow_json(workflow_id: str):
+    """GET /api/v1/workflows/<workflow_id>/json — DSL JSON for live monitor rendering."""
+    client = _middleware_client()
+    data = client.get_workflow_json(workflow_id)
+    return jsonify(data)

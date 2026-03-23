@@ -331,6 +331,9 @@ let mockCurrentWorkflowRun: {
   pending_states: string[];
 } | null = null;
 
+/** DSL from last mock start — used by getWorkflowDslJson for the live Monitor tab in mock mode. */
+let mockLastStartedDsl: Record<string, unknown> | null = null;
+
 function getMockRunnerStatus(): RunnerStatusResponse {
   if (!mockCurrentWorkflowRun || mockCurrentWorkflowRun.status !== "running") {
     return { runner_status: "idle" };
@@ -355,6 +358,19 @@ function getMockRunnerStatus(): RunnerStatusResponse {
 export const mockMiddlewareApi: MiddlewareApi = {
   async getRunnerStatus(): Promise<RunnerStatusResponse> {
     return delay(deepClone(getMockRunnerStatus()));
+  },
+
+  async getWorkflowDslJson(workflowId: string): Promise<Record<string, unknown>> {
+    const current = mockCurrentWorkflowRun;
+    if (
+      !current ||
+      current.workflow_id !== workflowId ||
+      current.status !== "running" ||
+      !mockLastStartedDsl
+    ) {
+      throw new Error("API error: 404 Workflow DSL not available in mock (start a run first)");
+    }
+    return delay(deepClone(mockLastStartedDsl));
   },
 
   async runWorkflowStart(workflowJson: Record<string, unknown>): Promise<WorkflowRunResponse> {
@@ -386,6 +402,7 @@ export const mockMiddlewareApi: MiddlewareApi = {
       completed_states: [],
       pending_states: stateNames.filter((s) => s !== startAt)
     };
+    mockLastStartedDsl = deepClone(workflowJson) as Record<string, unknown>;
     return delay(
       deepClone({
         workflow_id,
@@ -427,6 +444,7 @@ export const mockMiddlewareApi: MiddlewareApi = {
     const result: WorkflowRunResponse = { workflow_id, status: "cancelled" };
     setTimeout(() => {
       mockCurrentWorkflowRun = null;
+      mockLastStartedDsl = null;
     }, 0);
     return delay(deepClone(result));
   }

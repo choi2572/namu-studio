@@ -312,10 +312,9 @@ def _build_initial_message() -> Dict[str, Any]:
             elapsed = int((b - a).total_seconds() * 1000)
         except Exception:
             pass
-    return {
-        "type": "initial",
-        "runner_status": status,
-        "workflow": {
+    wf_payload: Optional[Dict[str, Any]] = None
+    if wf_id and status == "running":
+        wf_payload = {
             "workflow_id": wf_id,
             "started_at": started,
             "current_node": {
@@ -323,7 +322,19 @@ def _build_initial_message() -> Dict[str, Any]:
                 "status": "RUNNING",
                 "started_at": updated or started,
             } if current else None,
-        },
+            "node_history": nh,
+            "execution_stats": {
+                "total_nodes": max(total, 1),
+                "completed_nodes": completed,
+                "running_nodes": running,
+                "failed_nodes": 0,
+                "elapsed_time_ms": elapsed,
+            },
+        }
+    return {
+        "type": "initial",
+        "runner_status": status,
+        "workflow": wf_payload,
         "node_history": nh,
         "execution_stats": {
             "total_nodes": max(total, 1),
@@ -780,6 +791,16 @@ def create_app() -> Flask:
                 "elapsed_time_ms": elapsed,
             },
         })
+
+    @app.route("/api/v1/workflows/<workflow_id>/json", methods=["GET"])
+    def workflow_dsl_json(workflow_id: str):
+        with _state["lock"]:
+            if _state["workflow_id"] != workflow_id:
+                return jsonify({"error": "Not found", "message": f"Workflow {workflow_id} not found"}), 404
+            dsl = _state.get("workflow_dsl")
+        if not dsl or not isinstance(dsl, dict):
+            return jsonify({"error": "Not found", "message": "No DSL available for this workflow"}), 404
+        return jsonify(dsl)
 
     try:
         from flask_sock import Sock

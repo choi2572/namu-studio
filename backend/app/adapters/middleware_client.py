@@ -117,6 +117,13 @@ class MiddlewareClient:
             f"/api/v1/workflows/{workflow_id}",
         )
 
+    def get_workflow_json(self, workflow_id: str) -> Dict[str, Any]:
+        """GET /api/v1/workflows/{workflow_id}/json — workflow DSL JSON for rendering."""
+        return self._request(
+            "GET",
+            f"/api/v1/workflows/{workflow_id}/json",
+        )
+
     def get_skill_set(self) -> Dict[str, Any]:
         """GET /api/v1/skill-set from middleware (skillsets list)."""
         return self._request("GET", "/api/v1/skill-set")

@@ -29,7 +29,16 @@ export type RunSnapshot = {
   nodeStates: NodeStateSnapshot[];
 };
 
-// Middleware runner status (see docs/middleware_api_spec.md)
+// Middleware runner status (see docs/middleware_api_spec.md + live monitor contract)
+export type RunnerStatusValue =
+  | "idle"
+  | "running"
+  | "paused"
+  | "unspecified"
+  | "unknown"
+  | "error";
+
+/** @deprecated use RunnerStatusValue */
 export type RunnerStatus = "idle" | "running" | "error";
 
 export type RunnerWorkflowProgress = {
@@ -38,30 +47,42 @@ export type RunnerWorkflowProgress = {
   pending_states: string[];
 };
 
+/** Single node entry from middleware monitor / runner APIs. */
+export type MiddlewareNodeHistoryItem = {
+  node_name?: string;
+  name?: string;
+  status?: string;
+  started_at?: string;
+  completed_at?: string | null;
+  duration_ms?: number | null;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown> | null;
+};
+
 export type RunnerWorkflowInfo = {
   workflow_id: string;
   current_node?: string;
   progress?: RunnerWorkflowProgress;
   started_at: string;
   updated_at: string;
+  /** Present on some monitor `initial` payloads (nested history). */
+  node_history?: MiddlewareNodeHistoryItem[];
+  execution_stats?: Record<string, unknown>;
 };
 
-export type RunnerStatusResponse =
-  | {
-      runner_status: "idle";
-    }
-  | {
-      runner_status: "running";
-      workflow: RunnerWorkflowInfo;
-    }
-  | {
-      runner_status: "error";
-      error: string;
-      details?: {
-        error_code: string;
-        error_message: string;
-      };
-    };
+/**
+ * Runner status JSON from GET /api/v1/runner/status (shape varies by middleware version).
+ * When `runner_status` is `running` or `paused`, `workflow` may describe the active run.
+ */
+export type RunnerStatusResponse = {
+  runner_status: RunnerStatusValue;
+  workflow?: RunnerWorkflowInfo | null;
+  error?: string;
+  details?: {
+    error_code: string;
+    error_message: string;
+  };
+};
 
 // POST /api/v1/workflows/run (docs/middleware_api_spec.md)
 export type WorkflowRunStartPayload = {
@@ -100,6 +121,8 @@ export interface WorkflowsApi {
 export interface MiddlewareApi {
   /** 현재 미들웨어 runner의 상태를 조회 */
   getRunnerStatus(): Promise<RunnerStatusResponse>;
+  /** GET /api/v1/workflows/{workflow_id}/json — DSL JSON for live monitor (proxied via backend). */
+  getWorkflowDslJson(workflowId: string): Promise<Record<string, unknown>>;
   /** 워크플로우 실행 시작 (POST /api/v1/workflows/run, request_type: start) */
   runWorkflowStart(workflowJson: Record<string, unknown>): Promise<WorkflowRunResponse>;
   /** 워크플로우 실행 취소 (POST /api/v1/workflows/run, request_type: cancel) */
