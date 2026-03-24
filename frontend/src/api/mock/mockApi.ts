@@ -164,7 +164,7 @@ const validationErrorsByWorkflow: Record<string, ValidationError[]> = {
 export const mockWorkflowsApi: WorkflowsApi = {
   async list(): Promise<WorkflowListItem[]> {
     const storedFiles = readWorkflowFiles();
-    const storedItems = storedFiles.map((file) => ({
+    const storedItems: WorkflowListItem[] = storedFiles.map((file) => ({
       workflowId: file.workflowId,
       name: file.fileName,
       state: "DRAFT",

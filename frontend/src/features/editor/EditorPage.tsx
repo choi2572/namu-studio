@@ -444,7 +444,9 @@ function createNodeTypeConfigFromSkillset(skillset: import("@/domain/types").Ski
 function createNodeTypeConfigFromSkillsets(
   skillsets: import("@/domain/types").Skillset[]
 ): Record<string, NodeTypeConfig> {
-  const config: Record<string, NodeTypeConfig> = { ...STATIC_NODE_TYPE_CONFIG };
+  const config: Record<string, NodeTypeConfig> = {
+    ...(STATIC_NODE_TYPE_CONFIG as unknown as Record<string, NodeTypeConfig>)
+  };
   
   skillsets.forEach((skillset) => {
     const nodeKind = getSkillNodeKind(skillset);
@@ -1513,7 +1515,9 @@ function buildOnFailureDsl(
   while (currentName && !visited.has(currentName)) {
     visited.add(currentName);
     lastName = currentName;
-    const state = states[currentName];
+    const state = states[currentName] as
+      | (Record<string, unknown> & { Next?: string })
+      | undefined;
     if (!state || !state.Next) break;
     currentName = state.Next;
   }
@@ -1677,7 +1681,7 @@ function recomputeRetryScopeMembership(
     if (node.kind.startsWith("flow_control.")) break;
     scopeIds.add(current);
     if (endId && current === endId) break;
-    const next = outEdges.get(current) ?? null;
+    const next: string | null = outEdges.get(current) ?? null;
     if (!next) break;
     current = next;
   }
@@ -2688,7 +2692,7 @@ function NodeCard({
         // flow_control 노드를 만나면 그 전까지만 후보로 사용
         if (currentNode.kind.startsWith("flow_control.")) break;
         result.push(currentNode);
-        const next = outEdges.get(current)?.to ?? null;
+        const next: string | null = outEdges.get(current)?.to ?? null;
         if (!next) break;
         current = next;
       }
@@ -3891,8 +3895,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
       scope.nodeIds.forEach((nodeId) => {
         const isStart = result.startNodeId === nodeId;
-        const isStartCandidateWithError =
-          showBadges && result.startError && startCandidateSet.has(nodeId);
+        const isStartCandidateWithError = Boolean(
+          showBadges && result.startError && startCandidateSet.has(nodeId)
+        );
         const isEnd = result.endNodeIds.includes(nodeId);
         const existing = badges.get(nodeId);
         badges.set(nodeId, {
@@ -4657,7 +4662,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const downstreamIds = new Set<string>();
       let current: string | null = nodeId;
       while (current) {
-        const nextId = outEdges.get(current)?.to;
+        const nextId: string | undefined = outEdges.get(current)?.to;
         if (!nextId) break;
         const nextNode = nodeMap.get(nextId);
         if (!nextNode || nextNode.retryOwnerId !== ownerId || nextNode.retryScopeType !== scopeType) break;

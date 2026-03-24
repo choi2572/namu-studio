@@ -456,7 +456,10 @@ export function MonitorPage({ runId }: MonitorPageProps) {
 
     const dsl = workflowDraft.dsl_json as {
       StartAt?: string;
-      States?: Record<string, { Next?: string; Choices?: Array<{ Next?: string }>; End?: boolean }>;
+      States?: Record<
+        string,
+        { Next?: string; Choices?: Array<{ Next?: string }>; End?: boolean; Type?: string }
+      >;
     };
 
     if (!dsl.States) {

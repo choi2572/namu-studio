@@ -947,8 +947,9 @@ export function DagView({
 
   // --- Render: Monitor graph mode (containers + nested) ---
   if (useGraphMode && monitorLayout) {
+    const graph = monitorGraph!;
     const { positionedNodes, containerFrames, startPathIds, endPathIds } = monitorLayout;
-    const edgesToRenderGraph = monitorGraph.edges.filter((e) => {
+    const edgesToRenderGraph = graph.edges.filter((e) => {
       const fromExists = positionedNodes.some((n) => n.pathId === e.from);
       const toExists = positionedNodes.some((n) => n.pathId === e.to);
       return fromExists && toExists;

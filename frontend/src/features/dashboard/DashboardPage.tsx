@@ -84,20 +84,21 @@ export function DashboardPage() {
     queryKey: ["middleware-runner-status"],
     queryFn: () => middlewareApi.getRunnerStatus()
   });
-  const isRunnerRunning =
-    runnerStatus?.runner_status === "running" && runnerStatus.workflow;
+  const runnerWorkflow =
+    runnerStatus?.runner_status === "running" ? runnerStatus.workflow ?? null : null;
+  const isRunnerRunning = Boolean(runnerWorkflow);
   const runnerCurrentNode =
     isRunnerRunning &&
-    (runnerStatus.workflow.progress?.current_state ??
-      runnerStatus.workflow.current_node ??
+    (runnerWorkflow?.progress?.current_state ??
+      runnerWorkflow?.current_node ??
       null);
   const runnerStartedAt = isRunnerRunning
-    ? runnerStatus.workflow.started_at
+    ? runnerWorkflow?.started_at ?? null
     : null;
   const runnerElapsedMs = (() => {
     if (!isRunnerRunning) return null;
-    const started = new Date(runnerStatus.workflow.started_at).getTime();
-    const updated = new Date(runnerStatus.workflow.updated_at).getTime();
+    const started = new Date(runnerWorkflow?.started_at ?? "").getTime();
+    const updated = new Date(runnerWorkflow?.updated_at ?? "").getTime();
     if (Number.isNaN(started) || Number.isNaN(updated)) return null;
     return Math.max(0, updated - started);
   })();
@@ -538,7 +539,7 @@ export function DashboardPage() {
                 type="button"
                 className="cursor-pointer rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 onClick={() => setWorkflowToDelete(null)}
-                disabled={deleteMutation.isLoading}
+                disabled={deleteMutation.isPending}
               >
                 Cancel
               </button>
@@ -546,9 +547,9 @@ export function DashboardPage() {
                 type="button"
                 className="cursor-pointer rounded-md border border-red-600 bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
                 onClick={handleConfirmDelete}
-                disabled={deleteMutation.isLoading}
+                disabled={deleteMutation.isPending}
               >
-                {deleteMutation.isLoading ? "Deleting..." : "Delete"}
+                {deleteMutation.isPending ? "Deleting..." : "Delete"}
               </button>
             </div>
           </div>

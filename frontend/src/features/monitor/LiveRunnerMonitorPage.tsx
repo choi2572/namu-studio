@@ -7,10 +7,10 @@ import { middlewareApi, workflowsApi } from "@/api";
 import type {
   MiddlewareNodeHistoryItem,
   RunnerStatusResponse,
-  RunnerWorkflowInfo,
-  WorkflowListItem
+  RunnerWorkflowInfo
 } from "@/api/interfaces";
 import type { NodeStateSnapshot } from "@/api/interfaces";
+import type { WorkflowListItem } from "@/domain/types";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/cn";
