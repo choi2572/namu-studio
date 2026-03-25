@@ -53,6 +53,8 @@ import {
 const POLL_MS = 500;
 const PING_MS = 25_000;
 const WS_RECONNECT_MS = 3000;
+const WS_DISCONNECTED_DEBOUNCE_MS = 2000;
+const WS_ERROR_DEBOUNCE_MS = 2000;
 
 type MiddlewareLiveDebugPatch = {
   input?: Record<string, unknown> | null;
@@ -131,7 +133,9 @@ export function LiveRunnerMonitorPage() {
   });
 
   const [wsReadyState, setWsReadyState] = useState<number | null>(null);
+  const [displayWsReadyState, setDisplayWsReadyState] = useState<number | null>(null);
   const [wsError, setWsError] = useState<string | null>(null);
+  const [wsErrorShown, setWsErrorShown] = useState<string | null>(null);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [initialBootstrapDone, setInitialBootstrapDone] = useState(false);
   const [lastRunnerStatus, setLastRunnerStatus] = useState<RunnerStatusResponse | null>(null);
@@ -161,6 +165,9 @@ export function LiveRunnerMonitorPage() {
   const graphPatchesRef = useRef<GraphPatchPayload[]>([]);
   const lastRunnerStatusRef = useRef<RunnerStatusResponse | null>(null);
 
+  const disconnectedTimerRef = useRef<number | null>(null);
+  const wsErrorTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
     loadedWorkflowIdRef.current = loadedWorkflowId;
   }, [loadedWorkflowId]);
@@ -176,6 +183,61 @@ export function LiveRunnerMonitorPage() {
   useEffect(() => {
     lastRunnerStatusRef.current = lastRunnerStatus;
   }, [lastRunnerStatus]);
+
+  useEffect(() => {
+    // UI 깜빡임 방지: connected 상태였다가 잠깐 끊기면 disconnected를 바로 표시하지 않습니다.
+    if (wsReadyState === WebSocket.OPEN) {
+      if (disconnectedTimerRef.current) window.clearTimeout(disconnectedTimerRef.current);
+      disconnectedTimerRef.current = null;
+      setDisplayWsReadyState(WebSocket.OPEN);
+      setWsErrorShown(null);
+      if (wsErrorTimerRef.current) window.clearTimeout(wsErrorTimerRef.current);
+      wsErrorTimerRef.current = null;
+      return;
+    }
+
+    // 처음 연결 전이라면 그대로 반영
+    if (displayWsReadyState !== WebSocket.OPEN) {
+      setDisplayWsReadyState(wsReadyState);
+      setWsErrorShown(null);
+      return;
+    }
+
+    // connected였던 상태가 지속적으로 끊겼을 때만 disconnected 표시
+    if (disconnectedTimerRef.current) window.clearTimeout(disconnectedTimerRef.current);
+    disconnectedTimerRef.current = window.setTimeout(() => {
+      if (wsReadyState !== WebSocket.OPEN) {
+        setDisplayWsReadyState(WebSocket.CLOSED);
+      }
+    }, WS_DISCONNECTED_DEBOUNCE_MS);
+
+    return () => {
+      if (disconnectedTimerRef.current) window.clearTimeout(disconnectedTimerRef.current);
+      disconnectedTimerRef.current = null;
+    };
+  }, [wsReadyState, displayWsReadyState]);
+
+  useEffect(() => {
+    // error도 끊김이 "확정"됐을 때만 표시
+    if (displayWsReadyState === WebSocket.OPEN) {
+      setWsErrorShown(null);
+      if (wsErrorTimerRef.current) window.clearTimeout(wsErrorTimerRef.current);
+      wsErrorTimerRef.current = null;
+      return;
+    }
+    if (!wsError) {
+      setWsErrorShown(null);
+      return;
+    }
+    if (wsErrorTimerRef.current) window.clearTimeout(wsErrorTimerRef.current);
+    wsErrorTimerRef.current = window.setTimeout(() => {
+      setWsErrorShown(wsError);
+    }, WS_ERROR_DEBOUNCE_MS);
+    return () => {
+      if (wsErrorTimerRef.current) window.clearTimeout(wsErrorTimerRef.current);
+      wsErrorTimerRef.current = null;
+    };
+  }, [wsError, displayWsReadyState]);
 
   useEffect(() => {
     setMiddlewareWsDebug({});
@@ -319,6 +381,7 @@ export function LiveRunnerMonitorPage() {
 
     ws.onopen = () => {
       setWsReadyState(ws.readyState);
+      setWsError(null);
     };
     ws.onerror = () => {
       setWsError("WebSocket error");
@@ -694,7 +757,7 @@ export function LiveRunnerMonitorPage() {
     studioNodeDebug
   ]);
 
-  const wsConnected = wsReadyState === WebSocket.OPEN;
+  const wsConnected = displayWsReadyState === WebSocket.OPEN;
   const showGraph = Boolean(dslJson && monitorGraph && loadedWorkflowId);
   const showEmpty =
     initialBootstrapDone &&
@@ -705,7 +768,7 @@ export function LiveRunnerMonitorPage() {
     !runnerStatusIndicatesActiveWorkflow(lastRunnerStatus);
 
   const connectionLabel =
-    wsReadyState === WebSocket.CONNECTING || wsReadyState === null
+    displayWsReadyState === WebSocket.CONNECTING || displayWsReadyState === null
       ? "Connecting…"
       : wsConnected
         ? "Connected"
@@ -743,8 +806,8 @@ export function LiveRunnerMonitorPage() {
             {runStatusForDag && <StatusBadge status={runStatusForDag} />}
           </div>
         </div>
-        {(wsError || dslFetchError) && (
-          <p className="mt-3 text-sm text-red-600">{wsError ?? dslFetchError}</p>
+        {(wsErrorShown || dslFetchError) && (
+          <p className="mt-3 text-sm text-red-600">{wsErrorShown ?? dslFetchError}</p>
         )}
       </div>
 
