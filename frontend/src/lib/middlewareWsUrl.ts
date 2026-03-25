@@ -5,9 +5,12 @@
 export function getMiddlewareHttpBaseForBrowser(): string {
   const raw = process.env.NEXT_PUBLIC_MIDDLEWARE_BASE_URL?.trim();
   if (raw) {
-    return raw.replace(/\/$/, "");
+    const cleaned = raw.replace(/\/$/, "");
+    // Some browsers (e.g. Firefox) may prefer IPv6 for `localhost` (::1).
+    // The mock middleware binds to IPv4 by default, so force IPv4.
+    return cleaned.replace("://localhost", "://127.0.0.1");
   }
-  return "http://localhost:8000";
+  return "http://127.0.0.1:8000";
 }
 
 function httpToWebSocketBase(httpBase: string): string {
