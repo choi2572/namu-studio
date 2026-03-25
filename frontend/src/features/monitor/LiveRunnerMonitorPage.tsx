@@ -24,10 +24,7 @@ import {
   pickInputOutputFromMiddlewareMessage,
   resolveMiddlewareDebugStateKey
 } from "@/features/monitor/middlewareLiveDebug";
-import {
-  buildAllowStatusExternalChangeKeys,
-  skillNodeAllowsExternalStatusChange
-} from "@/features/monitor/skillsetExternalStatus";
+import { skillNodeAllowsExternalStatusChange } from "@/features/monitor/skillsetExternalStatus";
 import {
   buildMonitorGraph,
   applyGraphPatches,
@@ -532,11 +529,6 @@ export function LiveRunnerMonitorPage() {
     queryFn: () => skillsetsApi.list()
   });
 
-  const allowExternalStatusSkillKeys = useMemo(
-    () => buildAllowStatusExternalChangeKeys(skillsetsResponse?.skill_sets ?? []),
-    [skillsetsResponse?.skill_sets]
-  );
-
   const { data: runsForWorkflow = [] } = useQuery({
     queryKey: ["runs", "by-workflow", loadedWorkflowId],
     queryFn: () => runsApi.list({ workflowId: loadedWorkflowId! }),
@@ -612,10 +604,10 @@ export function LiveRunnerMonitorPage() {
         ? skillNodeAllowsExternalStatusChange(
             selectedMonitorNode.dslType,
             selectedMonitorNode.skillName,
-            allowExternalStatusSkillKeys
+            skillsetsResponse?.skill_sets ?? []
           )
         : false,
-    [selectedMonitorNode, allowExternalStatusSkillKeys]
+    [selectedMonitorNode, skillsetsResponse?.skill_sets]
   );
 
   const displayNodeDebug = useMemo((): NodeDebugBundle | null => {

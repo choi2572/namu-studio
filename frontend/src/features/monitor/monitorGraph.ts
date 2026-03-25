@@ -96,9 +96,11 @@ function collectNodesAndEdges(
     const label = (state.Label as string) ?? stateName;
     const pathId = nodePathId([...pathPrefix, stateName]);
     const apiStateName = pathIdToApiStateName(pathId);
-    const dslType = type ?? "Task";
+    const rawType = type ?? "Task";
+    const typeLc = rawType.toLowerCase();
+    const dslType = typeLc === "skill" ? "Skill" : rawType;
     const skillName =
-      dslType === "Skill" && typeof state.Skill === "string" ? state.Skill : null;
+      typeLc === "skill" && typeof state.Skill === "string" ? state.Skill : null;
 
     nodes.push({
       pathId,

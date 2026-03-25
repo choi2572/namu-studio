@@ -20,10 +20,7 @@ import { buildMonitorGraph, applyGraphPatches, type GraphPatchPayload } from "@/
 import { ENABLE_DYNAMIC_GRAPH_PATCH } from "@/lib/featureFlags";
 import { DagView } from "@/features/monitor/DagView";
 import { TimelineTable } from "@/features/monitor/TimelineTable";
-import {
-  buildAllowStatusExternalChangeKeys,
-  skillNodeAllowsExternalStatusChange
-} from "@/features/monitor/skillsetExternalStatus";
+import { skillNodeAllowsExternalStatusChange } from "@/features/monitor/skillsetExternalStatus";
 
 type MonitorPageProps = {
   runId: string;
@@ -214,11 +211,6 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     queryKey: ["skillsets"],
     queryFn: () => skillsetsApi.list()
   });
-
-  const allowExternalStatusSkillKeys = useMemo(
-    () => buildAllowStatusExternalChangeKeys(skillsetsResponse?.skill_sets ?? []),
-    [skillsetsResponse?.skill_sets]
-  );
 
   const baseMonitorGraph = useMemo(
     () => buildMonitorGraph(workflowDraft?.dsl_json),
@@ -640,10 +632,10 @@ export function MonitorPage({ runId }: MonitorPageProps) {
         ? skillNodeAllowsExternalStatusChange(
             selectedMonitorNode.dslType,
             selectedMonitorNode.skillName,
-            allowExternalStatusSkillKeys
+            skillsetsResponse?.skill_sets ?? []
           )
         : false,
-    [selectedMonitorNode, allowExternalStatusSkillKeys]
+    [selectedMonitorNode, skillsetsResponse?.skill_sets]
   );
 
   return (

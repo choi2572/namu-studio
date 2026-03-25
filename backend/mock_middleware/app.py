@@ -622,6 +622,7 @@ MOCK_SKILL_SET = {
             "name": "PickObject",
             "version": "0.0.1",
             "description": "Pick an object from a target location",
+            "allow_status_external_change": True,
             "parameters": {
                 "target_object": {"type": "string", "description": "The target object identifier to pick"},
                 "location": {"type": "string", "description": "The location where the object is located"},

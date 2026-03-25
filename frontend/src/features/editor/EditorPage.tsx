@@ -3707,9 +3707,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     mutationFn: () => workflowsApi.publish(workflowId),
     onSuccess: () => {
       setShowPublishConfirm(false);
-      setPublishToast(true);
       queryClient.invalidateQueries({ queryKey: ["workflow", workflowId] });
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      router.push(`/monitor/workflow/${workflowId}`);
     }
   });
 
