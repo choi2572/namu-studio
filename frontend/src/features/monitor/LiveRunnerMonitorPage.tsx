@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { middlewareApi, workflowsApi } from "@/api";
+import { middlewareApi, runsApi, skillsetsApi, workflowsApi } from "@/api";
 import type {
   MiddlewareNodeHistoryItem,
   RunnerStatusResponse,
@@ -11,12 +11,23 @@ import type {
 } from "@/api/interfaces";
 import type { NodeStateSnapshot } from "@/api/interfaces";
 import type { WorkflowListItem } from "@/domain/types";
+import type { NodeDebugBundle } from "@/domain/types";
+import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/cn";
 import { getMonitorWebSocketUrl } from "@/lib/middlewareWsUrl";
 import { pathIdToApiStateName } from "@/lib/ids";
+import { formatDuration } from "@/lib/format";
 import { NodeStatus, RunEvent, RunStatus } from "@/domain/types";
+import {
+  pickInputOutputFromMiddlewareMessage,
+  resolveMiddlewareDebugStateKey
+} from "@/features/monitor/middlewareLiveDebug";
+import {
+  buildAllowStatusExternalChangeKeys,
+  skillNodeAllowsExternalStatusChange
+} from "@/features/monitor/skillsetExternalStatus";
 import {
   buildMonitorGraph,
   applyGraphPatches,
@@ -25,7 +36,6 @@ import {
 } from "@/features/monitor/monitorGraph";
 import { ENABLE_DYNAMIC_GRAPH_PATCH } from "@/lib/featureFlags";
 import { DagView } from "@/features/monitor/DagView";
-import { TimelineTable } from "@/features/monitor/TimelineTable";
 import {
   applyNodeStatusChangeMessage,
   applyRunnerPollToNodeStates,
@@ -40,6 +50,12 @@ import {
 const POLL_MS = 500;
 const PING_MS = 25_000;
 const WS_RECONNECT_MS = 3000;
+
+type MiddlewareLiveDebugPatch = {
+  input?: Record<string, unknown> | null;
+  output?: Record<string, unknown> | null;
+  feedback?: Record<string, unknown> | null;
+};
 
 function computeTakenBranches(
   monitorGraph: MonitorGraph | null,
@@ -128,8 +144,9 @@ export function LiveRunnerMonitorPage() {
 
   const [feedEvents, setFeedEvents] = useState<RunEvent[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const [middlewareWsDebug, setMiddlewareWsDebug] = useState<
+    Record<string, MiddlewareLiveDebugPatch>
+  >({});
 
   const loadGenRef = useRef(0);
   const loadedWorkflowIdRef = useRef<string | null>(null);
@@ -155,6 +172,10 @@ export function LiveRunnerMonitorPage() {
     lastRunnerStatusRef.current = lastRunnerStatus;
   }, [lastRunnerStatus]);
 
+  useEffect(() => {
+    setMiddlewareWsDebug({});
+  }, [loadedWorkflowId]);
+
   const resetToEmpty = useCallback(() => {
     loadGenRef.current += 1;
     loadedWorkflowIdRef.current = null;
@@ -168,6 +189,7 @@ export function LiveRunnerMonitorPage() {
     feedSeqRef.current = 0;
     setDslFetchError(null);
     setSelectedNode(null);
+    setMiddlewareWsDebug({});
   }, []);
 
   const appendFeed = useCallback((ev: RunEvent) => {
@@ -337,6 +359,33 @@ export function LiveRunnerMonitorPage() {
       const msgWid = typeof data.workflow_id === "string" ? data.workflow_id : null;
       const currentId = loadedWorkflowIdRef.current;
 
+      if (type === "feedback") {
+        if (msgWid && msgWid !== loadedWorkflowIdRef.current) return;
+        const nodeName = typeof data.node_name === "string" ? data.node_name : null;
+        if (!nodeName) return;
+        const dsl = dslJsonRef.current;
+        const patches = graphPatchesRef.current;
+        const baseGraph =
+          ENABLE_DYNAMIC_GRAPH_PATCH && patches.length > 0 && dsl
+            ? applyGraphPatches(buildMonitorGraph(dsl), patches)
+            : dsl
+              ? buildMonitorGraph(dsl)
+              : null;
+        const key = resolveMiddlewareDebugStateKey(nodeName, baseGraph);
+        const fb = data.feedback;
+        const feedback =
+          fb && typeof fb === "object" && !Array.isArray(fb)
+            ? (fb as Record<string, unknown>)
+            : null;
+        if (feedback) {
+          setMiddlewareWsDebug((prevDbg) => ({
+            ...prevDbg,
+            [key]: { ...prevDbg[key], feedback }
+          }));
+        }
+        return;
+      }
+
       if (type === "node_status_change") {
         if (msgWid && msgWid !== currentId) {
           const pollWf = lastRunnerStatusRef.current?.workflow;
@@ -344,17 +393,30 @@ export function LiveRunnerMonitorPage() {
           return;
         }
         if (!msgWid || msgWid === loadedWorkflowIdRef.current) {
-          setNodeStates((prev) => {
-            const dsl = dslJsonRef.current;
-            const patches = graphPatchesRef.current;
-            const baseGraph =
-              ENABLE_DYNAMIC_GRAPH_PATCH && patches.length > 0 && dsl
-                ? applyGraphPatches(buildMonitorGraph(dsl), patches)
-                : dsl
-                  ? buildMonitorGraph(dsl)
-                  : null;
-            return applyNodeStatusChangeMessage(prev, data, baseGraph);
-          });
+          const dsl = dslJsonRef.current;
+          const patches = graphPatchesRef.current;
+          const baseGraph =
+            ENABLE_DYNAMIC_GRAPH_PATCH && patches.length > 0 && dsl
+              ? applyGraphPatches(buildMonitorGraph(dsl), patches)
+              : dsl
+                ? buildMonitorGraph(dsl)
+                : null;
+          setNodeStates((prev) => applyNodeStatusChangeMessage(prev, data, baseGraph));
+          const nodeName = typeof data.node_name === "string" ? data.node_name : null;
+          if (nodeName && baseGraph) {
+            const key = resolveMiddlewareDebugStateKey(nodeName, baseGraph);
+            const io = pickInputOutputFromMiddlewareMessage(data);
+            if (io.input !== undefined || io.output !== undefined) {
+              setMiddlewareWsDebug((prevDbg) => ({
+                ...prevDbg,
+                [key]: {
+                  ...prevDbg[key],
+                  ...(io.input !== undefined ? { input: io.input } : {}),
+                  ...(io.output !== undefined ? { output: io.output } : {})
+                }
+              }));
+            }
+          }
           const widForFeed = msgWid || loadedWorkflowIdRef.current || "runner";
           feedSeqRef.current += 1;
           appendFeedRef.current(nodeChangeToRunEvent(widForFeed, data, feedSeqRef.current));
@@ -367,16 +429,6 @@ export function LiveRunnerMonitorPage() {
         setRunStatusForDag(
           type === "workflow_cancelled" ? RunStatus.CANCELED : workflowCompletedRunStatus(data)
         );
-        feedSeqRef.current += 1;
-        appendFeedRef.current({
-          eventId: `mw-done-${feedSeqRef.current}`,
-          runId: msgWid || currentId || "runner",
-          seq: feedSeqRef.current,
-          timestamp: new Date().toISOString(),
-          eventType: type === "workflow_cancelled" ? "RUN_CANCELED" : "RUN_SUCCEEDED",
-          stateName: null,
-          payload: { status: data.status }
-        });
         return;
       }
 
@@ -385,16 +437,6 @@ export function LiveRunnerMonitorPage() {
         if (p && msgWid === loadedWorkflowIdRef.current) {
           setGraphPatches((prev) => [...prev, p]);
         }
-        feedSeqRef.current += 1;
-        appendFeedRef.current({
-          eventId: `mw-patch-${feedSeqRef.current}`,
-          runId: msgWid || loadedWorkflowIdRef.current || "runner",
-          seq: feedSeqRef.current,
-          timestamp: new Date().toISOString(),
-          eventType: "GRAPH_PATCH",
-          stateName: null,
-          payload: {}
-        });
       }
     };
 
@@ -454,11 +496,6 @@ export function LiveRunnerMonitorPage() {
     return applyGraphPatches(baseMonitorGraph, graphPatches);
   }, [baseMonitorGraph, graphPatches]);
 
-  const stateNameToPathId = useMemo(
-    () => monitorGraph?.stateNameToPathId ?? new Map<string, string>(),
-    [monitorGraph]
-  );
-
   const takenBranchByConditionPathId = useMemo(
     () => computeTakenBranches(monitorGraph, feedEvents),
     [monitorGraph, feedEvents]
@@ -485,13 +522,126 @@ export function LiveRunnerMonitorPage() {
     return Array.from(map.values());
   }, [dslJson, monitorGraph, nodeStates]);
 
-  useEffect(() => {
-    if (!autoScroll || !timelineRef.current) return;
-    const el = timelineRef.current;
-    requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-  }, [feedEvents, autoScroll]);
+  const debugStateName = useMemo(
+    () => (selectedNode ? pathIdToApiStateName(selectedNode) : ""),
+    [selectedNode]
+  );
+
+  const { data: skillsetsResponse } = useQuery({
+    queryKey: ["skillsets"],
+    queryFn: () => skillsetsApi.list()
+  });
+
+  const allowExternalStatusSkillKeys = useMemo(
+    () => buildAllowStatusExternalChangeKeys(skillsetsResponse?.skill_sets ?? []),
+    [skillsetsResponse?.skill_sets]
+  );
+
+  const { data: runsForWorkflow = [] } = useQuery({
+    queryKey: ["runs", "by-workflow", loadedWorkflowId],
+    queryFn: () => runsApi.list({ workflowId: loadedWorkflowId! }),
+    enabled: Boolean(loadedWorkflowId)
+  });
+
+  const resolvedRunId = useMemo(() => {
+    const active = runsForWorkflow.find(
+      (r) => r.status === RunStatus.RUNNING || r.status === RunStatus.WAITING
+    );
+    if (active) return active.runId;
+    const sorted = [...runsForWorkflow].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    );
+    return sorted[0]?.runId ?? null;
+  }, [runsForWorkflow]);
+
+  const { data: studioNodeDebug } = useQuery({
+    queryKey: ["node-debug", resolvedRunId, debugStateName],
+    queryFn: () => runsApi.getNodeDebug(resolvedRunId!, debugStateName),
+    enabled: Boolean(resolvedRunId && selectedNode && debugStateName),
+    retry: false
+  });
+
+  const historyDebugByState = useMemo(() => {
+    const hist = lastRunnerStatus?.workflow?.node_history ?? [];
+    const map = new Map<string, { input?: Record<string, unknown> | null; output?: Record<string, unknown> | null }>();
+    for (const h of hist) {
+      const name = h.node_name || h.name;
+      if (!name) continue;
+      if (!monitorGraph) {
+        map.set(name, { input: h.input ?? null, output: h.output ?? null });
+        continue;
+      }
+      const mn = monitorGraph.nodes.find((m) => m.stateName === name || m.apiStateName === name);
+      const key = mn?.apiStateName ?? name;
+      map.set(key, { input: h.input ?? null, output: h.output ?? null });
+    }
+    return map;
+  }, [lastRunnerStatus?.workflow?.node_history, monitorGraph]);
+
+  const selectedMonitorNode = useMemo(() => {
+    if (!selectedNode || !monitorGraph) return null;
+    return monitorGraph.nodes.find((n) => n.pathId === selectedNode) ?? null;
+  }, [selectedNode, monitorGraph]);
+
+  const selectedNodeState = useMemo(() => {
+    if (!selectedNode) return null;
+    if (monitorGraph) {
+      const node = selectedMonitorNode;
+      if (!node) return null;
+      const snap =
+        displayNodeStates.find((n) => n.stateName === node.apiStateName) ??
+        displayNodeStates.find((n) => n.stateName === node.stateName);
+      const typeDisplay =
+        node.nodeName === "VLM Planner"
+          ? "VLM Planner"
+          : node.skillName ?? node.dslType ?? "Task";
+      return {
+        stateName: node.apiStateName,
+        nodeName: node.nodeName,
+        status: snap?.status ?? NodeStatus.WAITING,
+        durationMs: snap?.durationMs ?? null,
+        typeDisplay
+      } as NodeStateSnapshot & { typeDisplay?: string };
+    }
+    return displayNodeStates.find((n) => n.stateName === selectedNode) ?? null;
+  }, [selectedNode, monitorGraph, displayNodeStates, selectedMonitorNode]);
+
+  const showExternalStatusActions = useMemo(
+    () =>
+      selectedMonitorNode
+        ? skillNodeAllowsExternalStatusChange(
+            selectedMonitorNode.dslType,
+            selectedMonitorNode.skillName,
+            allowExternalStatusSkillKeys
+          )
+        : false,
+    [selectedMonitorNode, allowExternalStatusSkillKeys]
+  );
+
+  const displayNodeDebug = useMemo((): NodeDebugBundle | null => {
+    if (!debugStateName || !selectedNodeState) return null;
+    const hist = historyDebugByState.get(debugStateName);
+    const ws = middlewareWsDebug[debugStateName];
+    const studio = studioNodeDebug;
+    if (!studio && !hist && !ws) return null;
+    return {
+      runId: studio?.runId ?? "",
+      stateName: studio?.stateName ?? debugStateName,
+      nodeName: studio?.nodeName ?? selectedNodeState.nodeName,
+      status: studio?.status ?? selectedNodeState.status,
+      durationMs: studio?.durationMs ?? selectedNodeState.durationMs ?? null,
+      input: (ws?.input ?? hist?.input ?? studio?.input) ?? null,
+      output: (ws?.output ?? hist?.output ?? studio?.output) ?? null,
+      feedback: (ws?.feedback ?? studio?.feedback) ?? null,
+      decision: studio?.decision
+    };
+  }, [
+    debugStateName,
+    selectedNodeState,
+    historyDebugByState,
+    middlewareWsDebug,
+    studioNodeDebug
+  ]);
 
   const wsConnected = wsReadyState === WebSocket.OPEN;
   const showEmpty =
@@ -567,76 +717,114 @@ export function LiveRunnerMonitorPage() {
         )}
 
         {showGraph && (
-          <Card
-            title="DAG View"
-            description="Live node updates from middleware WebSocket"
-            className="flex min-h-0 flex-1 flex-col overflow-hidden"
-          >
-            <div className="flex min-h-0 flex-1 flex-col p-6">
-              <DagView
-                nodeStates={displayNodeStates}
-                selectedNode={selectedNode}
-                onSelectNode={setSelectedNode}
-                edges={[]}
-                runStatus={runStatusForDag}
-                viewJson={viewJson ?? undefined}
-                monitorGraph={monitorGraph ?? undefined}
-                shouldAutoFocusRunningNode={runStatusForDag === RunStatus.RUNNING}
-                takenBranchByConditionPathId={takenBranchByConditionPathId}
-              />
+          <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[2fr_1fr]">
+            <div className="min-h-0 flex flex-col overflow-hidden">
+              <Card
+                title="DAG View"
+                description="Live node updates from middleware WebSocket"
+                className="flex min-h-0 flex-1 flex-col overflow-hidden"
+              >
+                <div className="flex min-h-0 flex-1 flex-col p-6">
+                  <DagView
+                    nodeStates={displayNodeStates}
+                    selectedNode={selectedNode}
+                    onSelectNode={setSelectedNode}
+                    edges={[]}
+                    runStatus={runStatusForDag}
+                    viewJson={viewJson ?? undefined}
+                    monitorGraph={monitorGraph ?? undefined}
+                    shouldAutoFocusRunningNode={runStatusForDag === RunStatus.RUNNING}
+                    takenBranchByConditionPathId={takenBranchByConditionPathId}
+                  />
+                </div>
+              </Card>
             </div>
-          </Card>
+            {selectedNodeState ? (
+              <Card title="Debug Panel" description="Node execution details">
+                <div className="space-y-4 text-xs">
+                  <div>
+                    <p className="font-semibold text-slate-900">{selectedNodeState.nodeName}</p>
+                    {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string }).typeDisplay && (
+                      <p className="mt-0.5 text-slate-500">
+                        {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string }).typeDisplay}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={selectedNodeState.status} />
+                    {selectedNodeState.durationMs !== null && (
+                      <span className="text-slate-500">
+                        {formatDuration(selectedNodeState.durationMs)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    <div className="rounded-md bg-slate-50 p-3">
+                      <p className="mb-1 font-semibold text-slate-900">Input</p>
+                      <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
+                        {JSON.stringify(displayNodeDebug?.input ?? {}, null, 2)}
+                      </pre>
+                    </div>
+                    <div className="rounded-md bg-slate-50 p-3">
+                      <p className="mb-1 font-semibold text-slate-900">Output</p>
+                      <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
+                        {JSON.stringify(displayNodeDebug?.output ?? {}, null, 2)}
+                      </pre>
+                    </div>
+                    <div className="rounded-md bg-slate-50 p-3">
+                      <p className="mb-1 font-semibold text-slate-900">Feedback</p>
+                      <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
+                        {JSON.stringify(displayNodeDebug?.feedback ?? {}, null, 2)}
+                      </pre>
+                    </div>
+                    {displayNodeDebug?.decision && (
+                      <div className="rounded-md bg-slate-50 p-3">
+                        <p className="mb-1 font-semibold text-slate-900">Decision</p>
+                        <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
+                          {JSON.stringify(displayNodeDebug.decision, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                  {showExternalStatusActions && (
+                    <div className="border-t border-slate-200 pt-4">
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        External status
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700"
+                        >
+                          Success
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="bg-red-600 hover:bg-red-700"
+                        >
+                          Failure
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            ) : (
+              <Card title="Debug Panel" description="Select a node to inspect its debug bundle">
+                <div className="flex min-h-[280px] items-center justify-center lg:min-h-0">
+                  <p className="text-sm text-slate-500">
+                    Click a node in the DAG view to inspect debug details.
+                  </p>
+                </div>
+              </Card>
+            )}
+          </div>
         )}
       </div>
-
-      {showGraph && (
-        <div className="flex-shrink-0 border-t border-slate-200 bg-white p-6">
-          <Card
-            title="Timeline"
-            description="Middleware events for this session"
-            actions={
-              <button
-                type="button"
-                onClick={() => setAutoScroll((prev) => !prev)}
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-                  autoScroll
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                    : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
-                )}
-                aria-pressed={autoScroll}
-              >
-                Auto-scroll {autoScroll ? "On" : "Off"}
-              </button>
-            }
-          >
-            <div
-              ref={timelineRef}
-              className="h-56 overflow-y-auto rounded-lg border border-slate-200"
-            >
-              <TimelineTable
-                events={feedEvents}
-                selectedNode={selectedNode}
-                selectedStateName={selectedNode ? pathIdToApiStateName(selectedNode) : null}
-                onSelectNode={(stateName) =>
-                  setSelectedNode(stateNameToPathId.get(stateName) ?? stateName)
-                }
-                nodeStates={
-                  monitorGraph
-                    ? monitorGraph.nodes.map((n) => ({
-                        stateName: n.apiStateName,
-                        nodeName: n.nodeName
-                      }))
-                    : displayNodeStates.map((n) => ({
-                        stateName: n.stateName,
-                        nodeName: n.nodeName
-                      }))
-                }
-              />
-            </div>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }

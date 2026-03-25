@@ -579,6 +579,7 @@ export const mockSkillsetsApi: SkillsetsApi = {
           name: "PickObject",
           version: "0.0.1",
           description: "Pick an object from a target location",
+          allow_status_external_change: true,
           parameters: {
             target_object: {
               type: "string",

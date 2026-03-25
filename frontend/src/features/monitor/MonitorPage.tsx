@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { middlewareApi, runsApi, workflowsApi } from "@/api";
+import { middlewareApi, runsApi, skillsetsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -20,6 +20,10 @@ import { buildMonitorGraph, applyGraphPatches, type GraphPatchPayload } from "@/
 import { ENABLE_DYNAMIC_GRAPH_PATCH } from "@/lib/featureFlags";
 import { DagView } from "@/features/monitor/DagView";
 import { TimelineTable } from "@/features/monitor/TimelineTable";
+import {
+  buildAllowStatusExternalChangeKeys,
+  skillNodeAllowsExternalStatusChange
+} from "@/features/monitor/skillsetExternalStatus";
 
 type MonitorPageProps = {
   runId: string;
@@ -205,6 +209,16 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     queryFn: () => workflowsApi.getDraft(snapshot!.run.workflowId),
     enabled: Boolean(snapshot?.run.workflowId)
   });
+
+  const { data: skillsetsResponse } = useQuery({
+    queryKey: ["skillsets"],
+    queryFn: () => skillsetsApi.list()
+  });
+
+  const allowExternalStatusSkillKeys = useMemo(
+    () => buildAllowStatusExternalChangeKeys(skillsetsResponse?.skill_sets ?? []),
+    [skillsetsResponse?.skill_sets]
+  );
 
   const baseMonitorGraph = useMemo(
     () => buildMonitorGraph(workflowDraft?.dsl_json),
@@ -592,11 +606,16 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return computeTakenBranches(monitorGraph, ev);
   }, [monitorGraph, showReplay, events, replayIndex]);
 
+  const selectedMonitorNode = useMemo(() => {
+    if (!selectedNode || !monitorGraph) return null;
+    return monitorGraph.nodes.find((n) => n.pathId === selectedNode) ?? null;
+  }, [selectedNode, monitorGraph]);
+
   const selectedNodeState = useMemo(() => {
     if (!selectedNode) return null;
     const statesToUse = displayNodeStates;
     if (monitorGraph) {
-      const node = monitorGraph.nodes.find((n) => n.pathId === selectedNode);
+      const node = selectedMonitorNode;
       if (!node) return null;
       const snap = statesToUse.find((n) => n.stateName === node.apiStateName) ?? statesToUse.find((n) => n.stateName === node.stateName);
       // VLM Planner 컨테이너는 DSL 타입 Repeat 대신 이름으로 표시
@@ -613,7 +632,19 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       } as NodeStateSnapshot & { typeDisplay?: string };
     }
     return statesToUse.find((n) => n.stateName === selectedNode) ?? null;
-  }, [selectedNode, monitorGraph, displayNodeStates]);
+  }, [selectedNode, monitorGraph, displayNodeStates, selectedMonitorNode]);
+
+  const showExternalStatusActions = useMemo(
+    () =>
+      selectedMonitorNode
+        ? skillNodeAllowsExternalStatusChange(
+            selectedMonitorNode.dslType,
+            selectedMonitorNode.skillName,
+            allowExternalStatusSkillKeys
+          )
+        : false,
+    [selectedMonitorNode, allowExternalStatusSkillKeys]
+  );
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -757,6 +788,31 @@ export function MonitorPage({ runId }: MonitorPageProps) {
                   </div>
                 )}
               </div>
+              {showExternalStatusActions && (
+                <div className="border-t border-slate-200 pt-4">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    External status
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      className="bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      Success
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      className="bg-red-600 hover:bg-red-700"
+                    >
+                      Failure
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
         ) : (

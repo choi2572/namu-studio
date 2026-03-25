@@ -112,6 +112,8 @@ export type Skillset = {
   feedback: unknown[];
   pre_conditions: string[];
   post_effects: string[];
+  /** true면 모니터링 Debug Panel에서 Success/Failure 등 외부 상태 변경 UI 노출 (middleware skill-set 응답) */
+  allow_status_external_change?: boolean;
 };
 
 export type SkillsetsResponse = {
