@@ -110,6 +110,10 @@ class MiddlewareClient:
         """POST /api/v1/workflows/run — forward request body (start/cancel)."""
         return self._request("POST", "/api/v1/workflows/run", body=body)
 
+    def workflows_action_status(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/v1/workflows/action-status — external action status update."""
+        return self._request("POST", "/api/v1/workflows/action-status", body=body)
+
     def get_workflow_info(self, workflow_id: str) -> Dict[str, Any]:
         """GET /api/v1/workflows/{workflow_id} (workflow information)."""
         return self._request(

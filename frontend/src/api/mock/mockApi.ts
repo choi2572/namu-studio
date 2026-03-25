@@ -9,6 +9,8 @@ import {
 } from "@/api/mock/data";
 import {
   MiddlewareApi,
+  WorkflowActionStatusRequest,
+  WorkflowActionStatusResponse,
   RunnerStatusResponse,
   RunListFilters,
   RunSnapshot,
@@ -447,6 +449,18 @@ export const mockMiddlewareApi: MiddlewareApi = {
       mockLastStartedDsl = null;
     }, 0);
     return delay(deepClone(result));
+  },
+
+  async postWorkflowActionStatus(
+    payload: WorkflowActionStatusRequest
+  ): Promise<WorkflowActionStatusResponse> {
+    const results = (payload.statuses ?? []).map((s) => ({
+      action_id: s.action_id,
+      result: (s.status === "success" || s.status === "failure" ? "accepted" : "rejected") as
+        | "accepted"
+        | "rejected"
+    }));
+    return delay(deepClone({ results }));
   }
 };
 

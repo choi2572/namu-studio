@@ -34,6 +34,12 @@ import {
 import { ENABLE_DYNAMIC_GRAPH_PATCH } from "@/lib/featureFlags";
 import { DagView } from "@/features/monitor/DagView";
 import {
+  ActionStatusToast,
+  ACTION_STATUS_TOAST_DISMISS_MS,
+  isFetchAbortError,
+  type ActionStatusToastState
+} from "@/features/monitor/ActionStatusToast";
+import {
   applyNodeStatusChangeMessage,
   applyRunnerPollToNodeStates,
   buildLiveNodeStatesFromInitial,
@@ -141,6 +147,8 @@ export function LiveRunnerMonitorPage() {
 
   const [feedEvents, setFeedEvents] = useState<RunEvent[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [actionStatusPending, setActionStatusPending] = useState(false);
+  const [actionStatusToast, setActionStatusToast] = useState<ActionStatusToastState | null>(null);
   const [middlewareWsDebug, setMiddlewareWsDebug] = useState<
     Record<string, MiddlewareLiveDebugPatch>
   >({});
@@ -610,6 +618,58 @@ export function LiveRunnerMonitorPage() {
     [selectedMonitorNode, skillsetsResponse?.skill_sets]
   );
 
+  const actionStatusEnabled = selectedNodeState?.status === NodeStatus.RUNNING && !actionStatusPending;
+  const actionStatusTargetId = selectedMonitorNode?.stateName ?? selectedNodeState?.stateName ?? null;
+
+  const submitActionStatus = async (status: "success" | "failure") => {
+    if (!actionStatusTargetId || !selectedNodeState) return;
+    setActionStatusPending(true);
+    try {
+      const response = await middlewareApi.postWorkflowActionStatus({
+        statuses: [{ action_id: actionStatusTargetId, status, reason: "" }]
+      });
+      const first = response.results?.[0];
+      const resultRaw = (first?.result ?? "accepted").toLowerCase();
+      if (resultRaw === "accepted") {
+        setActionStatusToast({
+          variant: "success",
+          message: `${selectedNodeState.nodeName}: ${first?.result ?? "accepted"}`
+        });
+      } else if (resultRaw === "rejected") {
+        setActionStatusToast({
+          variant: "rejected",
+          message: `${selectedNodeState.nodeName}: rejected`
+        });
+      } else {
+        setActionStatusToast({
+          variant: "error",
+          message: `${selectedNodeState.nodeName}: unexpected result (${first?.result ?? "unknown"})`
+        });
+      }
+    } catch (error) {
+      if (isFetchAbortError(error)) {
+        setActionStatusToast({
+          variant: "timeout",
+          message: `${selectedNodeState.nodeName}: no response within 10s`
+        });
+      } else {
+        const msg = error instanceof Error ? error.message : "request failed";
+        setActionStatusToast({
+          variant: "error",
+          message: `${selectedNodeState.nodeName}: ${msg}`
+        });
+      }
+    } finally {
+      setActionStatusPending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!actionStatusToast) return;
+    const id = window.setTimeout(() => setActionStatusToast(null), ACTION_STATUS_TOAST_DISMISS_MS);
+    return () => window.clearTimeout(id);
+  }, [actionStatusToast]);
+
   const displayNodeDebug = useMemo((): NodeDebugBundle | null => {
     if (!debugStateName || !selectedNodeState) return null;
     const hist = historyDebugByState.get(debugStateName);
@@ -779,16 +839,16 @@ export function LiveRunnerMonitorPage() {
                     )}
                   </div>
                   {showExternalStatusActions && (
-                    <div className="border-t border-slate-200 pt-4">
-                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                        External status
-                      </p>
-                      <div className="flex flex-wrap gap-2">
+                    <div className="rounded-md bg-slate-50 p-3">
+                      <p className="mb-1 font-semibold text-slate-900">Change status</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
                         <Button
                           type="button"
                           variant="primary"
                           size="sm"
                           className="bg-emerald-600 hover:bg-emerald-700"
+                          disabled={!actionStatusEnabled}
+                          onClick={() => void submitActionStatus("success")}
                         >
                           Success
                         </Button>
@@ -797,6 +857,8 @@ export function LiveRunnerMonitorPage() {
                           variant="primary"
                           size="sm"
                           className="bg-red-600 hover:bg-red-700"
+                          disabled={!actionStatusEnabled}
+                          onClick={() => void submitActionStatus("failure")}
                         >
                           Failure
                         </Button>
@@ -817,6 +879,7 @@ export function LiveRunnerMonitorPage() {
           </div>
         )}
       </div>
+      <ActionStatusToast toast={actionStatusToast} onDismiss={() => setActionStatusToast(null)} />
     </div>
   );
 }

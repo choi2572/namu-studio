@@ -99,6 +99,25 @@ export type WorkflowRunResponse = {
   status: "running" | "cancelled";
 };
 
+export type WorkflowActionStatusItem = {
+  action_id: string;
+  status: "success" | "failure";
+  reason: string;
+};
+
+export type WorkflowActionStatusRequest = {
+  statuses: WorkflowActionStatusItem[];
+};
+
+export type WorkflowActionStatusResult = {
+  action_id: string;
+  result: "accepted" | "rejected";
+};
+
+export type WorkflowActionStatusResponse = {
+  results: WorkflowActionStatusResult[];
+};
+
 export type WorkflowRunValidationError = {
   error: string;
   message: string;
@@ -127,6 +146,8 @@ export interface MiddlewareApi {
   runWorkflowStart(workflowJson: Record<string, unknown>): Promise<WorkflowRunResponse>;
   /** 워크플로우 실행 취소 (POST /api/v1/workflows/run, request_type: cancel) */
   runWorkflowCancel(): Promise<WorkflowRunResponse>;
+  /** 액션 상태 변경 요청 (POST /api/v1/workflows/action-status) */
+  postWorkflowActionStatus(payload: WorkflowActionStatusRequest): Promise<WorkflowActionStatusResponse>;
 }
 
 export interface RunsApi {

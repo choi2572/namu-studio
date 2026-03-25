@@ -751,6 +751,18 @@ def create_app() -> Flask:
         t.start()
         return jsonify({"workflow_id": workflow_id, "status": "running"})
 
+    @app.route("/api/v1/workflows/action-status", methods=["POST"])
+    def workflows_action_status():
+        data = request.get_json() or {}
+        statuses = data.get("statuses") or []
+        results = []
+        for s in statuses:
+            action_id = s.get("action_id", "")
+            status = str(s.get("status", "")).lower()
+            result = "accepted" if status in ("success", "failure") else "rejected"
+            results.append({"action_id": action_id, "result": result})
+        return jsonify({"results": results})
+
     @app.route("/api/v1/workflows/<workflow_id>", methods=["GET"])
     def workflow_info(workflow_id: str):
         with _state["lock"]:

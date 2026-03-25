@@ -42,3 +42,12 @@ def get_workflow_json(workflow_id: str):
     client = _middleware_client()
     data = client.get_workflow_json(workflow_id)
     return jsonify(data)
+
+
+@bp.route("/workflows/action-status", methods=["POST"])
+def post_workflow_action_status():
+    """POST /api/v1/workflows/action-status — proxy external action status update."""
+    client = _middleware_client()
+    body = request.get_json(force=True, silent=True) or {}
+    data = client.workflows_action_status(body)
+    return jsonify(data)

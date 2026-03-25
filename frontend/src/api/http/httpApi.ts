@@ -16,6 +16,8 @@ import {
   RunSnapshot,
   RunsApi,
   SkillsetsApi,
+  WorkflowActionStatusRequest,
+  WorkflowActionStatusResponse,
   WorkflowsApi,
   WorkflowRunResponse
 } from "@/api/interfaces";
@@ -92,6 +94,27 @@ export const httpMiddlewareApi: MiddlewareApi = {
       body: JSON.stringify({ request_type: "cancel" })
     });
     return handleResponse<WorkflowRunResponse>(response);
+  },
+
+  async postWorkflowActionStatus(
+    payload: WorkflowActionStatusRequest
+  ): Promise<WorkflowActionStatusResponse> {
+    const url = getApiUrl("/v1/workflows/action-status");
+    logApiCall("POST", url, payload);
+    const controller = new AbortController();
+    const timeoutMs = 10_000;
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      return handleResponse<WorkflowActionStatusResponse>(response);
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
   }
 };
 
