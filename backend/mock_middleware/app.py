@@ -823,11 +823,14 @@ def create_app() -> Flask:
         def monitor_ws(ws):
             with _ws_clients_lock:
                 _ws_clients.add(ws)
+            logger.info("WS monitor client connected")
             try:
                 ws.send(json.dumps(_build_initial_message()))
+                logger.info("WS monitor initial message sent")
                 while True:
                     raw = ws.receive()
                     if raw is None:
+                        logger.info("WS monitor client disconnected (ws.receive() returned None)")
                         break
                     try:
                         data = json.loads(raw)
@@ -836,10 +839,17 @@ def create_app() -> Flask:
                     except json.JSONDecodeError:
                         pass
             except Exception as e:
-                logger.debug("WS client closed: %s", e)
+                # 1005: "No status code" (abnormal close). 브라우저/네트워크/리커넥트로 인해
+                # 흔히 발생할 수 있어 스택 트레이스는 노이즈가 됩니다.
+                msg = str(e)
+                if "Connection closed: 1005" in msg or "1005" in msg:
+                    logger.info("WS monitor client disconnected (abnormal close 1005)")
+                else:
+                    logger.exception("WS monitor client loop error: %s", e)
             finally:
                 with _ws_clients_lock:
                     _ws_clients.discard(ws)
+                logger.info("WS monitor client cleaned up")
     except ImportError:
         logger.warning("flask_sock not installed; WebSocket monitor disabled. pip install flask-sock")
 
