@@ -464,9 +464,8 @@ export function LiveRunnerMonitorPage() {
           setLastRunnerStatus(rs);
 
           if (!runnerStatusIndicatesActiveWorkflow(rs)) {
-            if (loadedWorkflowIdRef.current) {
-              resetToEmpty();
-            }
+            // Idle after having run something: keep the last loaded graph on screen.
+            // Only reset when user hasn't loaded any workflow yet.
             return;
           }
 
@@ -489,7 +488,7 @@ export function LiveRunnerMonitorPage() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [resetToEmpty]);
+  }, []);
 
   const baseMonitorGraph = useMemo(
     () => buildMonitorGraph(dslJson ?? undefined),
@@ -696,14 +695,14 @@ export function LiveRunnerMonitorPage() {
   ]);
 
   const wsConnected = wsReadyState === WebSocket.OPEN;
+  const showGraph = Boolean(dslJson && monitorGraph && loadedWorkflowId);
   const showEmpty =
     initialBootstrapDone &&
     !dslFetchInProgress &&
+    !showGraph &&
     !loadedWorkflowId &&
     !dslJson &&
     !runnerStatusIndicatesActiveWorkflow(lastRunnerStatus);
-
-  const showGraph = Boolean(dslJson && monitorGraph && loadedWorkflowId);
 
   const connectionLabel =
     wsReadyState === WebSocket.CONNECTING || wsReadyState === null
@@ -750,25 +749,11 @@ export function LiveRunnerMonitorPage() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
-        {!initialBootstrapDone && (
+        {!initialBootstrapDone ? (
           <div className="flex flex-1 items-center justify-center text-slate-500">
             Waiting for monitor connection…
           </div>
-        )}
-
-        {initialBootstrapDone && showEmpty && (
-          <div className="flex flex-1 items-center justify-center text-slate-500">
-            No workflow is currently running
-          </div>
-        )}
-
-        {initialBootstrapDone && dslFetchInProgress && !loadedWorkflowId && (
-          <div className="flex flex-1 items-center justify-center text-slate-500">
-            Loading workflow definition…
-          </div>
-        )}
-
-        {showGraph && (
+        ) : showGraph ? (
           <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[2fr_1fr]">
             <div className="min-h-0 flex flex-col overflow-hidden">
               <Card
@@ -876,6 +861,18 @@ export function LiveRunnerMonitorPage() {
                 </div>
               </Card>
             )}
+          </div>
+        ) : dslFetchInProgress && !loadedWorkflowId ? (
+          <div className="flex flex-1 items-center justify-center text-slate-500">
+            Loading workflow definition…
+          </div>
+        ) : showEmpty ? (
+          <div className="flex flex-1 items-center justify-center text-slate-500">
+            No workflow is currently running
+          </div>
+        ) : (
+          <div className="flex flex-1 items-center justify-center text-slate-500">
+            Loading…
           </div>
         )}
       </div>
