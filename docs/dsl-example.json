@@ -1,0 +1,167 @@
+{
+  "Comment": "Generated from editor - full flow_control coverage with global failure handling",
+  "StartAt": "Input_1",
+  "Inputs": {
+    "target_id": { "Type": "string", "Value": "obj-001" },
+    "quality_score": { "Type": "double", "Value": 0.72 },
+    "dry_run": { "Type": "bool", "Value": false }
+  },
+  "States": {
+    "Input_1": {
+      "Type": "Pass",
+      "Skill": "flow_control.input",
+      "Parameters": {},
+      "Next": "CheckQuality_1",
+      "Label": "Input"
+    },
+    "CheckQuality_1": {
+      "Type": "Condition",
+      "If": {
+        "Condition": {
+          "Variable": "$.quality_score",
+          "Operator": ">=",
+          "Value": 0.7
+        },
+        "Then": "RepeatPrepare_1"
+      },
+      "Else": "RetryCriticalStep_1",
+      "Label": "Condition"
+    },
+    "RepeatPrepare_1": {
+      "Type": "Repeat",
+      "RepeatCount": 3,
+      "StartAt": "PrepStep_1",
+      "States": {
+        "PrepStep_1": {
+          "Type": "Skill",
+          "Skill": "vision.PreprocessFrame",
+          "Parameters": {
+            "target": "$.target_id",
+            "normalize": true
+          },
+          "Next": "ValidateStep_1",
+          "Label": "Repeat Body - Preprocess"
+        },
+        "ValidateStep_1": {
+          "Type": "Skill",
+          "Skill": "qa.ValidateFrame",
+          "Parameters": {
+            "threshold": 0.8
+          },
+          "End": true,
+          "Label": "Repeat Body - Validate"
+        }
+      },
+      "Next": "ParallelFanout_1",
+      "Label": "Repeat"
+    },
+    "ParallelFanout_1": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "BranchA_Analyze_1",
+          "States": {
+            "BranchA_Analyze_1": {
+              "Type": "Skill",
+              "Skill": "analysis.DetectObjects",
+              "Parameters": {
+                "model": "detector-v2"
+              },
+              "End": true,
+              "Label": "Parallel Branch 1"
+            }
+          }
+        },
+        {
+          "StartAt": "BranchB_Track_1",
+          "States": {
+            "BranchB_Track_1": {
+              "Type": "Skill",
+              "Skill": "tracking.TrackTargets",
+              "Parameters": {
+                "maxTargets": 5
+              },
+              "End": true,
+              "Label": "Parallel Branch 2"
+            }
+          }
+        }
+      ],
+      "Next": "RetryCriticalStep_1",
+      "Label": "Parallel"
+    },
+    "RetryCriticalStep_1": {
+      "Type": "Retry",
+      "MaxAttempts": 2,
+      "StartAt": "CriticalAction_1",
+      "State": {
+        "CriticalAction_1": {
+          "Type": "Skill",
+          "Skill": "robot.ExecuteAction",
+          "Parameters": {
+            "target": "$.target_id",
+            "safeMode": true
+          },
+          "Next": "PostCheck_1",
+          "Label": "Retry Main - Execute"
+        },
+        "PostCheck_1": {
+          "Type": "Skill",
+          "Skill": "qa.VerifyResult",
+          "Parameters": {
+            "mustPass": true
+          },
+          "End": true,
+          "Label": "Retry Main - Verify"
+        }
+      },
+      "BeforeRetryAfterFailure": {
+        "FailureCleanup_1": {
+          "Type": "Skill",
+          "Skill": "system.CleanupTemp",
+          "Parameters": {
+            "aggressive": false
+          },
+          "End": true,
+          "Label": "Retry Failure Hook - Cleanup"
+        }
+      },
+      "Next": "Output_1",
+      "Label": "Retry"
+    },
+    "Output_1": {
+      "Type": "Succeed",
+      "Label": "Output"
+    }
+  },
+  "OnFailure": {
+    "StartAt": "NotifyFailure_1",
+    "States": {
+      "NotifyFailure_1": {
+        "Type": "Skill",
+        "Skill": "system.NotifyOps",
+        "Parameters": {
+          "channel": "slack",
+          "severity": "high",
+          "message": "Workflow failed after retries"
+        },
+        "Next": "RecordIncident_1",
+        "Label": "OnFailure - Notify"
+      },
+      "RecordIncident_1": {
+        "Type": "Skill",
+        "Skill": "system.CreateIncidentTicket",
+        "Parameters": {
+          "project": "NAMU",
+          "autoAssign": true
+        },
+        "Next": "FailureEnd_1",
+        "Label": "OnFailure - Record"
+      },
+      "FailureEnd_1": {
+        "Type": "Succeed",
+        "Label": "OnFailure - End"
+      }
+    }
+  }
+}
