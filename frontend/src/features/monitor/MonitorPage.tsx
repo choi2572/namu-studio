@@ -646,7 +646,29 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     [selectedMonitorNode, skillsetsResponse?.skill_sets]
   );
 
-  const actionStatusEnabled = selectedNodeState?.status === NodeStatus.RUNNING && !actionStatusPending;
+  const isInRunningContainer = useMemo(() => {
+    if (!monitorGraph) return false;
+    const containerPathId = selectedMonitorNode?.containerPathId;
+    if (!containerPathId) return false;
+    const parentContainer = monitorGraph.nodes.find(
+      (n) =>
+        n.pathId === containerPathId &&
+        n.isContainer &&
+        (n.containerType === "repeat" || n.containerType === "parallel")
+    );
+    if (!parentContainer) return false;
+
+    const snap =
+      displayNodeStates.find((s) => s.stateName === parentContainer.apiStateName) ??
+      displayNodeStates.find((s) => s.stateName === parentContainer.stateName);
+
+    return snap?.status === NodeStatus.RUNNING;
+  }, [selectedMonitorNode, monitorGraph, displayNodeStates]);
+
+  const actionStatusEnabled =
+    !actionStatusPending &&
+    (selectedNodeState?.status === NodeStatus.RUNNING ||
+      (selectedNodeState?.status === NodeStatus.WAITING && isInRunningContainer));
   const actionStatusTargetId = selectedMonitorNode?.stateName ?? selectedNodeState?.stateName ?? null;
 
   const submitActionStatus = async (status: "success" | "failure") => {
