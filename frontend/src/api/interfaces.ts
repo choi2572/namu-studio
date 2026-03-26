@@ -29,7 +29,7 @@ export type RunSnapshot = {
   nodeStates: NodeStateSnapshot[];
 };
 
-// Middleware runner status (see docs/middleware_api_spec.md + live monitor contract)
+// Middleware runner status (see docs/middleware-api-spec.md + live monitor contract)
 export type RunnerStatusValue =
   | "idle"
   | "running"
@@ -84,7 +84,7 @@ export type RunnerStatusResponse = {
   };
 };
 
-// POST /api/v1/workflows/run (docs/middleware_api_spec.md)
+// POST /api/v1/workflows/run (docs/middleware-api-spec.md)
 export type WorkflowRunStartPayload = {
   request_type: "start";
   workflow_json: Record<string, unknown>;

@@ -1,168 +1,51 @@
-# 모니터 페이지 구현 시 주의사항
+# 모니터 페이지 고려사항 (현재 구현 반영)
 
-## 1. Live Mode Polling (중요)
+기준:
+- run 모니터: `frontend/src/features/monitor/MonitorPage.tsx`
+- runner 라이브 모니터: `frontend/src/features/monitor/LiveRunnerMonitorPage.tsx`
 
-**현재 문제**: 시뮬레이션 이벤트만 사용 중
+## 1. run 모니터 폴링 규칙
 
-**UI 노트 요구사항**: "Auto-updating via backend polling"
+- `run-snapshot`, `run-events`를 주기적으로 폴링
+- Run 상태가 terminal(`SUCCESS|FAILED|CANCELED`)이면 폴링 중지
+- terminal 전환 직후 한 번 더 refetch하여 마지막 이벤트 누락을 보정
 
-**해결 방법**:
-```typescript
-// useQuery에 refetchInterval 추가
-const { data: snapshot } = useQuery({
-  queryKey: ["run-snapshot", runId],
-  queryFn: () => runsApi.getSnapshot(runId),
-  enabled: !isReplayMode && runStatus !== null && !isTerminal,
-  refetchInterval: (query) => {
-    const status = query.state.data?.run.status;
-    // RUNNING 또는 WAITING일 때만 polling
-    return status === RunStatus.RUNNING || status === RunStatus.WAITING 
-      ? 2000 // 2초마다
-      : false;
-  }
-});
+## 2. replay 규칙
 
-// 새 이벤트 가져오기
-const { data: newEvents } = useQuery({
-  queryKey: ["run-events", runId, events.length],
-  queryFn: () => runsApi.getEvents(runId, events.length > 0 ? events[events.length - 1].seq : 0),
-  enabled: !isReplayMode && runStatus !== null && !isTerminal,
-  refetchInterval: (query) => {
-    const status = runStatus;
-    return status === RunStatus.RUNNING || status === RunStatus.WAITING ? 2000 : false;
-  }
-});
-```
+- replay는 저장된 이벤트를 순서대로 재적용해 Node 상태를 재구성
+- 현재 구현은 시간 기반이 아닌 이벤트 순서 + duration 기반 재생에 가깝다
+- `mode=replay` 또는 terminal run에서 replay 컨트롤 노출
 
-## 2. Replay Mode 구현 (중요)
+## 3. Cancel 동작
 
-**현재 문제**: Play/Pause/Scrub이 실제로 동작하지 않음
+- cancel 시 middleware cancel + backend cancel을 모두 시도
+- 성공 여부와 별개로 UI 캐시를 terminal 상태로 즉시 갱신해 폴링을 멈춤
+- 타임라인에 `RUN_CANCELED` 이벤트를 로컬 추가
 
-**UI 노트 요구사항**: 
-- Play/Pause로 재생 제어
-- Scrub으로 특정 시점으로 이동
+## 4. DAG/Timeline 동기화
 
-**해결 방법**:
-```typescript
-// replayPosition에 따라 표시할 이벤트 필터링
-const visibleEvents = useMemo(() => {
-  if (!isReplayMode || !replayPlaying) {
-    // Pause 상태: 현재 position까지의 이벤트만 표시
-    const maxSeq = Math.floor((replayPosition / 100) * initialEvents.length);
-    return initialEvents.filter(e => e.seq <= maxSeq);
-  }
-  // Play 상태: 시간에 따라 점진적으로 표시
-  return initialEvents; // 실제로는 애니메이션 필요
-}, [isReplayMode, replayPlaying, replayPosition, initialEvents]);
+- Timeline 클릭 시 해당 Node가 DAG에서 선택되도록 연결
+- 선택 Node는 Debug Panel 데이터 조회와 연결됨
+- condition 분기는 이벤트 순서를 기반으로 then/else 경로를 계산해 표시
 
-// replayPosition에 따라 노드 상태도 업데이트
-useEffect(() => {
-  if (!isReplayMode || !snapshot) return;
-  // replayPosition에 해당하는 시점의 노드 상태로 업데이트
-  // 이벤트 히스토리를 역추적하여 노드 상태 복원
-}, [isReplayMode, replayPosition, snapshot]);
-```
+## 5. debug 패널 규칙
 
-## 3. Top Bar 레이아웃
+- 기본 데이터는 백엔드 `node debug` API 사용
+- 라이브 모드(` /monitor `)는 WS payload(input/output/feedback)와 백엔드 데이터를 병합 표시
+- 데이터가 없으면 빈 객체 또는 null-safe 렌더링
 
-**UI 노트 요구사항**: 
-- Left: Workflow name + Run state
+## 6. 라이브 러너 모니터(` /monitor `) 특성
 
-**현재**: Workflow name만 표시
+- WS와 REST polling을 함께 사용
+- WS 연결 깜빡임 완화를 위해 disconnected/error를 debounce 처리
+- 실행 Workflow가 바뀌면 DSL/view를 다시 로드
 
-**수정 필요**:
-```typescript
-<div>
-  <h1 className="text-xl font-semibold">{workflowName}</h1>
-  {runStatus && (
-    <p className="text-sm text-slate-500 mt-1">
-      Status: <StatusBadge status={runStatus} />
-    </p>
-  )}
-</div>
-```
+## 7. 동적 그래프 패치(VLM)
 
-## 4. 이벤트 순서 보장
+- feature flag(`ENABLE_DYNAMIC_GRAPH_PATCH`)가 켜져 있고 `GRAPH_PATCH` 이벤트가 있으면 DAG를 동적으로 갱신
+- replay에서도 patch 이벤트를 순차 반영 가능
 
-**주의**: Timeline의 이벤트는 반드시 시간 순서대로 정렬되어야 함
+## 8. 남은 리스크/개선 포인트
 
-```typescript
-const sortedEvents = useMemo(() => {
-  return [...events].sort((a, b) => {
-    const timeA = new Date(a.timestamp).getTime();
-    const timeB = new Date(b.timestamp).getTime();
-    if (timeA !== timeB) return timeA - timeB;
-    return a.seq - b.seq; // 같은 시간이면 seq로 정렬
-  });
-}, [events]);
-```
-
-## 5. 노드 선택 동기화
-
-**주의**: Timeline에서 이벤트 클릭 시 DAG view의 노드도 하이라이트되어야 함
-
-**현재**: 구현되어 있음 (selectedNode 상태로 관리)
-
-## 6. Auto-scroll 동작
-
-**주의**: 
-- Live 모드에서만 auto-scroll 활성화
-- 사용자가 스크롤하면 auto-scroll 중지
-- Replay 모드에서는 auto-scroll 없음
-
-**현재**: 구현되어 있음
-
-## 7. Cancel 기능
-
-**주의**: 
-- Cancel은 실제 API 호출이 필요 (현재는 로컬 상태만 변경)
-- Cancel 후 polling 중지
-
-```typescript
-const handleCancel = async () => {
-  if (!snapshot) return;
-  try {
-    await runsApi.cancelRun(runId); // API 호출 필요
-    setRunStatus(RunStatus.CANCELED);
-  } catch (error) {
-    // 에러 처리
-  }
-};
-```
-
-## 8. DAG View 개선
-
-**현재**: 그리드 레이아웃으로 노드 표시
-
-**향후 개선**:
-- 실제 DAG 그래프로 표시 (노드 간 연결선 표시)
-- Workflow view_json의 노드 위치 정보 활용
-- 노드 간 transition 표시
-
-## 9. 에러 처리
-
-**주의**: 
-- API 호출 실패 시 에러 메시지 표시
-- 네트워크 오류 시 재시도 로직
-- 로딩 상태 표시
-
-## 10. 성능 최적화
-
-**주의**:
-- 많은 이벤트가 있을 때 Timeline 렌더링 최적화 (가상화 고려)
-- 노드 상태 업데이트 시 불필요한 리렌더링 방지
-- useMemo, useCallback 적절히 활용
-
-## 11. 접근성
-
-**주의**:
-- 키보드 네비게이션 지원
-- 스크린 리더 지원
-- 포커스 관리
-
-## 12. 상태 관리 일관성
-
-**주의**:
-- Replay 모드와 Live 모드의 상태 분리
-- Replay 모드에서는 절대 실행을 트리거하지 않음 (UI 노트 규칙)
-- Live 모드에서만 Cancel 가능
+- 이벤트가 매우 많을 때 timeline 렌더링 비용 증가 가능
+- middleware 메시지 스키마 변경 시 parser/상태 매핑 코드 동시 수정 필요

@@ -1,6 +1,6 @@
 # Mock Middleware
 
-A mock middleware server for testing the **Run → Monitor → Replay** flow without a real robot or middleware. It implements the API described in `docs/middleware_api_spec.md`.
+A mock middleware server for testing the **Run → Monitor → Replay** flow without a real robot or middleware. It implements the API described in `docs/middleware-api-spec.md`.
 
 ## Run
 
@@ -14,7 +14,7 @@ python -m mock_middleware
 
 The server listens at **http://localhost:8000**.
 
-## API (aligned with docs/middleware_api_spec.md)
+## API (aligned with docs/middleware-api-spec.md)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -38,7 +38,7 @@ Set `MOCK_VLM_DYNAMIC_PATCH=true` (or `1`) to enable the **VLM dynamic test scen
 Use a workflow that includes a VLM node (e.g. Pass state named `VLMPlanner_1`). The backend persists each as a `GRAPH_PATCH` run event.
 
 **To see dynamic nodes in the DAG view** (not just in the timeline), turn on the frontend flag:  
-`localStorage.setItem("ENABLE_DYNAMIC_GRAPH_PATCH", "true")` then refresh, or set `NEXT_PUBLIC_ENABLE_DYNAMIC_GRAPH_PATCH=true` in `frontend/.env` and restart the dev server. Without this, the timeline will show GRAPH_PATCH events but the graph will not be patched. See `docs/vlm_monitoring.md`.
+`localStorage.setItem("ENABLE_DYNAMIC_GRAPH_PATCH", "true")` then refresh, or set `NEXT_PUBLIC_ENABLE_DYNAMIC_GRAPH_PATCH=true` in `frontend/.env` and restart the dev server. Without this, the timeline will show GRAPH_PATCH events but the graph will not be patched. See `docs/vlm-monitoring.md`.
 
 ## Full test scenario (Run → Monitor → Replay)
 

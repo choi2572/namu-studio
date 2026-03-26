@@ -155,7 +155,7 @@ All backend APIs use the `/api` prefix. Errors use **Problem+JSON** (RFC 7807).
 
 ### Middleware proxy — `/api/v1`
 
-When using middleware, the backend can proxy requests to the middleware under `/api/v1` (e.g. workflow run, runner status, monitor WebSocket). See `docs/middleware_api_spec.md` for the middleware API.
+When using middleware, the backend can proxy requests to the middleware under `/api/v1` (e.g. workflow run, runner status, monitor WebSocket). See `docs/middleware-api-spec.md` for the middleware API.
 
 ### Error response (Problem+JSON)
 
@@ -189,5 +189,5 @@ CORS is enabled for development (e.g. frontend at `http://localhost:3000`).
 
 ## Documentation
 
-- [docs/10-backend_api.md](../docs/10-backend_api.md) — API responsibilities and design.
-- [docs/middleware_api_spec.md](../docs/middleware_api_spec.md) — Middleware API used by the backend when `EXECUTION_ENGINE=middleware`.
+- [docs/10-backend-api.md](../docs/10-backend-api.md) — API responsibilities and design.
+- [docs/middleware-api-spec.md](../docs/middleware-api-spec.md) — Middleware API used by the backend when `EXECUTION_ENGINE=middleware`.

@@ -1,6 +1,6 @@
 """Proxy API for middleware (runner status, workflow run).
 Frontend calls Backend at /api/v1/*; Backend forwards to Middleware.
-See docs/middleware_api_spec.md.
+See docs/middleware-api-spec.md.
 """
 import os
 from flask import Blueprint, current_app, request, jsonify

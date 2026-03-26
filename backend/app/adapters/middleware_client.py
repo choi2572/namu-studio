@@ -1,5 +1,5 @@
 """Middleware REST + WebSocket client (workflow execution & monitor).
-See docs/middleware_api_spec.md.
+See docs/middleware-api-spec.md.
 """
 import json
 import logging

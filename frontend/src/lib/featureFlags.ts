@@ -1,6 +1,6 @@
 /**
  * Feature flags for VLM / dynamic workflow (all OFF by default).
- * See docs/vlm_monitoring.md.
+ * See docs/vlm-monitoring.md.
  *
  * Next.js: NEXT_PUBLIC_* is inlined only for static process.env.NEXT_PUBLIC_* references.
  * Set in .env / .env.local and restart dev server. When env is not set, localStorage is used.

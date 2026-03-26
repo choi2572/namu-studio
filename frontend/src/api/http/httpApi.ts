@@ -46,7 +46,7 @@ function logApiCall(method: string, url: string, data?: unknown) {
 
 export const httpMiddlewareApi: MiddlewareApi = {
   async getRunnerStatus(): Promise<RunnerStatusResponse> {
-    // docs/middleware_api_spec.md - GET /api/v1/runner/status
+    // docs/middleware-api-spec.md - GET /api/v1/runner/status
     const url = getApiUrl("/v1/runner/status");
     logApiCall("GET", url);
     const response = await fetch(url);

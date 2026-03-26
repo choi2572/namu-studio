@@ -89,11 +89,11 @@ docker compose run -e RUN_MOCK_MIDDLEWARE=1 backend
 
 | Document | Description |
 |----------|-------------|
-| [docs/00-system_rules.md](docs/00-system_rules.md) | System rules and constraints |
-| [docs/10-backend_api.md](docs/10-backend_api.md) | Backend API responsibilities |
-| [docs/20-data_model.md](docs/20-data_model.md) | Data model |
-| [docs/30-middleware_contract.md](docs/30-middleware_contract.md) | Middleware contract |
-| [docs/40-ui_notes.md](docs/40-ui_notes.md) | UI guidelines |
+| [docs/00-system-rules.md](docs/00-system-rules.md) | System rules and constraints |
+| [docs/10-backend-api.md](docs/10-backend-api.md) | Backend API responsibilities |
+| [docs/20-data-model.md](docs/20-data-model.md) | Data model |
+| [docs/30-middleware-contract.md](docs/30-middleware-contract.md) | Middleware contract |
+| [docs/40-ui-notes.md](docs/40-ui-notes.md) | UI guidelines |
 
 ## Development status
 
