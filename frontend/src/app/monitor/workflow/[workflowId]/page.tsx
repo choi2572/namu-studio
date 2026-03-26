@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { runsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
@@ -27,6 +27,7 @@ export default function MonitorWorkflowPage() {
   const params = useParams();
   const router = useRouter();
   const workflowId = params.workflowId as string;
+  const [runErrorToast, setRunErrorToast] = useState<string | null>(null);
 
   const { data: workflows = [] } = useQuery({
     queryKey: ["workflows"],
@@ -52,11 +53,25 @@ export default function MonitorWorkflowPage() {
     },
     onError: (err) => {
       console.error("Start run failed", err);
-      if (typeof window !== "undefined") {
-        window.alert(getRunErrorMessage(err));
-      }
+      setRunErrorToast(getRunErrorMessage(err));
     }
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (targetWorkflowId: string) => workflowsApi.delete(targetWorkflowId),
+    onSuccess: () => {
+      router.push("/");
+    },
+    onError: (err) => {
+      console.error("Delete workflow failed", err);
+    }
+  });
+
+  useEffect(() => {
+    if (!runErrorToast) return;
+    const id = window.setTimeout(() => setRunErrorToast(null), 4500);
+    return () => window.clearTimeout(id);
+  }, [runErrorToast]);
 
   const monitorGraph = workflowDraft
     ? buildMonitorGraph(workflowDraft.dsl_json)
@@ -150,6 +165,27 @@ export default function MonitorWorkflowPage() {
               </svg>
               {executeMutation.isPending ? "Starting..." : "Run"}
             </Button>
+            <Button
+              variant="secondary"
+              onClick={() => deleteMutation.mutate(workflowId)}
+              className="inline-flex items-center gap-2"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                className="h-4 w-4"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9.75 9.75v7.5M14.25 9.75v7.5M4.5 5.25h15M6.75 5.25l.75-1.5A1.5 1.5 0 0 1 8.88 3h6.24a1.5 1.5 0 0 1 1.35.75l.75 1.5m-12.47 0h12.47M6.75 5.25h10.5M8.25 5.25v-.75A1.5 1.5 0 0 1 9.75 3h4.5a1.5 1.5 0 0 1 1.5 1.5v.75"
+                />
+              </svg>
+              Delete
+            </Button>
           </div>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
@@ -185,6 +221,14 @@ export default function MonitorWorkflowPage() {
           </div>
         </Card>
       </div>
+      {runErrorToast && (
+        <div className="pointer-events-none fixed right-6 top-6 z-50">
+          <div className="max-w-sm rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 shadow-lg">
+            <p className="font-semibold">Run failed</p>
+            <p className="mt-1">{runErrorToast}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

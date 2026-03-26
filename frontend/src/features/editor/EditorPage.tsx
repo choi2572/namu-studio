@@ -3705,13 +3705,45 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     }
   });
 
+  const buildCurrentDraftPayload = () => {
+    const view_json = buildViewJson(nodes, validEdges, canvasBase, zoom, failureGraph);
+    const dsl_json = buildDslJson(nodes, validEdges, skillsetMap, failureGraph);
+    const updatedAt = new Date().toISOString();
+    return { view_json, dsl_json, updatedAt };
+  };
+
   const publishMutation = useMutation({
-    mutationFn: () => workflowsApi.publish(workflowId),
-    onSuccess: () => {
+    mutationFn: async () => {
+      if (hasErrors) return;
+
+      let targetWorkflowId = workflowId;
+      const { view_json, dsl_json, updatedAt } = buildCurrentDraftPayload();
+
+      if (isNewWorkflow) {
+        const name = workflowName.trim() || "Untitled Workflow";
+        const created = await workflowsApi.create({ name });
+        targetWorkflowId = created.workflowId;
+      }
+
+      await saveMutation.mutateAsync({
+        workflowId: targetWorkflowId,
+        payload: {
+          workflowId: targetWorkflowId,
+          dsl_json,
+          view_json,
+          updatedAt
+        }
+      });
+
+      await workflowsApi.publish(targetWorkflowId);
+      return targetWorkflowId;
+    },
+    onSuccess: (targetWorkflowId) => {
+      if (!targetWorkflowId) return;
       setShowPublishConfirm(false);
-      queryClient.invalidateQueries({ queryKey: ["workflow", workflowId] });
+      queryClient.invalidateQueries({ queryKey: ["workflow", targetWorkflowId] });
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
-      router.push(`/monitor/workflow/${workflowId}`);
+      router.push(`/monitor/workflow/${targetWorkflowId}`);
     }
   });
 
@@ -4488,10 +4520,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   );
 
   const handleSave = async () => {
-    const view_json = buildViewJson(nodes, validEdges, canvasBase, zoom, failureGraph);
-    const dsl_json = buildDslJson(nodes, validEdges, skillsetMap, failureGraph);
-    const updatedAt = new Date().toISOString();
-
+    const { view_json, dsl_json, updatedAt } = buildCurrentDraftPayload();
     if (isNewWorkflow) {
       const name = workflowName.trim() || "Untitled Workflow";
       try {
