@@ -4596,6 +4596,293 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     [failureConnectingFrom, failureGraph.edges.length]
   );
 
+  const handleFailureParamChange = useCallback((nodeId: string, key: string, value: string) => {
+    setFailureGraph((prev) => {
+      const retryNode = prev.nodes.find((n) => n.id === nodeId);
+      const isRetryNode = retryNode?.kind === "flow_control.retry";
+      const isRetryTurningOffFailure =
+        isRetryNode && key === "onFailureEnabled" && value === "false";
+
+      let nextNodes = prev.nodes.map((node) => {
+        if (node.id === nodeId) {
+          return { ...node, params: { ...node.params, [key]: value } };
+        }
+        if (
+          isRetryTurningOffFailure &&
+          node.retryOwnerId === nodeId &&
+          node.retryScopeType === "failure"
+        ) {
+          return {
+            ...node,
+            retryOwnerId: null,
+            retryScopeType: null,
+            isRetryScopeEnd: false
+          };
+        }
+        return node;
+      });
+
+      if (isRetryNode && (key === "mainScopeEndId" || key === "failureScopeEndId")) {
+        const scopeType = key === "mainScopeEndId" ? "main" : "failure";
+        nextNodes = recomputeRetryScopeMembership(nextNodes, nodeId, scopeType, prev.edges);
+      }
+
+      let nextEdges = prev.edges;
+      if (key === "onFailureEnabled" && value === "false") {
+        const n = prev.nodes.find((nn) => nn.id === nodeId);
+        if (n?.kind === "flow_control.retry") {
+          nextEdges = prev.edges.filter((e) => !(e.from === nodeId && e.fromPort === "failure"));
+        }
+      }
+
+      return { ...prev, nodes: nextNodes, edges: nextEdges };
+    });
+    setHasUnsavedChanges(true);
+  }, []);
+
+  const handleFailureConditionExpressionFieldChange = useCallback(
+    (
+      nodeId: string,
+      expressionId: string,
+      field: "variable" | "comparisonOperator" | "value",
+      value: string
+    ) => {
+      setFailureGraph((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((node) => {
+          if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
+          const expressions = node.conditionExpressions ?? [createConditionExpression(null)];
+          const nextExpressions = expressions.map((expression) =>
+            expression.id === expressionId ? { ...expression, [field]: value } : expression
+          );
+          return { ...node, conditionExpressions: nextExpressions };
+        })
+      }));
+      setHasUnsavedChanges(true);
+    },
+    []
+  );
+
+  const handleFailureAddConditionExpression = useCallback(
+    (nodeId: string, operator: ConditionOperator) => {
+      setFailureGraph((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((node) => {
+          if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
+          const baseExpressions = normalizeConditionExpressions(node.conditionExpressions ?? []);
+          const nextExpressions = normalizeConditionExpressions([
+            ...baseExpressions,
+            createConditionExpression(operator)
+          ]);
+          const nextNode = { ...node, conditionExpressions: nextExpressions };
+          const { minX, minY, maxX, maxY } = getCanvasBounds(
+            FAILURE_CANVAS_BASE,
+            getNodeHeight(nextNode, nodeTypeConfig)
+          );
+          return {
+            ...nextNode,
+            position: {
+              x: clamp(node.position.x, minX, maxX),
+              y: clamp(node.position.y, minY, maxY)
+            }
+          };
+        })
+      }));
+      setHasUnsavedChanges(true);
+    },
+    [nodeTypeConfig]
+  );
+
+  const handleFailureRemoveConditionExpression = useCallback(
+    (nodeId: string, expressionId: string) => {
+      setFailureGraph((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((node) => {
+          if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
+          const remaining = (node.conditionExpressions ?? []).filter(
+            (expression) => expression.id !== expressionId
+          );
+          const nextExpressions = normalizeConditionExpressions(remaining);
+          const nextNode = { ...node, conditionExpressions: nextExpressions };
+          const { minX, minY, maxX, maxY } = getCanvasBounds(
+            FAILURE_CANVAS_BASE,
+            getNodeHeight(nextNode, nodeTypeConfig)
+          );
+          return {
+            ...nextNode,
+            position: {
+              x: clamp(node.position.x, minX, maxX),
+              y: clamp(node.position.y, minY, maxY)
+            }
+          };
+        })
+      }));
+      setHasUnsavedChanges(true);
+    },
+    [nodeTypeConfig]
+  );
+
+  const handleFailureVariableRowChange = useCallback(
+    (nodeId: string, rowId: string, field: "name" | "value", value: string) => {
+      setFailureGraph((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((node) => {
+          if (
+            node.id !== nodeId ||
+            (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
+          )
+            return node;
+          const rows = node.variableRows ?? [];
+          const nextRows = rows.map((row) =>
+            row.id === rowId ? { ...row, [field]: value } : row
+          );
+          return { ...node, variableRows: nextRows };
+        })
+      }));
+      setHasUnsavedChanges(true);
+    },
+    []
+  );
+
+  const handleFailureAddVariableRow = useCallback(
+    (nodeId: string, valueType: VariableValueType) => {
+      setFailureGraph((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((node) => {
+          if (
+            node.id !== nodeId ||
+            (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
+          )
+            return node;
+          const rows = node.variableRows ?? [];
+          const nextRows = [
+            ...rows,
+            {
+              id: `var-${nextVariableRowIndex.current++}`,
+              name: "",
+              value: "",
+              valueType
+            }
+          ];
+          const nextNode = { ...node, variableRows: nextRows };
+          const { minX, minY, maxX, maxY } = getCanvasBounds(
+            FAILURE_CANVAS_BASE,
+            getNodeHeight(nextNode, nodeTypeConfig)
+          );
+          return {
+            ...nextNode,
+            position: {
+              x: clamp(node.position.x, minX, maxX),
+              y: clamp(node.position.y, minY, maxY)
+            }
+          };
+        })
+      }));
+      setHasUnsavedChanges(true);
+    },
+    [nodeTypeConfig]
+  );
+
+  const handleFailureRemoveVariableRow = useCallback(
+    (nodeId: string, rowId: string) => {
+      setFailureGraph((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((node) => {
+          if (
+            node.id !== nodeId ||
+            (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
+          )
+            return node;
+          const rows = node.variableRows ?? [];
+          const nextRows = rows.filter((row) => row.id !== rowId);
+          const nextNode = { ...node, variableRows: nextRows };
+          const { minX, minY, maxX, maxY } = getCanvasBounds(
+            FAILURE_CANVAS_BASE,
+            getNodeHeight(nextNode, nodeTypeConfig)
+          );
+          return {
+            ...nextNode,
+            position: {
+              x: clamp(node.position.x, minX, maxX),
+              y: clamp(node.position.y, minY, maxY)
+            }
+          };
+        })
+      }));
+      setHasUnsavedChanges(true);
+    },
+    [nodeTypeConfig]
+  );
+
+  const handleFailureNameChange = useCallback((nodeId: string, value: string) => {
+    setFailureGraph((prev) => ({
+      ...prev,
+      nodes: prev.nodes.map((node) =>
+        node.id === nodeId ? { ...node, name: value } : node
+      )
+    }));
+    setHasUnsavedChanges(true);
+  }, []);
+
+  const handleFailureRetryScopeEndChange = useCallback((nodeId: string, checked: boolean) => {
+    setFailureGraph((prev) => {
+      const node = prev.nodes.find((n) => n.id === nodeId);
+      const ownerId = node?.retryOwnerId;
+      const scopeType = node?.retryScopeType;
+      if (!ownerId || !scopeType) return prev;
+      const edgesLocal = prev.edges;
+      const nodeMap = new Map(prev.nodes.map((n) => [n.id, n]));
+      const outEdges = new Map<string, { to: string }>();
+      edgesLocal.forEach((e) => {
+        if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, { to: e.to });
+      });
+      const downstreamIds = new Set<string>();
+      let current: string | null = nodeId;
+      while (current) {
+        const nextId: string | undefined = outEdges.get(current)?.to;
+        if (!nextId) break;
+        const nextNode = nodeMap.get(nextId);
+        if (!nextNode || nextNode.retryOwnerId !== ownerId || nextNode.retryScopeType !== scopeType)
+          break;
+        downstreamIds.add(nextId);
+        current = nextId;
+      }
+      let nextNodeIdToAdd: string | null = null;
+      if (!checked) {
+        const immediateNextId = outEdges.get(nodeId)?.to ?? null;
+        if (immediateNextId) {
+          const immediateNext = nodeMap.get(immediateNextId);
+          const alreadyInScope =
+            immediateNext?.retryOwnerId === ownerId && immediateNext?.retryScopeType === scopeType;
+          if (!alreadyInScope && immediateNext && !isForbiddenInRetryScope(immediateNext.kind))
+            nextNodeIdToAdd = immediateNextId;
+        }
+      }
+      const nextNodes = prev.nodes.map((n) => {
+        if (n.id === nodeId) return { ...n, isRetryScopeEnd: checked };
+        if (checked && downstreamIds.has(n.id))
+          return { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false };
+        if (
+          checked &&
+          n.retryOwnerId === ownerId &&
+          n.retryScopeType === scopeType &&
+          n.isRetryScopeEnd
+        )
+          return { ...n, isRetryScopeEnd: false };
+        if (!checked && nextNodeIdToAdd && n.id === nextNodeIdToAdd)
+          return {
+            ...n,
+            retryOwnerId: ownerId,
+            retryScopeType: scopeType,
+            isRetryScopeEnd: true
+          };
+        return n;
+      });
+      return { ...prev, nodes: nextNodes };
+    });
+    setHasUnsavedChanges(true);
+  }, []);
+
   const handleToggleExpand = (nodeId: string) => {
     const target = nodes.find((node) => node.id === nodeId);
     const isContainer = target ? isContainerNode(target) : false;
@@ -6182,8 +6469,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       minHeight: FAILURE_CANVAS_BASE.height
                     }}
                     onMouseDown={(e) => {
-                      // Failure 캔버스 배경 클릭 시 메인 선택만 해제
+                      // Failure 캔버스 배경 클릭 시 메인 선택만 해제 (노드 카드 안은 무시)
                       if (e.button !== 0) return;
+                      const t = e.target as HTMLElement;
+                      if (t.closest("[data-node-card]")) return;
                       e.stopPropagation();
                       setSelectedNode(null);
                       setSelectedEdgeId(null);
@@ -6330,22 +6619,61 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                             onCompleteConnect={() =>
                               handleFailureInputDrop(node.id)
                             }
-                            onParamChange={() => {}}
-                            onConditionExpressionFieldChange={() => {}}
-                            onAddConditionExpression={() => {}}
-                            onRemoveConditionExpression={() => {}}
-                            onVariableRowChange={() => {}}
-                            onAddVariableRow={() => {}}
-                            onRemoveVariableRow={() => {}}
-                            onNameChange={() => {}}
-                            isEditingName={false}
-                            onStartEditName={() => {}}
-                            onFinishEditName={() => {}}
+                            onParamChange={(key, value) =>
+                              handleFailureParamChange(node.id, key, value)
+                            }
+                            onConditionExpressionFieldChange={(
+                              expressionId,
+                              field,
+                              value
+                            ) =>
+                              handleFailureConditionExpressionFieldChange(
+                                node.id,
+                                expressionId,
+                                field,
+                                value
+                              )
+                            }
+                            onAddConditionExpression={(operator) =>
+                              handleFailureAddConditionExpression(node.id, operator)
+                            }
+                            onRemoveConditionExpression={(expressionId) =>
+                              handleFailureRemoveConditionExpression(
+                                node.id,
+                                expressionId
+                              )
+                            }
+                            onVariableRowChange={(rowId, field, value) =>
+                              handleFailureVariableRowChange(
+                                node.id,
+                                rowId,
+                                field,
+                                value
+                              )
+                            }
+                            onAddVariableRow={(valueType) =>
+                              handleFailureAddVariableRow(node.id, valueType)
+                            }
+                            onRemoveVariableRow={(rowId) =>
+                              handleFailureRemoveVariableRow(node.id, rowId)
+                            }
+                            onNameChange={(value) =>
+                              handleFailureNameChange(node.id, value)
+                            }
+                            isEditingName={editingNodeId === node.id}
+                            onStartEditName={() => handleStartEditName(node.id)}
+                            onFinishEditName={handleFinishEditName}
                             onOutputDragStart={() => {}}
                             onOutputDragEnd={() => {}}
                             onInputDragOver={() => {}}
                             onInputDrop={() =>
                               handleFailureInputDrop(node.id)
+                            }
+                            onRetryScopeEndChange={
+                              node.retryScopeType
+                                ? (checked) =>
+                                    handleFailureRetryScopeEndChange(node.id, checked)
+                                : undefined
                             }
                           />
                         </div>
