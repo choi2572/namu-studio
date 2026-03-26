@@ -156,16 +156,6 @@ export default function MonitorWorkflowPage() {
               Edit
             </Button>
             <Button
-              onClick={() => executeMutation.mutate()}
-              disabled={executeMutation.isPending || !isPublished}
-              className="inline-flex items-center gap-2"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
-              </svg>
-              {executeMutation.isPending ? "Starting..." : "Run"}
-            </Button>
-            <Button
               variant="secondary"
               onClick={() => deleteMutation.mutate(workflowId)}
               className="inline-flex items-center gap-2"
@@ -176,7 +166,7 @@ export default function MonitorWorkflowPage() {
                 viewBox="0 0 24 24"
                 strokeWidth={1.5}
                 stroke="currentColor"
-                className="h-4 w-4"
+                className="h-4 w-4 text-red-500"
               >
                 <path
                   strokeLinecap="round"
@@ -185,6 +175,16 @@ export default function MonitorWorkflowPage() {
                 />
               </svg>
               Delete
+            </Button>
+            <Button
+              onClick={() => executeMutation.mutate()}
+              disabled={executeMutation.isPending || !isPublished}
+              className="inline-flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
+              </svg>
+              {executeMutation.isPending ? "Starting..." : "Run"}
             </Button>
           </div>
         </div>
