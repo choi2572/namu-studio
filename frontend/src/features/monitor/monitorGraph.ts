@@ -66,7 +66,7 @@ type DslState = {
   Count?: number;
   RepeatCount?: number;
   StartAt?: string;
-  States?: Array<Record<string, DslState>>;
+  States?: Record<string, DslState> | Array<Record<string, DslState>>;
   // Condition DSL: If 블록 안/밖 모두 지원 (If.Then / If.Else 또는 루트 Else)
   If?: { Condition?: unknown; Then?: string; Else?: string };
   Else?: string;
@@ -175,6 +175,8 @@ function collectNodesAndEdges(
             Object.assign(bodyStates, item as Record<string, DslState>);
           }
         }
+      } else if (isRecord(state.States)) {
+        bodyStates = state.States as Record<string, DslState>;
       } else if (state.Body?.States && isRecord(state.Body.States)) {
         bodyStates = state.Body.States as Record<string, DslState>;
       }
