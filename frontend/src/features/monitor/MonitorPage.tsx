@@ -186,8 +186,11 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
-  const [actionStatusPending, setActionStatusPending] = useState(false);
+  const [actionStatusInFlight, setActionStatusInFlight] = useState<
+    null | "success" | "failure"
+  >(null);
   const [actionStatusToast, setActionStatusToast] = useState<ActionStatusToastState | null>(null);
+  const actionStatusSubmittingRef = useRef(false);
   const replayInitializedRef = useRef(false);
   const terminalRefetchDoneRef = useRef<string | null>(null);
 
@@ -665,6 +668,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return snap?.status === NodeStatus.RUNNING;
   }, [selectedMonitorNode, monitorGraph, displayNodeStates]);
 
+  const actionStatusPending = actionStatusInFlight !== null;
   const actionStatusEnabled =
     !actionStatusPending &&
     (selectedNodeState?.status === NodeStatus.RUNNING ||
@@ -673,7 +677,9 @@ export function MonitorPage({ runId }: MonitorPageProps) {
 
   const submitActionStatus = async (status: "success" | "failure") => {
     if (!actionStatusTargetId || !selectedNodeState) return;
-    setActionStatusPending(true);
+    if (actionStatusSubmittingRef.current) return;
+    actionStatusSubmittingRef.current = true;
+    setActionStatusInFlight(status);
     try {
       const response = await middlewareApi.postWorkflowActionStatus({
         statuses: [{ action_id: actionStatusTargetId, status, reason: "" }]
@@ -710,7 +716,8 @@ export function MonitorPage({ runId }: MonitorPageProps) {
         });
       }
     } finally {
-      setActionStatusPending(false);
+      actionStatusSubmittingRef.current = false;
+      setActionStatusInFlight(null);
     }
   };
 
@@ -870,21 +877,41 @@ export function MonitorPage({ runId }: MonitorPageProps) {
                       type="button"
                       variant="primary"
                       size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-700"
+                      className="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
                       disabled={!actionStatusEnabled}
                       onClick={() => void submitActionStatus("success")}
                     >
-                      Success
+                      {actionStatusInFlight === "success" ? (
+                        <>
+                          <span
+                            className="inline-block size-3.5 shrink-0 rounded-full border-2 border-white/35 border-t-white motion-safe:animate-spin"
+                            aria-hidden
+                          />
+                          Sending…
+                        </>
+                      ) : (
+                        "Success"
+                      )}
                     </Button>
                     <Button
                       type="button"
                       variant="primary"
                       size="sm"
-                      className="bg-red-600 hover:bg-red-700"
+                      className="inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700"
                       disabled={!actionStatusEnabled}
                       onClick={() => void submitActionStatus("failure")}
                     >
-                      Failure
+                      {actionStatusInFlight === "failure" ? (
+                        <>
+                          <span
+                            className="inline-block size-3.5 shrink-0 rounded-full border-2 border-white/35 border-t-white motion-safe:animate-spin"
+                            aria-hidden
+                          />
+                          Sending…
+                        </>
+                      ) : (
+                        "Failure"
+                      )}
                     </Button>
                   </div>
                 </div>

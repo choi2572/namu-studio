@@ -151,8 +151,11 @@ export function LiveRunnerMonitorPage() {
 
   const [feedEvents, setFeedEvents] = useState<RunEvent[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [actionStatusPending, setActionStatusPending] = useState(false);
+  const [actionStatusInFlight, setActionStatusInFlight] = useState<
+    null | "success" | "failure"
+  >(null);
   const [actionStatusToast, setActionStatusToast] = useState<ActionStatusToastState | null>(null);
+  const actionStatusSubmittingRef = useRef(false);
   const [middlewareWsDebug, setMiddlewareWsDebug] = useState<
     Record<string, MiddlewareLiveDebugPatch>
   >({});
@@ -699,6 +702,7 @@ export function LiveRunnerMonitorPage() {
     return snap?.status === NodeStatus.RUNNING;
   }, [selectedMonitorNode, monitorGraph, displayNodeStates]);
 
+  const actionStatusPending = actionStatusInFlight !== null;
   const actionStatusEnabled =
     !actionStatusPending &&
     (selectedNodeState?.status === NodeStatus.RUNNING ||
@@ -707,7 +711,9 @@ export function LiveRunnerMonitorPage() {
 
   const submitActionStatus = async (status: "success" | "failure") => {
     if (!actionStatusTargetId || !selectedNodeState) return;
-    setActionStatusPending(true);
+    if (actionStatusSubmittingRef.current) return;
+    actionStatusSubmittingRef.current = true;
+    setActionStatusInFlight(status);
     try {
       const response = await middlewareApi.postWorkflowActionStatus({
         statuses: [{ action_id: actionStatusTargetId, status, reason: "" }]
@@ -744,7 +750,8 @@ export function LiveRunnerMonitorPage() {
         });
       }
     } finally {
-      setActionStatusPending(false);
+      actionStatusSubmittingRef.current = false;
+      setActionStatusInFlight(null);
     }
   };
 
@@ -916,21 +923,41 @@ export function LiveRunnerMonitorPage() {
                           type="button"
                           variant="primary"
                           size="sm"
-                          className="bg-emerald-600 hover:bg-emerald-700"
+                          className="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
                           disabled={!actionStatusEnabled}
                           onClick={() => void submitActionStatus("success")}
                         >
-                          Success
+                          {actionStatusInFlight === "success" ? (
+                            <>
+                              <span
+                                className="inline-block size-3.5 shrink-0 rounded-full border-2 border-white/35 border-t-white motion-safe:animate-spin"
+                                aria-hidden
+                              />
+                              Sending…
+                            </>
+                          ) : (
+                            "Success"
+                          )}
                         </Button>
                         <Button
                           type="button"
                           variant="primary"
                           size="sm"
-                          className="bg-red-600 hover:bg-red-700"
+                          className="inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700"
                           disabled={!actionStatusEnabled}
                           onClick={() => void submitActionStatus("failure")}
                         >
-                          Failure
+                          {actionStatusInFlight === "failure" ? (
+                            <>
+                              <span
+                                className="inline-block size-3.5 shrink-0 rounded-full border-2 border-white/35 border-t-white motion-safe:animate-spin"
+                                aria-hidden
+                              />
+                              Sending…
+                            </>
+                          ) : (
+                            "Failure"
+                          )}
                         </Button>
                       </div>
                     </div>
