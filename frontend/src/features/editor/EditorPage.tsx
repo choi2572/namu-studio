@@ -785,6 +785,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const EDITOR_NODE_CLIPBOARD_PREFIX = "namu-studio:editor-node:";
+
+function serializeEditorNodeClipboard(node: EditorNode): string {
+  return EDITOR_NODE_CLIPBOARD_PREFIX + JSON.stringify({ v: 1, node });
+}
+
+function parseEditorNodeClipboard(text: string): EditorNode | null {
+  if (!text.startsWith(EDITOR_NODE_CLIPBOARD_PREFIX)) return null;
+  try {
+    const parsed: unknown = JSON.parse(
+      text.slice(EDITOR_NODE_CLIPBOARD_PREFIX.length)
+    );
+    if (!isRecord(parsed) || parsed.v !== 1) return null;
+    const raw = parsed.node;
+    if (!isRecord(raw)) return null;
+    if (typeof raw.id !== "string") return null;
+    if (typeof raw.name !== "string") return null;
+    if (typeof raw.kind !== "string") return null;
+    if (!isRecord(raw.position)) return null;
+    if (typeof raw.position.x !== "number" || typeof raw.position.y !== "number") {
+      return null;
+    }
+    if (!isRecord(raw.params)) return null;
+    return JSON.parse(JSON.stringify(raw)) as EditorNode;
+  } catch {
+    return null;
+  }
+}
+
 function isValidEditorEdge(value: unknown): value is EditorEdge {
   if (!isRecord(value)) return false;
   return (
@@ -4519,6 +4548,65 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     ]
   );
 
+  const buildPastedEditorNode = useCallback(
+    (source: EditorNode): EditorNode => {
+      const index = nextNodeIndex.current++;
+      const newId = `node-${index}`;
+      const nodeHeight = NODE_METRICS.collapsedHeight;
+      const { minX, minY, maxX, maxY } = getCanvasBounds(canvasBase, nodeHeight);
+      const offset = 24;
+      const position = {
+        x: clamp(source.position.x + offset, minX, maxX),
+        y: clamp(source.position.y + offset, minY, maxY)
+      };
+
+      const remappedConditions = (source.conditionExpressions ?? []).map(
+        (expr) => ({
+          ...expr,
+          id: `condition-${nextConditionIndex.current++}`
+        })
+      );
+      const remappedVariableRows = (source.variableRows ?? []).map((row) => ({
+        ...row,
+        id: `var-${nextVariableRowIndex.current++}`
+      }));
+
+      let params = { ...source.params };
+      if (source.kind === "flow_control.retry") {
+        params = {
+          ...params,
+          mainScopeEndId: "",
+          failureScopeEndId: ""
+        };
+      }
+
+      const conditionExpressions =
+        source.kind === "flow_control.condition"
+          ? normalizeConditionExpressions(remappedConditions)
+          : undefined;
+
+      return {
+        ...source,
+        id: newId,
+        position,
+        params,
+        conditionExpressions,
+        variableRows:
+          source.kind === "flow_control.input" ||
+          source.kind === "flow_control.output"
+            ? remappedVariableRows
+            : undefined,
+        containerId: null,
+        containerType: null,
+        branchIndex: null,
+        retryOwnerId: null,
+        retryScopeType: null,
+        isRetryScopeEnd: false
+      };
+    },
+    [canvasBase, normalizeConditionExpressions]
+  );
+
   const handleSave = async () => {
     const { view_json, dsl_json, updatedAt } = buildCurrentDraftPayload();
     if (isNewWorkflow) {
@@ -5417,16 +5505,70 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
       const target = event.target as HTMLElement | null;
-      if (
+      const isTypingTarget =
         target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-      ) {
-        return;
+          target.isContentEditable);
+
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod) {
+        const key = event.key.toLowerCase();
+        if (key === "c" || key === "x" || key === "v") {
+          if (isTypingTarget) return;
+          if (key === "c") {
+            if (!selectedNode) return;
+            const node = nodes.find((n) => n.id === selectedNode);
+            if (!node) return;
+            event.preventDefault();
+            void navigator.clipboard.writeText(serializeEditorNodeClipboard(node));
+            return;
+          }
+          if (key === "x") {
+            if (!selectedNode) return;
+            const node = nodes.find((n) => n.id === selectedNode);
+            if (!node) return;
+            event.preventDefault();
+            void navigator.clipboard.writeText(serializeEditorNodeClipboard(node));
+            handleDeleteNode(selectedNode);
+            return;
+          }
+          event.preventDefault();
+          void (async () => {
+            let text: string;
+            try {
+              text = await navigator.clipboard.readText();
+            } catch {
+              return;
+            }
+            const source = parseEditorNodeClipboard(text);
+            if (!source) return;
+            if (!nodeTypeConfig[source.kind]) return;
+            if (source.kind === "flow_control.vlm" && !ENABLE_VLM_NODES) return;
+            if (source.kind === "flow_control.input") {
+              const existingInput = nodes.find(
+                (n) => n.kind === "flow_control.input"
+              );
+              if (existingInput) {
+                setSelectedNode(existingInput.id);
+                setSelectedEdgeId(null);
+                return;
+              }
+            }
+            const newNode = buildPastedEditorNode(source);
+            setNodes((prev) => [...prev, newNode]);
+            setSelectedNode(newNode.id);
+            setSelectedEdgeId(null);
+            setEditingNodeId(null);
+            setHasUnsavedChanges(true);
+          })();
+          return;
+        }
       }
+
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (isTypingTarget) return;
       if (selectedNode) {
         event.preventDefault();
         handleDeleteNode(selectedNode);
@@ -5439,7 +5581,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleDeleteEdge, handleDeleteNode, selectedEdgeId, selectedNode]);
+  }, [
+    buildPastedEditorNode,
+    handleDeleteEdge,
+    handleDeleteNode,
+    nodeTypeConfig,
+    nodes,
+    selectedEdgeId,
+    selectedNode
+  ]);
 
   const handleAutoLayout = () => {
     if (nodes.length === 0) return;
