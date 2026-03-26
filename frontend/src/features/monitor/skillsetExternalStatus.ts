@@ -5,7 +5,12 @@ function isAllowStatusExternalChangeTrue(s: Skillset): boolean {
   const v = s.allow_status_external_change ?? ext.allowStatusExternalChange;
   if (v === true) return true;
   if (v === 1) return true;
-  if (typeof v === "string" && v.toLowerCase() === "true") return true;
+  if (typeof v === "string") {
+    const normalized = v.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "y") {
+      return true;
+    }
+  }
   return false;
 }
 
