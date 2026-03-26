@@ -1151,7 +1151,7 @@ type ContainerDslPayload = {
   type: ContainerType;
   repeatCount?: number;
   startAt?: string | null;
-  statesArray?: Array<Record<string, Record<string, unknown>>>;
+  states?: Record<string, Record<string, unknown>>;
   branches?: Array<{ StartAt: string | null; States: Record<string, Record<string, unknown>> }>;
 };
 
@@ -1225,7 +1225,7 @@ function buildStateRecords(
         Type: "Repeat",
         RepeatCount: payload?.repeatCount ?? getRepeatCount(node),
         StartAt: payload?.startAt ?? null,
-        States: payload?.statesArray ?? []
+        States: payload?.states ?? {}
       };
       if (next) {
         state.Next = next;
@@ -1368,12 +1368,11 @@ function buildDslJson(
         containerPayloads,
         skillsetMap
       );
-      const statesArray = Object.entries(bodyStates).map(([key, value]) => ({ [key]: value }));
       containerPayloads.set(container.id, {
         type: "repeat",
         repeatCount: getRepeatCount(container),
         startAt: bodyStartNode ? stateNameMap.get(bodyStartNode.id) ?? null : null,
-        statesArray
+        states: bodyStates
       });
       return;
     }
@@ -1572,7 +1571,7 @@ type DslState = {
   Count?: number;
   RepeatCount?: number;
   StartAt?: string;
-  States?: Array<Record<string, DslState>>;
+  States?: Record<string, DslState> | Array<Record<string, DslState>>;
   Parameters?: Record<string, unknown>;
   Choices?: Array<Record<string, unknown>>;
   Expressions?: Array<{ operator?: string | null; expression?: string }>;
@@ -2451,6 +2450,8 @@ function parseDslToEditor(
               Object.assign(bodyStates, item);
             }
           }
+        } else if (isRecord(state.States)) {
+          bodyStates = state.States as Record<string, DslState>;
         } else if (state.Body?.States) {
           bodyStates = state.Body.States;
         }
