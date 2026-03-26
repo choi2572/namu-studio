@@ -3389,6 +3389,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [publishToast, setPublishToast] = useState(false);
+  const [failureFlowToastMessage, setFailureFlowToastMessage] = useState<string | null>(null);
   const [failureGraph, setFailureGraph] = useState<FailureHandlingGraph>(() => {
     const entryId = "failure-entry-1";
     return {
@@ -4534,6 +4535,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const addFailureNode = useCallback(
     (kind: NodeKind, position: { x: number; y: number }) => {
       if (kind === "system.on_failure_entry") return;
+      if (kind.startsWith("flow_control.") && kind !== "flow_control.condition") {
+        setFailureFlowToastMessage(
+          "Failure Handling Flow에서는 Condition 노드만 추가할 수 있습니다."
+        );
+        return;
+      }
       const config = nodeTypeConfig[kind];
       const index = nextFailureNodeIndex.current++;
       const id = `failure-node-${index}`;
@@ -5746,6 +5753,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     return () => window.clearTimeout(id);
   }, [publishToast]);
 
+  useEffect(() => {
+    if (!failureFlowToastMessage) return;
+    const id = window.setTimeout(() => setFailureFlowToastMessage(null), 3000);
+    return () => window.clearTimeout(id);
+  }, [failureFlowToastMessage]);
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-6">
       {showPublishConfirm && (
@@ -5789,6 +5802,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           role="status"
         >
           Workflow published successfully.
+        </div>
+      )}
+      {failureFlowToastMessage && (
+        <div
+          className="fixed bottom-20 right-6 z-50 rounded-lg bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-lg"
+          role="status"
+        >
+          {failureFlowToastMessage}
         </div>
       )}
 
