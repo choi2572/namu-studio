@@ -1,24 +1,22 @@
 {
   "Comment": "Generated from editor - full flow_control coverage with global failure handling",
-  "StartAt": "Input_1",
+  "StartAt": "CheckQuality_1",
   "Inputs": {
-    "target_id": { "Type": "string", "Value": "obj-001" },
-    "quality_score": { "Type": "double", "Value": 0.72 },
-    "dry_run": { "Type": "bool", "Value": false }
+    "Type": "Pass",
+    "Skill": "flow_control.input",
+    "Next": "CheckQuality_1",
+    "Parameters": {
+      "target_id": { "Type": "string", "Value": "obj-001" },
+      "quality_score": { "Type": "double", "Value": 0.72 },
+      "dry_run": { "Type": "bool", "Value": false }
+    }
   },
   "States": {
-    "Input_1": {
-      "Type": "Pass",
-      "Skill": "flow_control.input",
-      "Parameters": {},
-      "Next": "CheckQuality_1",
-      "Label": "Input"
-    },
     "CheckQuality_1": {
       "Type": "Condition",
       "If": {
         "Condition": {
-          "Variable": "$.quality_score",
+          "Variable": 0.72,
           "Operator": ">=",
           "Value": 0.7
         },
@@ -36,7 +34,7 @@
           "Type": "Skill",
           "Skill": "vision.PreprocessFrame",
           "Parameters": {
-            "target": "$.target_id",
+            "target": "obj-001",
             "normalize": true
           },
           "Next": "ValidateStep_1",
@@ -99,7 +97,7 @@
           "Type": "Skill",
           "Skill": "robot.ExecuteAction",
           "Parameters": {
-            "target": "$.target_id",
+            "target": "obj-001",
             "safeMode": true
           },
           "Next": "PostCheck_1",

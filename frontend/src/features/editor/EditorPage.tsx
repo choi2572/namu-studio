@@ -1213,6 +1213,9 @@ function buildStateRecords(
   });
   const states: Record<string, Record<string, unknown>> = {};
   nodes.forEach((node) => {
+    if (node.kind === "flow_control.input") {
+      return;
+    }
     const stateName = stateNameMap.get(node.id);
     if (!stateName) return;
     const outgoing = edgesByFrom.get(node.id) ?? [];
@@ -1229,7 +1232,18 @@ function buildStateRecords(
       const falseTarget = getNext("false");
       const firstExpr = node.conditionExpressions?.[0];
       const variableRaw = firstExpr?.variable?.trim() ?? "";
-      const Variable = variableRaw.startsWith("$") ? variableRaw : `$.${variableRaw || "value"}`;
+      let Variable: string | number | boolean;
+      if (variableRaw.startsWith("$")) {
+        Variable = variableRaw;
+      } else if (variableRaw === "true" || variableRaw === "false") {
+        Variable = variableRaw === "true";
+      } else if (variableRaw === "") {
+        Variable = "";
+      } else {
+        const n = Number(variableRaw);
+        Variable =
+          Number.isFinite(n) && variableRaw === String(n) ? n : variableRaw;
+      }
       const Operator = comparisonOperatorToDsl(firstExpr?.comparisonOperator ?? "==");
       const rawVal = firstExpr?.value ?? "";
       let Value: number | boolean | string;
@@ -1341,7 +1355,7 @@ function buildStateRecords(
             ? node.kind.replace("skill.", "")
             : node.kind;
       state = {
-        Type: node.kind === "flow_control.input" ? "Pass" : "Skill",
+        Type: "Skill",
         Skill: skillName,
         Parameters: node.params
       };
@@ -1448,7 +1462,15 @@ function buildDslJson(
     edges
   );
   const inputNode = topLevelNodes.find((n) => n.kind === "flow_control.input");
-  const inputsRecord: Record<string, { Type: string; Value: number | boolean | string }> = {};
+  const inputNextEdge = inputNode
+    ? topLevelEdges.find((e) => e.from === inputNode.id && e.fromPort === "next")
+    : undefined;
+  const inputNextStateName = inputNextEdge
+    ? stateNameMap.get(inputNextEdge.to)
+    : undefined;
+
+  const inputsParameters: Record<string, { Type: string; Value: number | boolean | string }> =
+    {};
   inputNode?.variableRows?.forEach(({ name, value, valueType }) => {
     if (!name.trim()) return;
     const Type = valueType;
@@ -1470,13 +1492,29 @@ function buildDslJson(
       default:
         Value = value;
     }
-    inputsRecord[name.trim()] = { Type, Value };
+    inputsParameters[name.trim()] = { Type, Value };
   });
-  const hasInputs = Object.keys(inputsRecord).length > 0;
+
+  const workflowStartAt = inputNode
+    ? inputNextStateName
+    : startNode
+      ? stateNameMap.get(startNode.id)
+      : undefined;
+
+  const inputsBlock: Record<string, unknown> | null =
+    inputNode != null
+      ? {
+          Type: "Pass",
+          Skill: "flow_control.input",
+          ...(inputNextStateName ? { Next: inputNextStateName } : {}),
+          Parameters: inputsParameters
+        }
+      : null;
+
   const baseDsl: Record<string, unknown> = {
     Comment: "Generated from editor",
-    StartAt: startNode ? stateNameMap.get(startNode.id) : undefined,
-    ...(hasInputs ? { Inputs: inputsRecord } : {}),
+    StartAt: workflowStartAt,
+    ...(inputsBlock ? { Inputs: inputsBlock } : {}),
     States: states
   };
 
@@ -2220,47 +2258,94 @@ function parseDslToEditor(
   const states = (dslJson as { States?: Record<string, DslState> }).States;
   if (!states || !isRecord(states)) return null;
 
-  const rawInputs = (dslJson as { Inputs?: Record<string, { Type?: unknown; Value?: unknown }> }).Inputs;
-  let varRowIndex = 1;
-  const inputVariableRows: VariableRow[] = isRecord(rawInputs)
-    ? Object.entries(rawInputs)
-        .filter(([name]) => typeof name === "string" && name.trim() !== "")
-        .map(([name, entry]) => {
-          const item = isRecord(entry) ? entry : {};
-          const rawType = item.Type;
-          const valueType: VariableValueType =
-            rawType === "int" || rawType === "integer"
-              ? "int"
-              : rawType === "bool"
-                ? "bool"
-                : rawType === "double"
-                  ? "double"
-                  : rawType === "string"
-                    ? "string"
-                    : "string";
-          const rawValue = item.Value;
-          const value =
-            typeof rawValue === "string"
-              ? rawValue
-              : typeof rawValue === "number"
-                ? String(rawValue)
-                : typeof rawValue === "boolean"
-                  ? rawValue ? "true" : "false"
-                  : "";
-          return {
-            id: `var-${varRowIndex++}`,
-            name: name.trim(),
-            value,
-            valueType
-          };
-        })
-    : [];
+  const rawInputs = (dslJson as { Inputs?: unknown }).Inputs;
+
+  const mapEntryToVariableRow = (
+    name: string,
+    entry: unknown,
+    varRowIndex: { current: number }
+  ): VariableRow | null => {
+    if (!name.trim()) return null;
+    const item = isRecord(entry) ? entry : {};
+    const rawType = item.Type;
+    const valueType: VariableValueType =
+      rawType === "int" || rawType === "integer"
+        ? "int"
+        : rawType === "bool"
+          ? "bool"
+          : rawType === "double"
+            ? "double"
+            : rawType === "string"
+              ? "string"
+              : "string";
+    const rawValue = item.Value;
+    const value =
+      typeof rawValue === "string"
+        ? rawValue
+        : typeof rawValue === "number"
+          ? String(rawValue)
+          : typeof rawValue === "boolean"
+            ? rawValue
+              ? "true"
+              : "false"
+            : "";
+    return {
+      id: `var-${varRowIndex.current++}`,
+      name: name.trim(),
+      value,
+      valueType
+    };
+  };
+
+  const varRowCounter = { current: 1 };
+  let inputVariableRows: VariableRow[] = [];
+  let syntheticInputFromBlock = false;
+  let inputNextFromDsl: string | null = null;
+
+  if (isRecord(rawInputs) && isRecord(rawInputs.Parameters)) {
+    syntheticInputFromBlock = true;
+    inputVariableRows = Object.entries(rawInputs.Parameters)
+      .map(([name, entry]) => mapEntryToVariableRow(name, entry, varRowCounter))
+      .filter((row): row is VariableRow => row != null);
+    inputNextFromDsl =
+      typeof rawInputs.Next === "string" ? rawInputs.Next : null;
+  } else if (isRecord(rawInputs)) {
+    inputVariableRows = Object.entries(rawInputs)
+      .filter(
+        ([name]) =>
+          typeof name === "string" &&
+          name.trim() !== "" &&
+          name !== "Type" &&
+          name !== "Skill" &&
+          name !== "Next" &&
+          name !== "Parameters"
+      )
+      .map(([name, entry]) => mapEntryToVariableRow(name, entry, varRowCounter))
+      .filter((row): row is VariableRow => row != null);
+  }
 
   let nodeIndex = 1;
+  let inputNodeIdForSynthetic: string | null = null;
   let edgeIndex = 1;
   let conditionIndex = 1;
   const nodes: EditorNode[] = [];
   const edges: EditorEdge[] = [];
+
+  if (syntheticInputFromBlock) {
+    inputNodeIdForSynthetic = `node-${nodeIndex++}`;
+    nodes.push({
+      id: inputNodeIdForSynthetic,
+      name: "Inputs",
+      kind: "flow_control.input",
+      position: { x: 0, y: 0 },
+      isExpanded: false,
+      params: {},
+      variableRows: inputVariableRows,
+      containerId: null,
+      containerType: null,
+      branchIndex: null
+    });
+  }
 
   const createNodeKind = (state: DslState, stateName: string): NodeKind => {
     if (state.Type === "Condition") return "flow_control.condition";
@@ -2285,10 +2370,14 @@ function parseDslToEditor(
   const parseStateGroup = (
     groupStates: Record<string, DslState>,
     context?: { containerId?: string; containerType?: ContainerType; branchIndex?: number }
-  ) => {
+  ): Map<string, string> | undefined => {
     const idByState = new Map<string, string>();
     Object.entries(groupStates).forEach(([stateName, state]) => {
       const kind = createNodeKind(state, stateName);
+      if (kind === "flow_control.input" && syntheticInputFromBlock && inputNodeIdForSynthetic) {
+        idByState.set(stateName, inputNodeIdForSynthetic);
+        return;
+      }
       const id = `node-${nodeIndex++}`;
       idByState.set(stateName, id);
       const params = isRecord(state.Parameters)
@@ -2310,7 +2399,13 @@ function parseDslToEditor(
       if (kind === "flow_control.condition") {
         const ifCond = isRecord(state.If) && isRecord(state.If.Condition) ? state.If.Condition : null;
         if (ifCond) {
-          const variable = typeof ifCond.Variable === "string" ? ifCond.Variable.replace(/^\$\.?/, "") : "";
+          const rawVar = (ifCond as { Variable?: unknown }).Variable;
+          const variable =
+            typeof rawVar === "string"
+              ? rawVar
+              : typeof rawVar === "number" || typeof rawVar === "boolean"
+                ? String(rawVar)
+                : "";
           const comparisonOperator = dslOperatorToEditor(typeof ifCond.Operator === "string" ? ifCond.Operator : "Equals");
           const rawVal = ifCond.Value;
           const value =
@@ -2362,7 +2457,12 @@ function parseDslToEditor(
       }
       nodes.push({
         id,
-        name: state.Label ?? stateName,
+        name:
+          kind === "flow_control.input"
+            ? syntheticInputFromBlock
+              ? "Inputs"
+              : (state.Label ?? stateName)
+            : state.Label ?? stateName,
         kind,
         position: { x: 0, y: 0 },
         isExpanded: false,
@@ -2503,9 +2603,43 @@ function parseDslToEditor(
         });
       }
     });
+
+    if (context === undefined) {
+      return idByState;
+    }
+    return undefined;
   };
 
-  parseStateGroup(states);
+  const workflowRootIdByState = parseStateGroup(states);
+
+  if (
+    syntheticInputFromBlock &&
+    inputNodeIdForSynthetic &&
+    workflowRootIdByState
+  ) {
+    const nextName =
+      inputNextFromDsl ??
+      (typeof dslJson.StartAt === "string" ? dslJson.StartAt : null);
+    if (nextName) {
+      const targetId = workflowRootIdByState.get(nextName);
+      if (targetId && targetId !== inputNodeIdForSynthetic) {
+        const alreadyLinked = edges.some(
+          (e) =>
+            e.from === inputNodeIdForSynthetic &&
+            e.to === targetId &&
+            e.fromPort === "next"
+        );
+        if (!alreadyLinked) {
+          edges.push({
+            id: `edge-${edgeIndex++}`,
+            from: inputNodeIdForSynthetic,
+            fromPort: "next",
+            to: targetId
+          });
+        }
+      }
+    }
+  }
 
   let nextNodes = applyImportedLayout(nodes, edges, nodeTypeConfig);
   nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nextNodes));
@@ -4475,11 +4609,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const id = `node-${index}`;
       const config = nodeTypeConfig[kind];
       const name =
-        kind === "flow_control.vlm"
-          ? `VLMPlanner ${index}`
-          : config
-            ? `${config.label} ${index}`
-            : `${kind} ${index}`;
+        kind === "flow_control.input"
+          ? "Inputs"
+          : kind === "flow_control.vlm"
+            ? `VLMPlanner ${index}`
+            : config
+              ? `${config.label} ${index}`
+              : `${kind} ${index}`;
       const params = buildDefaultParams(kind);
       if (kind === "flow_control.repeat" && !params.count) {
         params.count = "1";
