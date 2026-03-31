@@ -1,13 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Namu Studio Icon">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#22c55e" />
-      <stop offset="100%" stop-color="#15803d" />
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+    <linearGradient id="line" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a5b4fc" />
+      <stop offset="100%" stop-color="#67e8f9" />
     </linearGradient>
   </defs>
   <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#bg)" />
   <path
-    d="M19 46V18h8l18 22V18h8v28h-8L27 24v22h-8Z"
-    fill="#f0fdf4"
+    d="M18 42L29 31L37 37L46 24"
+    fill="none"
+    stroke="url(#line)"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
   />
+  <circle cx="18" cy="42" r="3.5" fill="#c7d2fe" />
+  <circle cx="29" cy="31" r="3.5" fill="#c7d2fe" />
+  <circle cx="37" cy="37" r="3.5" fill="#99f6e4" />
+  <circle cx="46" cy="24" r="3.5" fill="#99f6e4" />
 </svg>
