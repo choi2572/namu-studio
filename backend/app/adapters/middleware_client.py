@@ -3,6 +3,7 @@ See docs/middleware-api-spec.md.
 """
 import json
 import logging
+import os
 import threading
 import uuid
 from datetime import datetime
@@ -564,6 +565,8 @@ def run_middleware_monitor_ws(
 
     closed = threading.Event()
 
+    debug_ws = os.getenv("NAMU_MONITOR_WS_DEBUG", "").strip().lower() in ("1", "true", "yes")
+
     def on_message(ws, message: str) -> None:
         try:
             data = json.loads(message)
@@ -571,7 +574,10 @@ def run_middleware_monitor_ws(
             logger.warning("Monitor WS run_id=%s: invalid JSON", run_id)
             return
         msg_type = (data.get("type") or "").strip().lower()
-        logger.debug("Monitor WS run_id=%s type=%s", run_id, msg_type)
+        if debug_ws:
+            logger.info("Monitor WS run_id=%s type=%s payload=%s", run_id, msg_type, json.dumps(data, ensure_ascii=False))
+        else:
+            logger.debug("Monitor WS run_id=%s type=%s", run_id, msg_type)
         try:
             if msg_type == "initial":
                 persist_initial(data)
