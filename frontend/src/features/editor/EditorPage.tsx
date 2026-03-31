@@ -1227,7 +1227,7 @@ function buildInputValuesMapFromNode(
 
 const CONDITION_INPUTS_REF = /^\$\.Inputs\.([A-Za-z_][A-Za-z0-9_]*)$/;
 
-/** Condition Variable/Value: `$.Inputs.x`는 입력 기본값으로 치환, 그 외 `$` 경로는 유지, 리터럴은 숫자·불로 직렬화 */
+/** Condition·Skill 파라미터 문자열: `$.Inputs.x`는 입력 기본값으로 치환, 그 외 `$` 경로는 유지, 리터럴은 숫자·불로 직렬화 */
 function conditionFieldToDslValue(
   raw: string,
   inputValues: Map<string, number | boolean | string> | undefined
@@ -1249,53 +1249,6 @@ function conditionFieldToDslValue(
     }
   }
   return trimmed;
-}
-
-/** view_json 전용: DSL에 넣을 리터럴과 값이 같을 때 입력 이름이 유일하면 `$.Inputs.name`으로 바꿔 저장 */
-function uniqueInputNameForComparable(
-  comparable: string | number | boolean,
-  inputMap: Map<string, number | boolean | string>
-): string | null {
-  const matches: string[] = [];
-  inputMap.forEach((v, name) => {
-    if (v === comparable) matches.push(name);
-  });
-  if (matches.length === 1) return matches[0]!;
-  return null;
-}
-
-function enrichConditionExpressionFieldForView(
-  raw: string,
-  inputMap: Map<string, number | boolean | string>
-): string {
-  if (inputMap.size === 0) return raw;
-  const trimmed = (raw ?? "").trim();
-  if (trimmed === "") return "";
-  if (trimmed.startsWith("$")) return raw;
-  const comparable = conditionFieldToDslValue(trimmed, undefined);
-  const name = uniqueInputNameForComparable(comparable, inputMap);
-  return name ? `$.Inputs.${name}` : raw;
-}
-
-function enrichNodesConditionExpressionsForView(
-  nodes: EditorNode[],
-  inputNode: EditorNode | undefined
-): EditorNode[] {
-  const inputMap = buildInputValuesMapFromNode(inputNode);
-  if (inputMap.size === 0) return nodes;
-  return nodes.map((node) => {
-    if (node.kind !== "flow_control.condition") return node;
-    const exprs = node.conditionExpressions;
-    if (!exprs?.length) return node;
-    return {
-      ...node,
-      conditionExpressions: exprs.map((expr) => ({
-        ...expr,
-        variable: enrichConditionExpressionFieldForView(expr.variable, inputMap),
-        value: enrichConditionExpressionFieldForView(expr.value, inputMap)
-      }))
-    };
-  });
 }
 
 function buildStateRecords(
@@ -1451,10 +1404,16 @@ function buildStateRecords(
           : node.kind.startsWith("skill.")
             ? node.kind.replace("skill.", "")
             : node.kind;
+      const skillParameters = Object.fromEntries(
+        Object.entries(node.params).map(([paramKey, paramVal]) => [
+          paramKey,
+          conditionFieldToDslValue(paramVal, inputValuesForConditions)
+        ])
+      );
       state = {
         Type: "Skill",
         Skill: skillName,
-        Parameters: node.params
+        Parameters: skillParameters
       };
       if (next) {
         state.Next = next;
@@ -1610,7 +1569,11 @@ function buildDslJson(
     return baseDsl;
   }
 
-  const onFailure = buildOnFailureDsl(failureGraph, stateNameMap);
+  const onFailure = buildOnFailureDsl(
+    failureGraph,
+    stateNameMap,
+    inputValuesForConditions
+  );
   if (!onFailure) {
     return baseDsl;
   }
@@ -1623,7 +1586,8 @@ function buildDslJson(
 
 function buildOnFailureDsl(
   failureGraph: FailureHandlingGraph,
-  stateNameMap: Map<string, string>
+  stateNameMap: Map<string, string>,
+  inputValuesForConditions?: Map<string, number | boolean | string>
 ) {
   const { nodes, edges, entryNodeId } = failureGraph;
   if (!nodes.length) return null;
@@ -1657,7 +1621,10 @@ function buildOnFailureDsl(
     failureEdges,
     failureStateNameMap,
     new Map(),
-    undefined
+    undefined,
+    undefined,
+    undefined,
+    inputValuesForConditions
   );
 
   const startStateName = failureStateNameMap.get(startNode.id);
@@ -1694,15 +1661,9 @@ function buildViewJson(
   zoom: number,
   failureGraph: FailureHandlingGraph
 ): EditorViewJson {
-  const inputNode = nodes.find((n) => n.kind === "flow_control.input");
-  const viewNodes = enrichNodesConditionExpressionsForView(nodes, inputNode);
-  const viewFailureNodes = enrichNodesConditionExpressionsForView(
-    failureGraph.nodes,
-    inputNode
-  );
   return {
     version: "v1",
-    nodes: viewNodes,
+    nodes,
     edges,
     canvas: {
       width: canvasBase.width,
@@ -1712,7 +1673,7 @@ function buildViewJson(
     failure: {
       enabled: failureGraph.enabled,
       entryNodeId: failureGraph.entryNodeId,
-      nodes: viewFailureNodes,
+      nodes: failureGraph.nodes,
       edges: failureGraph.edges
     }
   };
