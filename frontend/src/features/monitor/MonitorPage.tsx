@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { middlewareApi, runsApi, skillsetsApi, workflowsApi } from "@/api";
 import { Button } from "@/components/Button";
@@ -153,6 +153,7 @@ function computeTakenBranches(
 }
 
 export function MonitorPage({ runId }: MonitorPageProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const isReplayMode = searchParams.get("mode") === "replay";
@@ -456,7 +457,6 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   };
 
   const isTerminal = runStatus ? isRunTerminal(runStatus) : false;
-  const showReplayControls = isReplayMode || isTerminal;
   const workflowName = snapshot?.workflowName ?? "Loading...";
   const runMeta = snapshot?.run;
   const workflowId = runMeta?.workflowId;
@@ -464,6 +464,17 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   // UI notes: Cancel button only when RUNNING, Replay controls only when finished
   const showCancel = runStatus === RunStatus.RUNNING && !isReplayMode;
   const showReplay = isTerminal || isReplayMode;
+  const showRunFromTerminal = isTerminal && !isReplayMode && Boolean(workflowId);
+
+  const rerunMutation = useMutation({
+    mutationFn: async () => runsApi.startRun(workflowId!),
+    onSuccess: (run) => {
+      router.push(`/monitor/${run.runId}`);
+    },
+    onError: (error) => {
+      console.error("Re-run failed", error);
+    }
+  });
 
   // DSL에서 엣지 정보 추출
   const edges = useMemo(() => {
@@ -764,7 +775,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
                 </Button>
               </Link>
             )}
-            {showReplay && (
+            {isReplayMode && (
               <Button
                 onClick={() => {
                   if (replayIndex >= events.length - 1 && events.length > 0) {
@@ -778,6 +789,18 @@ export function MonitorPage({ runId }: MonitorPageProps) {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
                 </svg>
                 {replayPlaying ? "Pause" : "Play"}
+              </Button>
+            )}
+            {showRunFromTerminal && (
+              <Button
+                onClick={() => rerunMutation.mutate()}
+                disabled={rerunMutation.isPending}
+                className="inline-flex items-center gap-2"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
+                </svg>
+                {rerunMutation.isPending ? "Starting..." : "Run"}
               </Button>
             )}
           </div>
