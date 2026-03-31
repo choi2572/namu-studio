@@ -130,6 +130,16 @@ export type WorkflowRunValidationError = {
 export interface WorkflowsApi {
   list(): Promise<WorkflowListItem[]>;
   create(payload?: { name?: string; description?: string }): Promise<WorkflowListItem>;
+  /** 단일 워크플로우 메타 조회 (name/description 등) */
+  get(workflowId: string): Promise<WorkflowListItem>;
+  /** 워크플로우 메타(name/description) 수정 */
+  update(
+    workflowId: string,
+    payload: {
+      name?: string;
+      description?: string;
+    }
+  ): Promise<WorkflowListItem>;
   getDraft(workflowId: string): Promise<WorkflowDraft>;
   saveDraft(workflowId: string, payload: WorkflowDraft): Promise<WorkflowDraft>;
   validateDraft(workflowId: string): Promise<ValidationError[]>;

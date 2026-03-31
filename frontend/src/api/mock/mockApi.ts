@@ -180,6 +180,26 @@ export const mockWorkflowsApi: WorkflowsApi = {
     ];
     return delay(deepClone(merged));
   },
+
+  async get(workflowId: string): Promise<WorkflowListItem> {
+    const storedFiles = readWorkflowFiles();
+    const stored = storedFiles.find((file) => file.workflowId === workflowId);
+    const base =
+      workflowList.find((item) => item.workflowId === workflowId) ??
+      (stored
+        ? ({
+            workflowId: stored.workflowId,
+            name: stored.fileName,
+            state: "DRAFT",
+            latestVersion: null,
+            latestRun: null
+          } as WorkflowListItem)
+        : null);
+    if (!base) {
+      throw new Error(`Workflow not found: ${workflowId}`);
+    }
+    return delay(deepClone(base));
+  },
   async create(payload?: {
     name?: string;
     description?: string;
@@ -201,6 +221,23 @@ export const mockWorkflowsApi: WorkflowsApi = {
       updatedAt: new Date().toISOString()
     };
     return delay(deepClone(item));
+  },
+
+  async update(
+    workflowId: string,
+    payload: { name?: string; description?: string }
+  ): Promise<WorkflowListItem> {
+    const index = workflowList.findIndex((w) => w.workflowId === workflowId);
+    if (index < 0) {
+      throw new Error(`Workflow not found: ${workflowId}`);
+    }
+    const current = workflowList[index];
+    const updated: WorkflowListItem = {
+      ...current,
+      name: payload.name ?? current.name
+    };
+    workflowList[index] = updated;
+    return delay(deepClone(updated));
   },
   async getDraft(workflowId: string): Promise<WorkflowDraft> {
     const stored = findWorkflowFile(workflowId);

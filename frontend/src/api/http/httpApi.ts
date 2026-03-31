@@ -126,6 +126,13 @@ export const httpWorkflowsApi: WorkflowsApi = {
     return handleResponse<WorkflowListItem[]>(response);
   },
 
+  async get(workflowId: string): Promise<WorkflowListItem> {
+    const url = getApiUrl(`/workflows/${workflowId}`);
+    logApiCall("GET", url);
+    const response = await fetch(url);
+    return handleResponse<WorkflowListItem>(response);
+  },
+
   async create(payload?: {
     name?: string;
     description?: string;
@@ -141,6 +148,22 @@ export const httpWorkflowsApi: WorkflowsApi = {
         name: payload?.name,
         description: payload?.description
       })
+    });
+    return handleResponse<WorkflowListItem>(response);
+  },
+
+  async update(
+    workflowId: string,
+    payload: { name?: string; description?: string }
+  ): Promise<WorkflowListItem> {
+    const url = getApiUrl(`/workflows/${workflowId}`);
+    logApiCall("PATCH", url, payload);
+    const response = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
     });
     return handleResponse<WorkflowListItem>(response);
   },

@@ -3160,7 +3160,7 @@ function NodeCard({
         }}
       >
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-1 min-w-0 group">
             {isEditingName ? (
               <input
                 value={node.name}
@@ -3176,30 +3176,57 @@ function NodeCard({
                 className="flex-1 min-w-0 rounded border border-slate-200 bg-white text-sm font-semibold text-slate-800 focus:border-slate-300 focus:outline-none"
               />
             ) : (
-              <button
-                type="button"
-                // 펼쳐진 상태에서만 이름 더블클릭으로 리네임 가능 + 드래그 제외
-                // 접힌 상태에서는 data-no-drag / cursor-pointer 를 제거해서
-                // 헤더 전체(이름 영역 포함)가 드래그 핸들이 되도록 함
-                {...(node.isExpanded
-                  ? {
-                      "data-no-drag": true,
-                      className:
-                        "cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700 flex-1 min-w-0"
-                    }
-                  : {
-                      className:
-                        "cursor-grab active:cursor-grabbing truncate text-left text-sm font-semibold text-slate-800 flex-1 min-w-0"
-                    })}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  if (!node.isExpanded) return;
-                  onStartEditName();
-                }}
-                title="Double click to rename"
-              >
-                {node.name}
-              </button>
+              <>
+                <button
+                  type="button"
+                  // 펼쳐진 상태에서만 이름 더블클릭으로 리네임 가능 + 드래그 제외
+                  // 접힌 상태에서는 data-no-drag / cursor-pointer 를 제거해서
+                  // 헤더 전체(이름 영역 포함)가 드래그 핸들이 되도록 함
+                  {...(node.isExpanded
+                    ? {
+                        "data-no-drag": true,
+                        className:
+                          "cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700 flex-1 min-w-0"
+                      }
+                    : {
+                        className:
+                          "cursor-grab active:cursor-grabbing truncate text-left text-sm font-semibold text-slate-800 flex-1 min-w-0"
+                      })}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    if (!node.isExpanded) return;
+                    onStartEditName();
+                  }}
+                  title="Double click to rename"
+                >
+                  {node.name}
+                </button>
+                <button
+                  type="button"
+                  data-no-drag
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStartEditName();
+                  }}
+                  className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                  title="이름 변경"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                    className="w-3 h-3"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                    />
+                  </svg>
+                </button>
+              </>
             )}
           </div>
           
@@ -6192,29 +6219,34 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         <div className="min-w-0 flex-1">
           <p className="text-xs text-slate-500">Workflow Editor</p>
           <div className="flex items-center gap-2">
-            {isNewWorkflow && isEditingWorkflowName ? (
+            {isEditingWorkflowName ? (
               <input
                 value={workflowName}
                 onChange={(event) => setWorkflowName(event.target.value)}
-                onBlur={() => {
+                onBlur={async () => {
                   setIsEditingWorkflowName(false);
-                  // TODO: API 호출로 workflow 이름 업데이트
                   if (workflows) {
                     const currentWorkflow = workflows.find(
                       (w) => w.workflowId === workflowId
                     );
                     if (currentWorkflow && workflowName.trim() && workflowName !== currentWorkflow.name) {
-                      // 이름이 변경되었고 유효하면 업데이트
-                      queryClient.setQueryData<typeof workflows>(
-                        ["workflows"],
-                        (old) =>
-                          old?.map((w) =>
-                            w.workflowId === workflowId
-                              ? { ...w, name: workflowName.trim() }
-                              : w
-                          )
-                      );
-                      setOriginalWorkflowName(workflowName.trim());
+                      try {
+                        const updated = await workflowsApi.update(currentWorkflow.workflowId, {
+                          name: workflowName.trim()
+                        });
+                        queryClient.setQueryData<typeof workflows>(
+                          ["workflows"],
+                          (old) =>
+                            old?.map((w) =>
+                              w.workflowId === workflowId ? { ...w, name: updated.name } : w
+                            )
+                        );
+                        setOriginalWorkflowName(updated.name);
+                      } catch (error) {
+                        console.error("Failed to update workflow name", error);
+                        // 실패 시 로컬 이름을 원래 값으로 롤백
+                        setWorkflowName(currentWorkflow.name);
+                      }
                     } else if (!workflowName.trim()) {
                       // 빈 이름이면 원래 값으로 복원
                       setWorkflowName(originalWorkflowName);
@@ -6239,40 +6271,36 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   className="text-xl font-semibold cursor-pointer hover:text-slate-700 select-none"
                   onDoubleClick={(e) => {
                     e.stopPropagation();
-                    if (!isNewWorkflow) return;
                     setIsEditingWorkflowName(true);
                   }}
-                  title={isNewWorkflow ? "더블클릭하여 이름 변경" : "기존 워크플로우의 이름 변경은 추후 지원 예정입니다."}
+                  title="더블클릭하여 이름 변경"
                 >
                   {isLoadingWorkflows ? "Loading..." : (workflowName || activeDraft?.workflowId || "Untitled Workflow")}
                 </h1>
-                {isNewWorkflow && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!isNewWorkflow) return;
-                      setIsEditingWorkflowName(true);
-                    }}
-                    className="cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100"
-                    title="이름 변경"
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditingWorkflowName(true);
+                  }}
+                  className="cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 p-1 rounded hover:bg-slate-100"
+                  title="이름 변경"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                    className="w-4 h-4"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={1.5}
-                      stroke="currentColor"
-                      className="w-4 h-4"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
-                      />
-                    </svg>
-                  </button>
-                )}
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                    />
+                  </svg>
+                </button>
               </div>
             )}
             <StatusBadge status="DRAFT" />
