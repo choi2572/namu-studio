@@ -1193,6 +1193,111 @@ function findStartNode(nodes: EditorNode[], edges: EditorEdge[]) {
   return candidate ?? nodes[0];
 }
 
+/** Input 행 → DSL Condition 등에 넣을 타입이 있는 JSON 값 */
+function typedValueFromInputVariableRow(
+  valueType: VariableValueType,
+  value: string
+): number | boolean | string {
+  switch (valueType) {
+    case "int": {
+      const n = Number.parseInt(value, 10);
+      return Number.isFinite(n) ? n : 0;
+    }
+    case "double": {
+      const n = Number.parseFloat(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    case "bool":
+      return value === "true" || value === "1";
+    default:
+      return value;
+  }
+}
+
+function buildInputValuesMapFromNode(
+  inputNode: EditorNode | undefined
+): Map<string, number | boolean | string> {
+  const map = new Map<string, number | boolean | string>();
+  inputNode?.variableRows?.forEach(({ name, value, valueType }) => {
+    if (!name.trim()) return;
+    map.set(name.trim(), typedValueFromInputVariableRow(valueType, value));
+  });
+  return map;
+}
+
+const CONDITION_INPUTS_REF = /^\$\.Inputs\.([A-Za-z_][A-Za-z0-9_]*)$/;
+
+/** Condition Variable/Value: `$.Inputs.x`는 입력 기본값으로 치환, 그 외 `$` 경로는 유지, 리터럴은 숫자·불로 직렬화 */
+function conditionFieldToDslValue(
+  raw: string,
+  inputValues: Map<string, number | boolean | string> | undefined
+): string | number | boolean {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") return "";
+  if (trimmed.startsWith("$")) {
+    const m = trimmed.match(CONDITION_INPUTS_REF);
+    if (m && inputValues?.has(m[1])) {
+      return inputValues.get(m[1])!;
+    }
+    return trimmed;
+  }
+  if (trimmed === "true" || trimmed === "false") return trimmed === "true";
+  const n = Number(trimmed);
+  if (Number.isFinite(n) && trimmed !== "") {
+    if (/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+      return n;
+    }
+  }
+  return trimmed;
+}
+
+/** view_json 전용: DSL에 넣을 리터럴과 값이 같을 때 입력 이름이 유일하면 `$.Inputs.name`으로 바꿔 저장 */
+function uniqueInputNameForComparable(
+  comparable: string | number | boolean,
+  inputMap: Map<string, number | boolean | string>
+): string | null {
+  const matches: string[] = [];
+  inputMap.forEach((v, name) => {
+    if (v === comparable) matches.push(name);
+  });
+  if (matches.length === 1) return matches[0]!;
+  return null;
+}
+
+function enrichConditionExpressionFieldForView(
+  raw: string,
+  inputMap: Map<string, number | boolean | string>
+): string {
+  if (inputMap.size === 0) return raw;
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") return "";
+  if (trimmed.startsWith("$")) return raw;
+  const comparable = conditionFieldToDslValue(trimmed, undefined);
+  const name = uniqueInputNameForComparable(comparable, inputMap);
+  return name ? `$.Inputs.${name}` : raw;
+}
+
+function enrichNodesConditionExpressionsForView(
+  nodes: EditorNode[],
+  inputNode: EditorNode | undefined
+): EditorNode[] {
+  const inputMap = buildInputValuesMapFromNode(inputNode);
+  if (inputMap.size === 0) return nodes;
+  return nodes.map((node) => {
+    if (node.kind !== "flow_control.condition") return node;
+    const exprs = node.conditionExpressions;
+    if (!exprs?.length) return node;
+    return {
+      ...node,
+      conditionExpressions: exprs.map((expr) => ({
+        ...expr,
+        variable: enrichConditionExpressionFieldForView(expr.variable, inputMap),
+        value: enrichConditionExpressionFieldForView(expr.value, inputMap)
+      }))
+    };
+  });
+}
+
 function buildStateRecords(
   nodes: EditorNode[],
   edges: EditorEdge[],
@@ -1200,7 +1305,8 @@ function buildStateRecords(
   containerPayloads?: Map<string, ContainerDslPayload>,
   skillsetMap?: Map<string, import("@/domain/types").Skillset>,
   allNodes?: EditorNode[],
-  allEdges?: EditorEdge[]
+  allEdges?: EditorEdge[],
+  inputValuesForConditions?: Map<string, number | boolean | string>
 ) {
   const fullNodes = allNodes ?? nodes;
   const fullEdges = allEdges ?? edges;
@@ -1232,27 +1338,16 @@ function buildStateRecords(
       const falseTarget = getNext("false");
       const firstExpr = node.conditionExpressions?.[0];
       const variableRaw = firstExpr?.variable?.trim() ?? "";
-      let Variable: string | number | boolean;
-      if (variableRaw.startsWith("$")) {
-        Variable = variableRaw;
-      } else if (variableRaw === "true" || variableRaw === "false") {
-        Variable = variableRaw === "true";
-      } else if (variableRaw === "") {
-        Variable = "";
-      } else {
-        const n = Number(variableRaw);
-        Variable =
-          Number.isFinite(n) && variableRaw === String(n) ? n : variableRaw;
-      }
       const Operator = comparisonOperatorToDsl(firstExpr?.comparisonOperator ?? "==");
-      const rawVal = firstExpr?.value ?? "";
-      let Value: number | boolean | string;
-      if (rawVal === "true" || rawVal === "false") {
-        Value = rawVal === "true";
-      } else {
-        const n = Number(rawVal);
-        Value = Number.isFinite(n) ? n : rawVal;
-      }
+      const Variable = conditionFieldToDslValue(
+        variableRaw,
+        inputValuesForConditions
+      );
+      const valueRaw = firstExpr?.value ?? "";
+      const Value = conditionFieldToDslValue(
+        valueRaw,
+        inputValuesForConditions
+      );
       state = {
         Type: "Condition",
         If: {
@@ -1305,7 +1400,8 @@ function buildStateRecords(
         fullEdges,
         stateNameMap,
         containerPayloadsMap,
-        skillsetMap
+        skillsetMap,
+        inputValuesForConditions
       );
       const failureScope = onFailureEnabled
         ? buildRetryScopeSubflow(
@@ -1315,7 +1411,8 @@ function buildStateRecords(
             fullEdges,
             stateNameMap,
             containerPayloadsMap,
-            skillsetMap
+            skillsetMap,
+            inputValuesForConditions
           )
         : null;
       const maxAttempts = Math.max(
@@ -1392,6 +1489,8 @@ function buildDslJson(
     (edge) => topLevelNodeIds.has(edge.from) && topLevelNodeIds.has(edge.to)
   );
   const stateNameMap = buildStateNameMap(nodes);
+  const inputNode = topLevelNodes.find((n) => n.kind === "flow_control.input");
+  const inputValuesForConditions = buildInputValuesMapFromNode(inputNode);
   const containerPayloads = new Map<string, ContainerDslPayload>();
 
   containerNodes.forEach((container) => {
@@ -1409,7 +1508,10 @@ function buildDslJson(
         bodyEdges,
         stateNameMap,
         containerPayloads,
-        skillsetMap
+        skillsetMap,
+        undefined,
+        undefined,
+        inputValuesForConditions
       );
       containerPayloads.set(container.id, {
         type: "repeat",
@@ -1436,7 +1538,10 @@ function buildDslJson(
         branchEdges,
         stateNameMap,
         containerPayloads,
-        skillsetMap
+        skillsetMap,
+        undefined,
+        undefined,
+        inputValuesForConditions
       );
       return {
         StartAt: branchStartNode
@@ -1459,9 +1564,9 @@ function buildDslJson(
     containerPayloads,
     skillsetMap,
     nodes,
-    edges
+    edges,
+    inputValuesForConditions
   );
-  const inputNode = topLevelNodes.find((n) => n.kind === "flow_control.input");
   const inputNextEdge = inputNode
     ? topLevelEdges.find((e) => e.from === inputNode.id && e.fromPort === "next")
     : undefined;
@@ -1474,24 +1579,7 @@ function buildDslJson(
   inputNode?.variableRows?.forEach(({ name, value, valueType }) => {
     if (!name.trim()) return;
     const Type = valueType;
-    let Value: number | boolean | string;
-    switch (valueType) {
-      case "int": {
-        const n = Number.parseInt(value, 10);
-        Value = Number.isFinite(n) ? n : 0;
-        break;
-      }
-      case "double": {
-        const n = Number.parseFloat(value);
-        Value = Number.isFinite(n) ? n : 0;
-        break;
-      }
-      case "bool":
-        Value = value === "true" || value === "1";
-        break;
-      default:
-        Value = value;
-    }
+    const Value = typedValueFromInputVariableRow(valueType, value);
     inputsParameters[name.trim()] = { Type, Value };
   });
 
@@ -1606,9 +1694,15 @@ function buildViewJson(
   zoom: number,
   failureGraph: FailureHandlingGraph
 ): EditorViewJson {
+  const inputNode = nodes.find((n) => n.kind === "flow_control.input");
+  const viewNodes = enrichNodesConditionExpressionsForView(nodes, inputNode);
+  const viewFailureNodes = enrichNodesConditionExpressionsForView(
+    failureGraph.nodes,
+    inputNode
+  );
   return {
     version: "v1",
-    nodes,
+    nodes: viewNodes,
     edges,
     canvas: {
       width: canvasBase.width,
@@ -1618,7 +1712,7 @@ function buildViewJson(
     failure: {
       enabled: failureGraph.enabled,
       entryNodeId: failureGraph.entryNodeId,
-      nodes: failureGraph.nodes,
+      nodes: viewFailureNodes,
       edges: failureGraph.edges
     }
   };
@@ -1853,7 +1947,8 @@ function buildRetryScopeSubflow(
   edges: EditorEdge[],
   stateNameMap: Map<string, string>,
   containerPayloads: Map<string, ContainerDslPayload>,
-  skillsetMap?: Map<string, import("@/domain/types").Skillset>
+  skillsetMap?: Map<string, import("@/domain/types").Skillset>,
+  inputValuesForConditions?: Map<string, number | boolean | string>
 ): { startAt: string | null; states: Record<string, Record<string, unknown>> } {
   const scopeNodeIds = getRetryScopeNodeIds(retryNodeId, scopeType, nodes, edges);
   if (scopeNodeIds.size === 0) return { startAt: null, states: {} };
@@ -1868,7 +1963,10 @@ function buildRetryScopeSubflow(
     scopeEdges,
     stateNameMap,
     containerPayloads,
-    skillsetMap
+    skillsetMap,
+    undefined,
+    undefined,
+    inputValuesForConditions
   );
   const startAt = stateNameMap.get(startId) ?? null;
   return { startAt, states };
