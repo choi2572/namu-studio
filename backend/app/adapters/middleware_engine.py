@@ -142,7 +142,13 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
         pass
 
     def reconcile_stale_run(self, run: Run) -> bool:
-        """If middleware runner_status is idle but run is still RUNNING/WAITING, mark run CANCELED."""
+        """
+        Reconcile a potentially stale run when starting a new one.
+
+        If the middleware runner is idle but this run is still RUNNING/WAITING in the DB,
+        try to fetch workflow information from middleware first and mark the run terminal
+        (SUCCESS/FAILED/CANCELED) based on that. As a fallback, mark it CANCELED.
+        """
         try:
             resp = self.client.get_runner_status()
             runner_status = (resp.get("runner_status") or "").lower()
@@ -151,15 +157,64 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
         except Exception as e:
             logger.warning("Reconcile: get_runner_status failed: %s", e)
             return False
+
         run_id = run.run_id
         run = self.run_repo.get(run_id)
         if not run or run.status not in (RunStatus.RUNNING, RunStatus.WAITING):
             return False
+
+        workflow_id = getattr(run, "middleware_workflow_id", None)
+
+        # 1) 우선 미들웨어 workflow info로 실제 최종 상태를 확인해 본다.
+        if workflow_id:
+            try:
+                info = self.client.get_workflow_info(workflow_id)
+                status = (info.get("status") or "").lower()
+                if status in ("succeeded", "failed", "cancelled", "canceled"):
+                    if status == "succeeded":
+                        run.status = RunStatus.SUCCESS
+                    elif status in ("failed", "failure", "error"):
+                        run.status = RunStatus.FAILED
+                        run.failure_code = run.failure_code or "MIDDLEWARE_FAILED"
+                        run.failure_message = run.failure_message or info.get("message") or "Workflow failed"
+                    else:
+                        run.status = RunStatus.CANCELED
+                    run.finished_at = datetime.utcnow()
+                    self.run_repo.update(run)
+
+                    import uuid
+                    from app.domain.models import RunEvent
+
+                    seq = (self.run_event_repo.get_max_seq(run_id) or 0) + 1
+                    self.run_event_repo.create(
+                        RunEvent(
+                            event_id=str(uuid.uuid4()),
+                            run_id=run_id,
+                            seq=seq,
+                            timestamp=datetime.utcnow(),
+                            event_type="RUN_CANCELED" if run.status == RunStatus.CANCELED else "RUN_COMPLETED",
+                            state_name=None,
+                            payload_json={"source": "reconcile_stale_run", "middleware_status": status},
+                        )
+                    )
+                    logger.info(
+                        "Reconciled stale run %s via workflow_info (status=%s, marked %s)",
+                        run_id,
+                        status,
+                        run.status.name,
+                    )
+                    return True
+            except Exception as e:
+                logger.warning("Reconcile: get_workflow_info(%s) failed: %s", workflow_id, e)
+
+        # 2) workflow info에서도 터미널이 아니거나 정보를 얻지 못한 경우, 보수적으로 CANCELED 처리.
         run.status = RunStatus.CANCELED
         run.finished_at = datetime.utcnow()
         self.run_repo.update(run)
+
         import uuid
         from app.domain.models import RunEvent
+
         seq = (self.run_event_repo.get_max_seq(run_id) or 0) + 1
         self.run_event_repo.create(
             RunEvent(
@@ -169,7 +224,7 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
                 timestamp=datetime.utcnow(),
                 event_type="RUN_CANCELED",
                 state_name=None,
-                payload_json={"source": "reconcile_stale_run"},
+                payload_json={"source": "reconcile_stale_run", "middleware_status": "unknown"},
             )
         )
         logger.info("Reconciled stale run %s (middleware idle, marked CANCELED)", run_id)

@@ -16,7 +16,7 @@ import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/cn";
-import { getMonitorWebSocketUrl } from "@/lib/middlewareWsUrl";
+import { getMiddlewareHttpBaseForBrowser, getMonitorWebSocketUrl } from "@/lib/middlewareWsUrl";
 import { pathIdToApiStateName } from "@/lib/ids";
 import { formatDuration } from "@/lib/format";
 import { NodeStatus, RunEvent, RunStatus } from "@/domain/types";
@@ -167,6 +167,7 @@ export function LiveRunnerMonitorPage() {
   const dslJsonRef = useRef<Record<string, unknown> | null>(null);
   const graphPatchesRef = useRef<GraphPatchPayload[]>([]);
   const lastRunnerStatusRef = useRef<RunnerStatusResponse | null>(null);
+  const runStatusForDagRef = useRef<RunStatus | null>(null);
 
   const disconnectedTimerRef = useRef<number | null>(null);
   const wsErrorTimerRef = useRef<number | null>(null);
@@ -186,6 +187,10 @@ export function LiveRunnerMonitorPage() {
   useEffect(() => {
     lastRunnerStatusRef.current = lastRunnerStatus;
   }, [lastRunnerStatus]);
+
+  useEffect(() => {
+    runStatusForDagRef.current = runStatusForDag;
+  }, [runStatusForDag]);
 
   useEffect(() => {
     // UI 깜빡임 방지: connected 상태였다가 잠깐 끊기면 disconnected를 바로 표시하지 않습니다.
@@ -345,6 +350,53 @@ export function LiveRunnerMonitorPage() {
       }
     },
     [applyDslAndNodes, resolveViewJson]
+  );
+
+  const reconcileWorkflowCompletion = useCallback(
+    async (workflowId: string) => {
+      try {
+        const base = getMiddlewareHttpBaseForBrowser();
+        const url = `${base}/api/v1/workflows/${encodeURIComponent(workflowId)}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          return;
+        }
+        const info = (await res.json()) as {
+          workflow_id?: string;
+          status?: string;
+          current_node?: string;
+          progress?: RunnerWorkflowInfo["progress"];
+          started_at?: string;
+          updated_at?: string;
+          node_history?: MiddlewareNodeHistoryItem[];
+        };
+        const s = String(info.status || "").toLowerCase();
+        let finalStatus: RunStatus;
+        if (s === "failed" || s === "failure" || s === "error") {
+          finalStatus = RunStatus.FAILED;
+        } else if (s === "cancelled" || s === "canceled") {
+          finalStatus = RunStatus.CANCELED;
+        } else {
+          finalStatus = RunStatus.SUCCESS;
+        }
+        setRunStatusForDag(finalStatus);
+
+        const wfInfo: RunnerWorkflowInfo = {
+          workflow_id: info.workflow_id ?? workflowId,
+          current_node: info.current_node,
+          progress: info.progress,
+          started_at: info.started_at ?? "",
+          updated_at: info.updated_at ?? "",
+          node_history: info.node_history ?? [],
+          execution_stats: {}
+        };
+
+        setNodeStates((prev) => applyRunnerPollToNodeStates(prev, wfInfo));
+      } catch {
+        // 모니터 UI 보정용이므로 실패 시 무시
+      }
+    },
+    []
   );
 
   const loadWorkflowDslRef = useRef(loadWorkflowDsl);
@@ -529,7 +581,22 @@ export function LiveRunnerMonitorPage() {
           if (cancelled) return;
           setLastRunnerStatus(rs);
 
-          if (!runnerStatusIndicatesActiveWorkflow(rs)) {
+          const prev = lastRunnerStatusRef.current;
+          const prevActive = runnerStatusIndicatesActiveWorkflow(prev);
+          const prevWid = prev?.workflow?.workflow_id;
+          const currentActive = runnerStatusIndicatesActiveWorkflow(rs);
+          const currentWid = rs.workflow?.workflow_id;
+
+          if (
+            prevActive &&
+            prevWid &&
+            (!currentActive || currentWid !== prevWid) &&
+            runStatusForDagRef.current === RunStatus.RUNNING
+          ) {
+            void reconcileWorkflowCompletion(prevWid);
+          }
+
+          if (!currentActive) {
             // Idle after having run something: keep the last loaded graph on screen.
             // Only reset when user hasn't loaded any workflow yet.
             return;

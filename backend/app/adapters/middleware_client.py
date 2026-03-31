@@ -580,12 +580,24 @@ def run_middleware_monitor_ws(
             elif msg_type == "workflow_completed":
                 persist_workflow_completed(data)
                 closed.set()
+                try:
+                    ws.close()
+                except Exception:
+                    pass
             elif msg_type == "workflow_cancelled":
                 persist_workflow_completed(data)
                 closed.set()
+                try:
+                    ws.close()
+                except Exception:
+                    pass
             elif msg_type == "error":
                 persist_error(data)
                 closed.set()
+                try:
+                    ws.close()
+                except Exception:
+                    pass
             elif msg_type == "feedback":
                 persist_feedback(data)
             elif msg_type == "graph_patch":
