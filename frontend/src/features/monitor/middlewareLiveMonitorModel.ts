@@ -133,6 +133,74 @@ export function applyRunnerPollToNodeStates(
   });
 }
 
+function isTerminalNodeStatus(s: NodeStatus): boolean {
+  return (
+    s === NodeStatus.SUCCEEDED ||
+    s === NodeStatus.FAILED ||
+    s === NodeStatus.CANCELED ||
+    s === NodeStatus.SKIPPED
+  );
+}
+
+/**
+ * Workflow terminal 이벤트 처리용 보정.
+ * WS에서 `node_status_change`가 누락되더라도, RUNNING/WAITING 노드를
+ * workflow terminal 결과에 맞춰 강제로 마감한다.
+ */
+export function applyTerminalWorkflowToNodeStates(
+  nodes: NodeStateSnapshot[],
+  wf: RunnerWorkflowInfo,
+  finalRunStatus: RunStatus
+): NodeStateSnapshot[] {
+  const completed = new Set((wf.progress?.completed_states ?? []).filter(Boolean) as string[]);
+  const pending = new Set((wf.progress?.pending_states ?? []).filter(Boolean) as string[]);
+
+  // node_history가 있으면 "정확한 종료 상태"를 우선한다.
+  // 단, node_history가 RUNNING 같은 미종료 상태로 남아있을 수 있으니
+  // 그 경우에는 terminal 보정(아래 completed/pending 기반)을 덮어쓴다.
+  const historyStatusByNodeName = new Map<string, NodeStatus>();
+  for (const h of wf.node_history ?? []) {
+    const name = h.node_name || h.name;
+    if (!name) continue;
+    const mapped = mapMiddlewareNodeStatus(h.status);
+    if (isTerminalNodeStatus(mapped)) {
+      historyStatusByNodeName.set(name, mapped);
+    }
+  }
+
+  const pendingStatusForRun =
+    finalRunStatus === RunStatus.CANCELED
+      ? NodeStatus.CANCELED
+      : finalRunStatus === RunStatus.FAILED
+        ? NodeStatus.SKIPPED
+        : NodeStatus.SUCCEEDED;
+
+  const defaultStatusForRun =
+    finalRunStatus === RunStatus.CANCELED
+      ? NodeStatus.CANCELED
+      : finalRunStatus === RunStatus.FAILED
+        ? NodeStatus.FAILED
+        : NodeStatus.SUCCEEDED;
+
+  return nodes.map((n) => {
+    const fromHistory = historyStatusByNodeName.get(n.stateName);
+    if (fromHistory) return { ...n, status: fromHistory };
+
+    if (pending.has(n.stateName)) {
+      return { ...n, status: pendingStatusForRun };
+    }
+
+    if (completed.has(n.stateName)) {
+      // completed_states는 보통 성공/완료된 상태이므로 SUCCEEDED로 마감한다.
+      // 실패 노드는 node_history에 FAILED가 찍히는 케이스가 많아, 그 경우는 위 history 우선으로 처리된다.
+      return { ...n, status: NodeStatus.SUCCEEDED };
+    }
+
+    // completed/pending에 없으면(스펙 불일치) 보수적으로 run terminal에 맞게 마감한다.
+    return { ...n, status: defaultStatusForRun };
+  });
+}
+
 export function applyNodeStatusChangeMessage(
   prev: NodeStateSnapshot[],
   msg: Record<string, unknown>,

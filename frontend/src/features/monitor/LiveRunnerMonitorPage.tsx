@@ -42,6 +42,7 @@ import {
 } from "@/features/monitor/ActionStatusToast";
 import {
   applyNodeStatusChangeMessage,
+  applyTerminalWorkflowToNodeStates,
   applyRunnerPollToNodeStates,
   buildLiveNodeStatesFromInitial,
   extractNodeHistoryFromInitialPayload,
@@ -328,7 +329,7 @@ export function LiveRunnerMonitorPage() {
   );
 
   const reconcileWorkflowCompletion = useCallback(
-    async (workflowId: string) => {
+    async (workflowId: string, finalRunStatusOverride?: RunStatus) => {
       try {
         const base = getMiddlewareHttpBaseForBrowser();
         const url = `${base}/api/v1/workflows/${encodeURIComponent(workflowId)}`;
@@ -354,6 +355,9 @@ export function LiveRunnerMonitorPage() {
         } else {
           finalStatus = RunStatus.SUCCESS;
         }
+        if (finalRunStatusOverride) {
+          finalStatus = finalRunStatusOverride;
+        }
         setRunStatusForDag(finalStatus);
 
         const wfInfo: RunnerWorkflowInfo = {
@@ -366,7 +370,7 @@ export function LiveRunnerMonitorPage() {
           execution_stats: {}
         };
 
-        setNodeStates((prev) => applyRunnerPollToNodeStates(prev, wfInfo));
+        setNodeStates((prev) => applyTerminalWorkflowToNodeStates(prev, wfInfo, finalStatus));
       } catch {
         // 모니터 UI 보정용이므로 실패 시 무시
       }
@@ -529,9 +533,13 @@ export function LiveRunnerMonitorPage() {
 
       if (type === "workflow_completed" || type === "workflow_cancelled") {
         if (msgWid && currentId && msgWid !== currentId) return;
-        setRunStatusForDag(
-          type === "workflow_cancelled" ? RunStatus.CANCELED : workflowCompletedRunStatus(data)
-        );
+        const wid = msgWid ?? currentId;
+        const finalStatus =
+          type === "workflow_cancelled" ? RunStatus.CANCELED : workflowCompletedRunStatus(data);
+        if (wid) {
+          setRunStatusForDag(finalStatus);
+          void reconcileWorkflowCompletion(wid, finalStatus);
+        }
         return;
       }
 
