@@ -282,6 +282,11 @@ def _apply_node_status_change(
     run_event_repo,
 ) -> None:
     """Handle node_status_change: persist event and update node_run."""
+    run = run_repo.get(run_id)
+    if run and run.status in (RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELED):
+        # terminal 이후에는 스펙상/네트워크 지연으로 node_status_change가 늦게 도착할 수 있는데,
+        # 이게 terminal 보정을 다시 RUNNING으로 덮어쓰는 것을 방지한다.
+        return
     node_name = payload.get("node_name")
     if not node_name:
         return
