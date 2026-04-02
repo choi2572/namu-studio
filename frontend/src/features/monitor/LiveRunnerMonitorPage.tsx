@@ -896,6 +896,12 @@ export function LiveRunnerMonitorPage() {
     !dslJson &&
     !runnerStatusIndicatesActiveWorkflow(lastRunnerStatus);
 
+  /** GET /runner/status 기준으로 액티브 워크플로가 없으면 DAG에서 남은 RUNNING도 회색 처리 */
+  const runnerPollSaysNoActiveWorkflow = useMemo(
+    () => lastRunnerStatus != null && !runnerStatusIndicatesActiveWorkflow(lastRunnerStatus),
+    [lastRunnerStatus]
+  );
+
   const connectionLabel =
     displayWsReadyState === WebSocket.CONNECTING || displayWsReadyState === null
       ? "Connecting…"
@@ -973,9 +979,14 @@ export function LiveRunnerMonitorPage() {
                     onSelectNode={setSelectedNode}
                     edges={[]}
                     runStatus={runStatusForDag}
+                    forceEndedNodeAppearance={runnerPollSaysNoActiveWorkflow}
                     viewJson={viewJson ?? undefined}
                     monitorGraph={monitorGraph ?? undefined}
-                    shouldAutoFocusRunningNode={runStatusForDag === RunStatus.RUNNING}
+                    shouldAutoFocusRunningNode={
+                      runStatusForDag === RunStatus.RUNNING &&
+                      (lastRunnerStatus == null ||
+                        runnerStatusIndicatesActiveWorkflow(lastRunnerStatus))
+                    }
                     takenBranchByConditionPathId={takenBranchByConditionPathId}
                   />
                 </div>

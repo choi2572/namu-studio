@@ -62,6 +62,11 @@ type DagViewProps = {
   onSelectNode: (idOrStateName: string) => void;
   edges?: DagEdge[];
   runStatus?: RunStatus | null;
+  /**
+   * Runner/폴링 등에서 "지금은 실행 중이 아님"이 확정됐는데 UI 노드만 RUNNING으로 남은 경우,
+   * 터미널 run 배지 없이도 RUNNING을 회색(NOT_RUN)으로 보이게 한다.
+   */
+  forceEndedNodeAppearance?: boolean;
   viewJson?: Record<string, unknown> | null;
   /** When set, render with container frames (Repeat/Parallel) and nested nodes (path-based IDs). */
   monitorGraph?: MonitorGraph | null;
@@ -631,7 +636,8 @@ function computeMonitorLayout(
 
 function containerBadge(
   container: MonitorContainer,
-  positionedNodes: PositionedMonitorNode[]
+  positionedNodes: PositionedMonitorNode[],
+  runEnded: boolean
 ): string | null {
   const childPathIds = container.regions.flatMap((r) => r.pathIds);
   const children = childPathIds
@@ -640,6 +646,9 @@ function containerBadge(
   const running = children.filter((n) => n.status === NodeStatus.RUNNING);
   const succeeded = children.filter((n) => n.status === NodeStatus.SUCCEEDED);
   if (running.length > 0) {
+    if (runEnded) {
+      return null;
+    }
     if (container.type === "parallel") {
       const idx = container.regions.findIndex((r) =>
         r.pathIds.some((id) => running.some((n) => n.pathId === id))
@@ -805,6 +814,7 @@ export function DagView({
   onSelectNode,
   edges = [],
   runStatus,
+  forceEndedNodeAppearance = false,
   viewJson,
   monitorGraph,
   onScrollToNode,
@@ -890,12 +900,16 @@ export function DagView({
   const useGraphMode = Boolean(monitorGraph && monitorLayout);
   const canvasSize = useGraphMode ? monitorLayout!.canvasSize : canvasSizeFlat;
 
+  const runEnded =
+    (runStatus != null && isRunTerminal(runStatus)) || Boolean(forceEndedNodeAppearance);
+
   const runningNode = useMemo(() => {
+    if (runEnded) return undefined;
     if (useGraphMode && monitorLayout) {
       return monitorLayout.positionedNodes.find((n) => n.status === NodeStatus.RUNNING);
     }
     return positionedNodesFlat.find((node) => node.status === NodeStatus.RUNNING);
-  }, [useGraphMode, monitorLayout, positionedNodesFlat]);
+  }, [runEnded, useGraphMode, monitorLayout, positionedNodesFlat]);
 
   const scrollToNode = useCallback(
     (pathIdOrStateName: string) => {
@@ -1058,22 +1072,23 @@ export function DagView({
             headerHeight={frame.headerHeight}
             regions={frame.regions}
             readOnly
-            badgeLabel={containerBadge(frame.container, positionedNodes)}
+            badgeLabel={containerBadge(frame.container, positionedNodes, runEnded)}
           />
         ))}
         </div>
 
         {positionedNodes.map((node) => {
-          const runEnded = runStatus != null && isRunTerminal(runStatus);
+          const displayStaleRunning = runEnded && node.status === NodeStatus.RUNNING;
           const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
-          const displayStatus = displayNotRun ? "NOT_RUN" : node.status;
+          const displayStatus =
+            displayStaleRunning || displayNotRun ? "NOT_RUN" : node.status;
           const nodeTypeInfo = getNodeTypeInfoFromDsl(node.dslType, node.containerType);
           // VLM Planner 컨테이너는 DSL 타입 Repeat 대신 이름으로 표시
           const typeLabel =
             node.nodeName === "VLM Planner"
               ? "VLM Planner"
               : node.skillName ?? node.dslType;
-          const isRunning = node.status === NodeStatus.RUNNING;
+          const isRunning = node.status === NodeStatus.RUNNING && !displayStaleRunning;
           const isCompleted = node.status === NodeStatus.SUCCEEDED;
           const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
           const isSelected = selectedNode === node.pathId;
@@ -1146,7 +1161,15 @@ export function DagView({
                       <p
                         className={cn(
                           "font-semibold truncate",
-                          isRunning ? "text-blue-900" : isCompleted ? "text-green-900" : isWaiting ? "text-amber-900" : displayNotRun ? "text-slate-600" : "text-slate-800"
+                          isRunning
+                            ? "text-blue-900"
+                            : isCompleted
+                              ? "text-green-900"
+                              : isWaiting
+                                ? "text-amber-900"
+                                : displayNotRun || displayStaleRunning
+                                  ? "text-slate-600"
+                                  : "text-slate-800"
                         )}
                       >
                         {node.nodeName}
@@ -1173,6 +1196,11 @@ export function DagView({
                         </span>
                       )}
                       {isWaiting && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">Waiting</span>}
+                      {displayStaleRunning && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                          Not completed
+                        </span>
+                      )}
                       {displayNotRun && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">Not run</span>}
                       {isCompleted && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">✓ Completed</span>}
                     </div>
@@ -1312,11 +1340,12 @@ export function DagView({
 
       {/* Nodes - in front of edges */}
       {positionedNodes.map((node) => {
-        const runEnded = runStatus != null && isRunTerminal(runStatus);
+        const displayStaleRunning = runEnded && node.status === NodeStatus.RUNNING;
         const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
-        const displayStatus = displayNotRun ? "NOT_RUN" : node.status;
+        const displayStatus =
+          displayStaleRunning || displayNotRun ? "NOT_RUN" : node.status;
         const nodeTypeInfo = getNodeTypeInfo(node.name, node.stateName);
-        const isRunning = node.status === NodeStatus.RUNNING;
+        const isRunning = node.status === NodeStatus.RUNNING && !displayStaleRunning;
         const isCompleted = node.status === NodeStatus.SUCCEEDED;
         const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
 
@@ -1356,11 +1385,15 @@ export function DagView({
                   <div className="flex items-center gap-2 mb-1">
                     <p className={cn(
                       "font-semibold truncate",
-                      isRunning ? "text-blue-900" :
-                      isCompleted ? "text-green-900" :
-                      isWaiting ? "text-amber-900" :
-                      displayNotRun ? "text-slate-600" :
-                      "text-slate-800"
+                      isRunning
+                        ? "text-blue-900"
+                        : isCompleted
+                          ? "text-green-900"
+                          : isWaiting
+                            ? "text-amber-900"
+                            : displayNotRun || displayStaleRunning
+                              ? "text-slate-600"
+                              : "text-slate-800"
                     )}>
                       {node.name}
                     </p>
@@ -1392,6 +1425,11 @@ export function DagView({
                         Waiting
                       </span>
                     )}
+                    {displayStaleRunning && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                        Not completed
+                      </span>
+                    )}
                     {displayNotRun && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
                         Not run
@@ -1406,11 +1444,15 @@ export function DagView({
 
                   <p className={cn(
                     "text-xs truncate",
-                    isRunning ? "text-blue-700" :
-                    isCompleted ? "text-green-700" :
-                    isWaiting ? "text-amber-700" :
-                    displayNotRun ? "text-slate-500" :
-                    "text-slate-600"
+                    isRunning
+                      ? "text-blue-700"
+                      : isCompleted
+                        ? "text-green-700"
+                        : isWaiting
+                          ? "text-amber-700"
+                          : displayNotRun || displayStaleRunning
+                            ? "text-slate-500"
+                            : "text-slate-600"
                   )}>
                     {node.stateName}
                   </p>
