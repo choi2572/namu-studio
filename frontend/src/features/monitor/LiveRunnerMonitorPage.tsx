@@ -28,6 +28,7 @@ import { skillNodeAllowsExternalStatusChange } from "@/features/monitor/skillset
 import {
   buildMonitorGraph,
   applyGraphPatches,
+  collectOnFailureApiStateNames,
   type GraphPatchPayload,
   type MonitorGraph
 } from "@/features/monitor/monitorGraph";
@@ -46,6 +47,7 @@ import {
   extractNodeHistoryFromInitialPayload,
   parseGraphPatchMessage,
   parseInitialWorkflow,
+  runEventFromMiddlewareNodeStatusChange,
   runnerStatusIndicatesActiveWorkflow,
   workflowCompletedRunStatus
 } from "@/features/monitor/middlewareLiveMonitorModel";
@@ -96,33 +98,6 @@ function computeTakenBranches(
     else if (elseToNode && match(elseToNode)) result.set(cond.pathId, "else");
   }
   return result;
-}
-
-function nodeChangeToRunEvent(workflowId: string, msg: Record<string, unknown>, seq: number): RunEvent {
-  const tsRaw = msg.timestamp;
-  let timestamp: string;
-  if (typeof tsRaw === "number") {
-    timestamp = new Date(tsRaw > 1e12 ? tsRaw : tsRaw * 1000).toISOString();
-  } else if (typeof tsRaw === "string") {
-    timestamp = tsRaw;
-  } else {
-    timestamp = new Date().toISOString();
-  }
-  const node = String(msg.node_name || "");
-  const st = String(msg.status || "").toUpperCase();
-  let eventType = "NODE_STARTED";
-  if (st === "SUCCESS") eventType = "NODE_SUCCEEDED";
-  else if (st === "FAILURE" || st === "FAILED") eventType = "NODE_FAILED";
-  const durationMs = typeof msg.duration_ms === "number" ? msg.duration_ms : undefined;
-  return {
-    eventId: `mw-${seq}`,
-    runId: workflowId,
-    seq,
-    timestamp,
-    eventType,
-    stateName: node,
-    payload: durationMs != null ? { durationMs } : {}
-  };
 }
 
 export function LiveRunnerMonitorPage() {
@@ -542,7 +517,12 @@ export function LiveRunnerMonitorPage() {
           }
           const widForFeed = msgWid || loadedWorkflowIdRef.current || "runner";
           feedSeqRef.current += 1;
-          appendFeedRef.current(nodeChangeToRunEvent(widForFeed, data, feedSeqRef.current));
+          appendFeedRef.current(
+            runEventFromMiddlewareNodeStatusChange(widForFeed, widForFeed, data, {
+              seq: feedSeqRef.current,
+              eventId: `mw-${feedSeqRef.current}`
+            })
+          );
         }
         return;
       }
@@ -638,6 +618,11 @@ export function LiveRunnerMonitorPage() {
     [monitorGraph, feedEvents]
   );
 
+  const onFailureApiStateNames = useMemo(
+    () => collectOnFailureApiStateNames(dslJson),
+    [dslJson]
+  );
+
   const displayNodeStates = useMemo(() => {
     if (!dslJson || !monitorGraph) return nodeStates;
     const latest = nodeStates;
@@ -658,6 +643,13 @@ export function LiveRunnerMonitorPage() {
     });
     return Array.from(map.values());
   }, [dslJson, monitorGraph, nodeStates]);
+
+  const failureHandlingFlowActive = useMemo(() => {
+    if (onFailureApiStateNames.size === 0) return false;
+    return displayNodeStates.some(
+      (n) => onFailureApiStateNames.has(n.stateName) && n.status === NodeStatus.RUNNING
+    );
+  }, [displayNodeStates, onFailureApiStateNames]);
 
   const debugStateName = useMemo(
     () => (selectedNode ? pathIdToApiStateName(selectedNode) : ""),
@@ -906,6 +898,19 @@ export function LiveRunnerMonitorPage() {
           <p className="mt-3 text-sm text-red-600">{wsErrorShown ?? dslFetchError}</p>
         )}
       </div>
+
+      {failureHandlingFlowActive && (
+        <div
+          className="flex-shrink-0 border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-950"
+          role="status"
+        >
+          <p className="font-medium text-amber-900">Failure-handling flow in progress</p>
+          <p className="mt-0.5 text-amber-800/90">
+            The workflow entered the OnFailure branch. Recovery steps are executing — the graph may look idle for main
+            states while this path runs.
+          </p>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
         {!initialBootstrapDone ? (

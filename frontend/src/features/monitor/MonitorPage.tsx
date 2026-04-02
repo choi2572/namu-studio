@@ -10,13 +10,29 @@ import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { NodeStateSnapshot } from "@/api/interfaces";
-import { NodeStatus, RunEvent, RunStatus, RunSummary } from "@/domain/types";
+import {
+  isRunActive,
+  isRunTerminal,
+  NodeStatus,
+  RunEvent,
+  RunStatus,
+  RunSummary
+} from "@/domain/types";
 import { cn } from "@/lib/cn";
 import { formatDuration } from "@/lib/format";
 import { pathIdToApiStateName } from "@/lib/ids";
-import { isRunTerminal } from "@/domain/types";
 import { SIMULATED_EVENTS_BY_RUN } from "@/features/monitor/simulatedEvents";
-import { buildMonitorGraph, applyGraphPatches, type GraphPatchPayload } from "@/features/monitor/monitorGraph";
+import {
+  buildMonitorGraph,
+  applyGraphPatches,
+  collectOnFailureApiStateNames,
+  type GraphPatchPayload
+} from "@/features/monitor/monitorGraph";
+import {
+  resolveTimelineStateNameFromMiddleware,
+  runEventFromMiddlewareNodeStatusChange
+} from "@/features/monitor/middlewareLiveMonitorModel";
+import { getMonitorWebSocketUrl } from "@/lib/middlewareWsUrl";
 import { ENABLE_DYNAMIC_GRAPH_PATCH } from "@/lib/featureFlags";
 import { DagView } from "@/features/monitor/DagView";
 import { TimelineTable } from "@/features/monitor/TimelineTable";
@@ -38,6 +54,22 @@ function getNextSeq(events: RunEvent[]) {
   }
   return Math.max(...events.map((event) => event.seq)) + 1;
 }
+
+/** Keeps middleware WS tail rows across run-events polling. */
+function mergeServerRunEventsWithLive(server: RunEvent[], prev: RunEvent[]): RunEvent[] {
+  const live = prev.filter(
+    (e) =>
+      e.eventId.startsWith("mw-live-") ||
+      e.eventId.startsWith("mw-onfailure-entry-")
+  );
+  const byId = new Map<string, RunEvent>();
+  for (const e of server) byId.set(e.eventId, e);
+  for (const e of live) byId.set(e.eventId, e);
+  return Array.from(byId.values()).sort((a, b) => a.seq - b.seq);
+}
+
+const MONITOR_PAGE_WS_PING_MS = 25_000;
+const MONITOR_PAGE_WS_RECONNECT_MS = 3000;
 
 /** DSL 기준 노드 대분류 (Timeline 뱃지용) */
 function getNodeTypeCategory(
@@ -187,6 +219,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
+  const [monitorWsReconnect, setMonitorWsReconnect] = useState(0);
   const [actionStatusInFlight, setActionStatusInFlight] = useState<
     null | "success" | "failure"
   >(null);
@@ -200,6 +233,11 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     index: 0
   });
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const timelineResolveStatesRef = useRef<NodeStateSnapshot[]>([]);
+  const monitorGraphRef = useRef<ReturnType<typeof buildMonitorGraph>>(null);
+  const onFailureNamesRef = useRef<Set<string>>(new Set());
+  const onFailureEntryEmittedRef = useRef(false);
+  const monitorWsMsgCounterRef = useRef(0);
 
   const debugStateName = useMemo(
     () => (selectedNode ? pathIdToApiStateName(selectedNode) : ""),
@@ -250,6 +288,32 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     [monitorGraph]
   );
 
+  const onFailureApiStateNames = useMemo(
+    () => collectOnFailureApiStateNames(workflowDraft?.dsl_json ?? null),
+    [workflowDraft?.dsl_json]
+  );
+
+  useEffect(() => {
+    monitorGraphRef.current = monitorGraph;
+  }, [monitorGraph]);
+
+  useEffect(() => {
+    onFailureNamesRef.current = onFailureApiStateNames;
+  }, [onFailureApiStateNames]);
+
+  useEffect(() => {
+    onFailureEntryEmittedRef.current = false;
+  }, [runId]);
+
+  useEffect(() => {
+    setEvents([]);
+  }, [runId]);
+
+  useEffect(() => {
+    timelineResolveStatesRef.current =
+      snapshot?.nodeStates && snapshot.nodeStates.length > 0 ? snapshot.nodeStates : nodeStates;
+  }, [snapshot?.nodeStates, nodeStates]);
+
   useEffect(() => {
     if (!snapshot) return;
     setNodeStates(snapshot.nodeStates);
@@ -258,8 +322,124 @@ export function MonitorPage({ runId }: MonitorPageProps) {
 
   useEffect(() => {
     if (eventsData === undefined) return;
-    setEvents(eventsData);
+    setEvents((prev) => mergeServerRunEventsWithLive(eventsData, prev));
   }, [runId, eventsData]);
+
+  useEffect(() => {
+    if (isReplayMode) return;
+    const workflowId = snapshot?.run?.workflowId;
+    if (!workflowId || runStatus == null || !isRunActive(runStatus)) {
+      return;
+    }
+
+    let cancelled = false;
+    let intentionalClose = false;
+    monitorWsMsgCounterRef.current = 0;
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(getMonitorWebSocketUrl());
+    } catch {
+      return;
+    }
+
+    const pushLive = (ev: RunEvent) => {
+      setEvents((prev) => {
+        if (prev.some((e) => e.eventId === ev.eventId)) return prev;
+        const nextSeq = getNextSeq(prev);
+        return [...prev, { ...ev, seq: nextSeq }].sort((a, b) => a.seq - b.seq);
+      });
+    };
+
+    const pingTimer = window.setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "ping" }));
+        } catch {
+          /* ignore */
+        }
+      }
+    }, MONITOR_PAGE_WS_PING_MS);
+
+    ws.onmessage = (event) => {
+      if (cancelled) return;
+      let data: Record<string, unknown>;
+      try {
+        data = JSON.parse(String(event.data)) as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      const type = String(data.type || "").toLowerCase();
+      if (type === "pong") return;
+      const msgWid = typeof data.workflow_id === "string" ? data.workflow_id : null;
+      if (!msgWid || msgWid !== workflowId) return;
+      if (type !== "node_status_change") return;
+
+      const nodeName = typeof data.node_name === "string" ? data.node_name : null;
+      if (!nodeName) return;
+
+      const resolved = resolveTimelineStateNameFromMiddleware(
+        nodeName,
+        monitorGraphRef.current,
+        timelineResolveStatesRef.current
+      );
+      const onFailureSet = onFailureNamesRef.current;
+      const st = String(data.status || "").toUpperCase();
+      const isFailureFlowNode = onFailureSet.size > 0 && onFailureSet.has(resolved);
+      const isTerminalStatus =
+        st === "SUCCESS" ||
+        st === "FAILURE" ||
+        st === "FAILED" ||
+        st === "SKIPPED" ||
+        st === "CANCELED" ||
+        st === "CANCELLED";
+      const isStartLike = !isTerminalStatus;
+
+      if (isFailureFlowNode && isStartLike && !onFailureEntryEmittedRef.current) {
+        onFailureEntryEmittedRef.current = true;
+        monitorWsMsgCounterRef.current += 1;
+        const entryId = `mw-onfailure-entry-${runId}-${monitorWsMsgCounterRef.current}-${Date.now()}`;
+        pushLive({
+          eventId: entryId,
+          runId,
+          seq: 0,
+          timestamp: new Date().toISOString(),
+          eventType: "ON_FAILURE_FLOW_ENTERED",
+          stateName: null,
+          payload: { firstNode: resolved }
+        });
+      }
+
+      monitorWsMsgCounterRef.current += 1;
+      const evId = `mw-live-${workflowId}-${monitorWsMsgCounterRef.current}-${nodeName}-${st}-${Date.now()}`;
+      pushLive(
+        runEventFromMiddlewareNodeStatusChange(runId, workflowId, data, {
+          seq: 0,
+          eventId: evId
+        })
+      );
+    };
+
+    ws.onclose = () => {
+      window.clearInterval(pingTimer);
+      if (!cancelled && !intentionalClose) {
+        window.setTimeout(() => setMonitorWsReconnect((n) => n + 1), MONITOR_PAGE_WS_RECONNECT_MS);
+      }
+    };
+
+    return () => {
+      cancelled = true;
+      intentionalClose = true;
+      window.clearInterval(pingTimer);
+      ws.close();
+    };
+  }, [
+    isReplayMode,
+    snapshot?.run?.workflowId,
+    runStatus,
+    runId,
+    monitorWsReconnect
+  ]);
 
   useEffect(() => {
     if (!snapshot || runStatus !== RunStatus.RUNNING || isReplayMode) return;
@@ -598,6 +778,30 @@ export function MonitorPage({ runId }: MonitorPageProps) {
 
     return Array.from(nodeMap.values());
   }, [latestNodeStates, workflowDraft, monitorGraph]);
+
+  const timelineTableNodeStates = useMemo(() => {
+    const base = monitorGraph
+      ? monitorGraph.nodes.map((n) => ({
+          stateName: n.apiStateName,
+          nodeName: n.nodeName,
+          typeLabel: getNodeTypeCategory(n.dslType, n.containerType)
+        }))
+      : allNodes.map((n) => ({
+          stateName: n.stateName,
+          nodeName: n.nodeName
+        }));
+    const existing = new Set(base.map((b) => b.stateName));
+    const extra: Array<{ stateName: string; nodeName: string; typeLabel: string }> = [];
+    for (const sn of onFailureApiStateNames) {
+      if (existing.has(sn)) continue;
+      extra.push({
+        stateName: sn,
+        nodeName: sn,
+        typeLabel: "Failure handling"
+      });
+    }
+    return [...base, ...extra];
+  }, [monitorGraph, allNodes, onFailureApiStateNames]);
 
   const initialReplayNodes = useMemo(
     () =>
@@ -1005,18 +1209,8 @@ export function MonitorPage({ runId }: MonitorPageProps) {
               onSelectNode={(stateName) =>
                 setSelectedNode(stateNameToPathId.get(stateName) ?? stateName)
               }
-              nodeStates={
-                monitorGraph
-                  ? monitorGraph.nodes.map((n) => ({
-                      stateName: n.apiStateName,
-                      nodeName: n.nodeName,
-                      typeLabel: getNodeTypeCategory(n.dslType, n.containerType)
-                    }))
-                  : allNodes.map((n) => ({
-                      stateName: n.stateName,
-                      nodeName: n.nodeName
-                    }))
-              }
+              nodeStates={timelineTableNodeStates}
+              onFailureApiStateNames={onFailureApiStateNames}
             />
           </div>
         </Card>

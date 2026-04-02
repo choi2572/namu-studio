@@ -1,5 +1,6 @@
 import type { MiddlewareNodeHistoryItem, RunnerWorkflowInfo } from "@/api/interfaces";
 import type { NodeStateSnapshot } from "@/api/interfaces";
+import type { RunEvent } from "@/domain/types";
 import { NodeStatus, RunStatus } from "@/domain/types";
 import type { GraphPatchPayload, MonitorGraph } from "./monitorGraph";
 
@@ -181,6 +182,58 @@ export function workflowCompletedRunStatus(msg: Record<string, unknown>): RunSta
   if (s === "failed" || s === "failure") return RunStatus.FAILED;
   if (s === "cancelled" || s === "canceled") return RunStatus.CANCELED;
   return RunStatus.SUCCESS;
+}
+
+/** Maps middleware monitor WS `node_status_change` to a run timeline row (seq assigned by caller). */
+export function runEventFromMiddlewareNodeStatusChange(
+  runId: string,
+  workflowId: string,
+  msg: Record<string, unknown>,
+  opts: { seq: number; eventId: string }
+): RunEvent {
+  const tsRaw = msg.timestamp;
+  let timestamp: string;
+  if (typeof tsRaw === "number") {
+    timestamp = new Date(tsRaw > 1e12 ? tsRaw : tsRaw * 1000).toISOString();
+  } else if (typeof tsRaw === "string") {
+    timestamp = tsRaw;
+  } else {
+    timestamp = new Date().toISOString();
+  }
+  const node = String(msg.node_name || "");
+  const st = String(msg.status || "").toUpperCase();
+  let eventType = "NODE_STARTED";
+  if (st === "SUCCESS") eventType = "NODE_SUCCEEDED";
+  else if (st === "FAILURE" || st === "FAILED") eventType = "NODE_FAILED";
+  else if (st === "SKIPPED") eventType = "NODE_SKIPPED";
+  else if (st === "CANCELED" || st === "CANCELLED") eventType = "NODE_CANCELED";
+  else if (st === "WAITING") eventType = "NODE_WAITING";
+
+  const durationMs = typeof msg.duration_ms === "number" ? msg.duration_ms : undefined;
+  return {
+    eventId: opts.eventId,
+    runId,
+    seq: opts.seq,
+    timestamp,
+    eventType,
+    stateName: node || null,
+    payload: durationMs != null ? { durationMs } : {}
+  };
+}
+
+/** Align middleware `node_name` with monitor / OnFailure set keys (apiStateName when graph is known). */
+export function resolveTimelineStateNameFromMiddleware(
+  nodeName: string,
+  monitorGraph: MonitorGraph | null,
+  nodeStatesFallback: Array<{ stateName: string }>
+): string {
+  const direct = nodeStatesFallback.find((n) => n.stateName === nodeName);
+  if (direct) return direct.stateName;
+  if (monitorGraph) {
+    const mn = monitorGraph.nodes.find((x) => x.apiStateName === nodeName || x.stateName === nodeName);
+    if (mn) return mn.apiStateName;
+  }
+  return nodeName;
 }
 
 export function parseGraphPatchMessage(msg: Record<string, unknown>): GraphPatchPayload | null {

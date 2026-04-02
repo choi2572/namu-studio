@@ -30,6 +30,12 @@ const NODE_TYPE_COLORS: Record<string, { border: string; bg: string; text: strin
     bg: "bg-amber-50",
     text: "text-amber-700",
     indicator: "bg-amber-500"
+  },
+  failure_handling: {
+    border: "border-rose-200",
+    bg: "bg-rose-50",
+    text: "text-rose-800",
+    indicator: "bg-rose-600"
   }
 };
 
@@ -130,6 +136,13 @@ function EventIcon({ type }: { type: string }) {
       </svg>
     );
   }
+  if (type.includes("ON_FAILURE") || type.includes("FAILURE_FLOW")) {
+    return (
+      <svg {...iconProps}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+    );
+  }
   // 기본 아이콘
   return (
     <svg {...iconProps}>
@@ -146,6 +159,8 @@ type TimelineTableProps = {
   selectedStateName?: string | null;
   onSelectNode: (stateName: string) => void;
   nodeStates?: Array<{ stateName: string; nodeName: string; typeLabel?: string }>;
+  /** DSL OnFailure API state names — timeline rows for these nodes get a subtle highlight */
+  onFailureApiStateNames?: Set<string>;
 };
 
 // 이벤트 타입별 색상 (아이콘은 SVG로 대체)
@@ -212,6 +227,10 @@ const EVENT_TYPE_CONFIG: Record<
   GRAPH_PATCH: {
     color: "text-violet-600",
     bgColor: "bg-violet-50"
+  },
+  ON_FAILURE_FLOW_ENTERED: {
+    color: "text-rose-800",
+    bgColor: "bg-rose-100"
   }
 };
 
@@ -229,7 +248,8 @@ export function TimelineTable({
   selectedNode,
   selectedStateName = null,
   onSelectNode,
-  nodeStates = []
+  nodeStates = [],
+  onFailureApiStateNames = undefined
 }: TimelineTableProps) {
   const highlightStateName = selectedStateName ?? selectedNode;
   if (events.length === 0) {
@@ -296,6 +316,11 @@ export function TimelineTable({
               : getNodeTypeInfo(nodeInfo.nodeName, event.stateName || "")
             : null;
 
+          const isOnFailureEntry = event.eventType === "ON_FAILURE_FLOW_ENTERED";
+          const isOnFailureNodeEvent = Boolean(
+            event.stateName && onFailureApiStateNames?.has(event.stateName)
+          );
+
           return (
             <TableRow
               key={event.eventId}
@@ -306,7 +331,14 @@ export function TimelineTable({
               }}
               className={cn(
                 "cursor-pointer transition-colors",
-                event.stateName && highlightStateName === event.stateName && "bg-blue-50"
+                event.stateName &&
+                  highlightStateName === event.stateName &&
+                  "ring-2 ring-blue-500/55 ring-inset",
+                isOnFailureEntry &&
+                  "border-l-4 border-rose-600 bg-rose-50/95 shadow-sm ring-1 ring-rose-200/80",
+                isOnFailureNodeEvent &&
+                  !isOnFailureEntry &&
+                  "border-l-2 border-rose-400 bg-rose-50/50"
               )}
             >
               <TableCell className="font-mono text-slate-600">
@@ -332,7 +364,16 @@ export function TimelineTable({
                 </div>
               </TableCell>
               <TableCell>
-                {event.stateName ? (
+                {isOnFailureEntry ? (
+                  <div className="space-y-0.5">
+                    <span className="font-medium text-rose-900">OnFailure branch</span>
+                    <p className="text-[11px] text-rose-800/90">
+                      {(event.payload as { firstNode?: string } | null | undefined)?.firstNode
+                        ? `First step: ${(event.payload as { firstNode: string }).firstNode}`
+                        : "Workflow entered global failure handling"}
+                    </p>
+                  </div>
+                ) : event.stateName ? (
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-slate-800">
                       {nodeInfo?.nodeName || event.stateName}

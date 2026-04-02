@@ -217,6 +217,69 @@ function collectNodesAndEdges(
   });
 }
 
+/**
+ * API state keys (middleware `node_name` / monitor `stateName`) defined under top-level DSL `OnFailure`.
+ * Path rules match `collectNodesAndEdges` so nested Repeat/Parallel names align with the runner.
+ */
+export function collectOnFailureApiStateNames(
+  dslJson: Record<string, unknown> | null | undefined
+): Set<string> {
+  const out = new Set<string>();
+  if (!dslJson || !isRecord(dslJson)) return out;
+  const onFailure = (dslJson as { OnFailure?: unknown }).OnFailure;
+  if (!onFailure || !isRecord(onFailure)) return out;
+  const states = (onFailure as { States?: unknown }).States;
+  if (!states || !isRecord(states)) return out;
+  collectOnFailureStateNamesRecursive(states as Record<string, DslState>, [NODE_PATH.ROOT], out);
+  return out;
+}
+
+function collectOnFailureStateNamesRecursive(
+  states: Record<string, DslState>,
+  pathPrefix: string[],
+  out: Set<string>
+): void {
+  Object.entries(states).forEach(([stateName, state]) => {
+    if (!isRecord(state)) return;
+    const type = state.Type as string | undefined;
+    const pathId = nodePathId([...pathPrefix, stateName]);
+    out.add(pathIdToApiStateName(pathId));
+
+    if (type === "Repeat") {
+      let bodyStates: Record<string, DslState> | undefined;
+      if (Array.isArray(state.States)) {
+        bodyStates = {};
+        for (const item of state.States) {
+          if (isRecord(item)) {
+            Object.assign(bodyStates, item as Record<string, DslState>);
+          }
+        }
+      } else if (isRecord(state.States)) {
+        bodyStates = state.States as Record<string, DslState>;
+      } else if (state.Body?.States && isRecord(state.Body.States)) {
+        bodyStates = state.Body.States as Record<string, DslState>;
+      }
+      if (bodyStates && Object.keys(bodyStates).length > 0) {
+        const bodyPathPrefix = [...pathPrefix, stateName, NODE_PATH.BODY];
+        collectOnFailureStateNamesRecursive(bodyStates, bodyPathPrefix, out);
+      }
+    }
+
+    if (type === "Parallel" && Array.isArray(state.Branches)) {
+      state.Branches.forEach((branch, index) => {
+        const branchStates = branch?.States;
+        if (!branchStates || !isRecord(branchStates)) return;
+        const branchPathPrefix = [...pathPrefix, stateName, `${NODE_PATH.BRANCH_PREFIX}${index}`];
+        collectOnFailureStateNamesRecursive(
+          branchStates as Record<string, DslState>,
+          branchPathPrefix,
+          out
+        );
+      });
+    }
+  });
+}
+
 function buildContainers(nodes: MonitorNode[]): MonitorContainer[] {
   const containers: MonitorContainer[] = [];
   const containerNodes = nodes.filter((n) => n.isContainer && n.containerType);
