@@ -380,6 +380,7 @@ def _apply_workflow_completed(
     run_id: str,
     payload: Dict[str, Any],
     run_repo,
+    node_run_repo,
     run_event_repo,
 ) -> None:
     """Handle workflow_completed / workflow_cancelled: set run SUCCESS, FAILED, or CANCELED, emit event."""
@@ -392,7 +393,7 @@ def _apply_workflow_completed(
         run.status = RunStatus.CANCELED
         event_type = "RUN_CANCELED"
         payload_json = {"source": "workflow_cancelled"}
-    elif status_str == "failed":
+    elif status_str in ("failed", "failure", "error"):
         run.status = RunStatus.FAILED
         run.failure_code = payload.get("error_code") or "WORKFLOW_FAILED"
         run.failure_message = payload.get("message") or "Workflow failed"
@@ -406,9 +407,53 @@ def _apply_workflow_completed(
         run.status = RunStatus.SUCCESS
         event_type = "RUN_SUCCEEDED"
         payload_json = payload.get("final_stats") or {}
+
+    # 스펙상 terminal 시점에 node_status_change가 누락될 수 있으므로,
+    # 남아있는 RUNNING/WAITING 노드를 "워크플로우 최종 결과"로 마감 보정한다.
+    if run.status == RunStatus.CANCELED:
+        target_node_status = NodeStatus.CANCELED
+        target_node_event_type = "NODE_CANCELED"
+    elif run.status == RunStatus.FAILED:
+        # 병렬 중 하나가 실패로 workflow가 FAILED 되었더라도,
+        # 다른 가지(실패 노드가 아님)는 terminal 시점에 SKIPPED로 보정한다.
+        target_node_status = NodeStatus.SKIPPED
+        target_node_event_type = "NODE_SKIPPED"
+    else:
+        target_node_status = NodeStatus.SUCCEEDED
+        target_node_event_type = "NODE_SUCCEEDED"
+
+    node_runs = node_run_repo.get_by_run(run_id)
+    updated_node_state_names: list[str] = []
+    for nr in node_runs:
+        if nr.status in (NodeStatus.RUNNING, NodeStatus.WAITING):
+            nr.status = target_node_status
+            nr.finished_at = ts
+            if nr.started_at:
+                nr.duration_ms = int((ts - nr.started_at).total_seconds() * 1000)
+            node_run_repo.update(nr)
+            updated_node_state_names.append(nr.state_name)
+
     run.finished_at = ts
     run_repo.update(run)
-    seq = (run_event_repo.get_max_seq(run_id) or 0) + 1
+
+    # terminal 보정으로 추가된 노드 completion 이벤트도 넣어서
+    # 모니터 timeline/replay에도 반영되게 한다.
+    seq = (run_event_repo.get_max_seq(run_id) or 0)
+    for node_name in updated_node_state_names:
+        seq += 1
+        run_event_repo.create(
+            RunEvent(
+                event_id=str(uuid.uuid4()),
+                run_id=run_id,
+                seq=seq,
+                timestamp=ts,
+                event_type=target_node_event_type,
+                state_name=node_name,
+                payload_json={},
+            )
+        )
+
+    seq += 1
     run_event_repo.create(
         RunEvent(
             event_id=str(uuid.uuid4()),
@@ -552,7 +597,7 @@ def run_middleware_monitor_ws(
         )
 
     def persist_workflow_completed(data: Dict[str, Any]) -> None:
-        _apply_workflow_completed(run_id, data, run_repo, run_event_repo)
+        _apply_workflow_completed(run_id, data, run_repo, node_run_repo, run_event_repo)
 
     def persist_error(data: Dict[str, Any]) -> None:
         _apply_error(run_id, data, run_repo, node_run_repo, run_event_repo)

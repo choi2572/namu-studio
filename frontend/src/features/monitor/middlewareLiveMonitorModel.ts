@@ -175,13 +175,6 @@ export function applyTerminalWorkflowToNodeStates(
         ? NodeStatus.SKIPPED
         : NodeStatus.SUCCEEDED;
 
-  const defaultStatusForRun =
-    finalRunStatus === RunStatus.CANCELED
-      ? NodeStatus.CANCELED
-      : finalRunStatus === RunStatus.FAILED
-        ? NodeStatus.FAILED
-        : NodeStatus.SUCCEEDED;
-
   return nodes.map((n) => {
     const fromHistory = historyStatusByNodeName.get(n.stateName);
     if (fromHistory) return { ...n, status: fromHistory };
@@ -196,8 +189,14 @@ export function applyTerminalWorkflowToNodeStates(
       return { ...n, status: NodeStatus.SUCCEEDED };
     }
 
-    // completed/pending에 없으면(스펙 불일치) 보수적으로 run terminal에 맞게 마감한다.
-    return { ...n, status: defaultStatusForRun };
+    // spec상 workflow terminal 시점에는 node_status_change가 누락될 수 있다.
+    // 그 경우 progress.pending/completed가 "현재 화면에 있는 모든 RUNNING 노드"를
+    // 포함하지 못할 수 있으므로, 최소한 현재 RUNNING인 노드는 terminal 결과로 마감한다.
+    if (n.status === NodeStatus.RUNNING) {
+      return { ...n, status: pendingStatusForRun };
+    }
+
+    return n;
   });
 }
 

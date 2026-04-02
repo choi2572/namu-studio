@@ -19,7 +19,7 @@ import { cn } from "@/lib/cn";
 import { getMiddlewareHttpBaseForBrowser, getMonitorWebSocketUrl } from "@/lib/middlewareWsUrl";
 import { pathIdToApiStateName } from "@/lib/ids";
 import { formatDuration } from "@/lib/format";
-import { NodeStatus, RunEvent, RunStatus } from "@/domain/types";
+import { NodeStatus, RunEvent, RunStatus, isRunTerminal } from "@/domain/types";
 import {
   pickInputOutputFromMiddlewareMessage,
   resolveMiddlewareDebugStateKey
@@ -330,6 +330,32 @@ export function LiveRunnerMonitorPage() {
 
   const reconcileWorkflowCompletion = useCallback(
     async (workflowId: string, finalRunStatusOverride?: RunStatus) => {
+      // terminal 시점에는 middleware가 node_status_change를 보내지 않는 스펙이라,
+      // REST fallback이 실패해도 최소한 "현재 RUNNING 노드"는 즉시 마감한다.
+      if (finalRunStatusOverride) {
+        const lastWf = lastRunnerStatusRef.current?.workflow;
+        const immediateWf: RunnerWorkflowInfo =
+          lastWf && lastWf.workflow_id === workflowId
+            ? lastWf
+            : {
+                workflow_id: workflowId,
+                started_at: "",
+                updated_at: "",
+                progress: {
+                  completed_states: [],
+                  current_state: "",
+                  pending_states: []
+                },
+                node_history: [],
+                execution_stats: {}
+              };
+
+        setRunStatusForDag(finalRunStatusOverride);
+        setNodeStates((prev) =>
+          applyTerminalWorkflowToNodeStates(prev, immediateWf, finalRunStatusOverride)
+        );
+      }
+
       try {
         const base = getMiddlewareHttpBaseForBrowser();
         const url = `${base}/api/v1/workflows/${encodeURIComponent(workflowId)}`;
@@ -489,6 +515,13 @@ export function LiveRunnerMonitorPage() {
       }
 
       if (type === "node_status_change") {
+        // spec상 terminal 시점엔 node_status_change가 없더라도,
+        // 네트워크/스레드 지연으로 "늦게 도착한" node_status_change가
+        // terminal 보정을 덮어쓰지 않도록 방어한다.
+        if (runStatusForDagRef.current && isRunTerminal(runStatusForDagRef.current)) {
+          return;
+        }
+
         if (msgWid && msgWid !== currentId) {
           const pollWf = lastRunnerStatusRef.current?.workflow;
           void loadWorkflowDslRef.current(msgWid, pollWf ? { fromPoll: pollWf } : undefined);
