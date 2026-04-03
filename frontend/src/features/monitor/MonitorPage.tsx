@@ -224,6 +224,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     null | "success" | "failure"
   >(null);
   const [actionStatusToast, setActionStatusToast] = useState<ActionStatusToastState | null>(null);
+  const [cancelInFlight, setCancelInFlight] = useState(false);
   const actionStatusSubmittingRef = useRef(false);
   const replayInitializedRef = useRef(false);
   const terminalRefetchDoneRef = useRef<string | null>(null);
@@ -587,53 +588,59 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   }, [replayPlaying, replayIndex, events.length, replayDelays]);
 
   const handleCancel = async () => {
+    if (cancelInFlight) return;
+    setCancelInFlight(true);
     const startedAt = snapshot?.run.startedAt ?? new Date().toISOString();
     try {
-      await middlewareApi.runWorkflowCancel();
-    } catch (e) {
-      console.error("Middleware cancel failed", e);
-    }
-    try {
-      await runsApi.cancelRun(runId);
-    } catch (e) {
-      console.error("Backend cancel failed", e);
-    }
-    setRunStatus(RunStatus.CANCELED);
-    // 즉시 캐시를 terminal로 갱신해서 refetchInterval이 폴링을 멈추도록 함
-    queryClient.setQueryData(["run-snapshot", runId], (old: { run: RunSummary; workflowName: string; nodeStates: NodeStateSnapshot[] } | undefined) => {
-      if (!old) return old;
-      const updatedNodes = old.nodeStates.map((n) =>
-        n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
-          ? { ...n, status: NodeStatus.CANCELED }
-          : n
+      try {
+        await middlewareApi.runWorkflowCancel();
+      } catch (e) {
+        console.error("Middleware cancel failed", e);
+      }
+      try {
+        await runsApi.cancelRun(runId);
+      } catch (e) {
+        console.error("Backend cancel failed", e);
+      }
+      setRunStatus(RunStatus.CANCELED);
+      // 즉시 캐시를 terminal로 갱신해서 refetchInterval이 폴링을 멈추도록 함
+      queryClient.setQueryData(["run-snapshot", runId], (old: { run: RunSummary; workflowName: string; nodeStates: NodeStateSnapshot[] } | undefined) => {
+        if (!old) return old;
+        const updatedNodes = old.nodeStates.map((n) =>
+          n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
+            ? { ...n, status: NodeStatus.CANCELED }
+            : n
+        );
+        return {
+          ...old,
+          run: { ...old.run, status: RunStatus.CANCELED },
+          nodeStates: updatedNodes
+        };
+      });
+      setNodeStates((prev) =>
+        prev.map((n) =>
+          n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
+            ? { ...n, status: NodeStatus.CANCELED }
+            : n
+        )
       );
-      return {
-        ...old,
-        run: { ...old.run, status: RunStatus.CANCELED },
-        nodeStates: updatedNodes
-      };
-    });
-    setNodeStates((prev) =>
-      prev.map((n) =>
-        n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
-          ? { ...n, status: NodeStatus.CANCELED }
-          : n
-      )
-    );
-    setEvents((prev) => {
-      const nextSeq = getNextSeq(prev);
-      return [
-        ...prev,
-        {
-          eventId: `event-cancel-${nextSeq}`,
-          runId,
-          seq: nextSeq,
-          timestamp: getNextTimestamp(prev, startedAt),
-          eventType: "RUN_CANCELED",
-          payload: { source: "monitor" }
-        }
-      ];
-    });
+      setEvents((prev) => {
+        const nextSeq = getNextSeq(prev);
+        return [
+          ...prev,
+          {
+            eventId: `event-cancel-${nextSeq}`,
+            runId,
+            seq: nextSeq,
+            timestamp: getNextTimestamp(prev, startedAt),
+            eventType: "RUN_CANCELED",
+            payload: { source: "monitor" }
+          }
+        ];
+      });
+    } finally {
+      setCancelInFlight(false);
+    }
   };
 
   const isTerminal = runStatus ? isRunTerminal(runStatus) : false;
@@ -953,7 +960,9 @@ export function MonitorPage({ runId }: MonitorPageProps) {
           <div className="flex items-center gap-3">
             {runStatus && <StatusBadge status={runStatus} />}
             {showCancel && (
-              <Button onClick={handleCancel}>Cancel</Button>
+              <Button onClick={handleCancel} disabled={cancelInFlight}>
+                {cancelInFlight ? "Cancelling…" : "Cancel"}
+              </Button>
             )}
             {showReplay && workflowId && (
               <Link href={`/monitor/workflow/${workflowId}`}>
