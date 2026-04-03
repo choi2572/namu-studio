@@ -30,6 +30,11 @@ import {
 import { getAvailableVariables } from "@/lib/variableReferences";
 import { ENABLE_VLM_NODES } from "@/lib/featureFlags";
 import { downloadJsonFile, sanitizeDownloadFileBaseName } from "@/lib/downloadJsonFile";
+import {
+  cloneDslOnFailureBlock,
+  dslJsonHasOnFailureKey,
+  mergeDslOnFailureIfServerDropped
+} from "@/lib/dslOnFailure";
 
 type EditorPageProps = {
   workflowId: string;
@@ -543,26 +548,6 @@ const CANVAS_DEFAULT = {
 
 /** 실패 처리 캔버스 기본 크기 (상하 플로우용) */
 const FAILURE_CANVAS_BASE = { width: 800, height: 1200 };
-
-function dslJsonHasOnFailureKey(dslJson: unknown): boolean {
-  return (
-    dslJson !== null &&
-    typeof dslJson === "object" &&
-    Object.prototype.hasOwnProperty.call(dslJson as Record<string, unknown>, "OnFailure")
-  );
-}
-
-/** 저장 시 에디터 그래프가 비어 있어도 DSL의 OnFailure를 잃지 않기 위해 로드 시 복제해 둔다. */
-function cloneDslOnFailureBlock(dslJson: unknown): Record<string, unknown> | null {
-  if (!isRecord(dslJson)) return null;
-  const onFailure = dslJson.OnFailure;
-  if (!onFailure || !isRecord(onFailure)) return null;
-  try {
-    return structuredClone(onFailure) as Record<string, unknown>;
-  } catch {
-    return JSON.parse(JSON.stringify(onFailure)) as Record<string, unknown>;
-  }
-}
 
 function createInitialFailureGraph(enabled: boolean): FailureHandlingGraph {
   const entryId = "failure-entry-1";
@@ -4036,8 +4021,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       workflowId: string;
       payload: WorkflowDraft;
     }) => workflowsApi.saveDraft(targetWorkflowId, payload),
-    onSuccess: (saved) => {
-      setDraftOverride(saved);
+    onSuccess: (saved, variables) => {
+      const sentDsl = variables.payload.dsl_json as Record<string, unknown>;
+      const mergedDsl = mergeDslOnFailureIfServerDropped(
+        (saved.dsl_json ?? {}) as Record<string, unknown>,
+        sentDsl
+      );
+      setDraftOverride({ ...saved, dsl_json: mergedDsl });
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
       if (saved.workflowId !== workflowId) {
         router.replace(`/editor/${saved.workflowId}`);
@@ -4059,12 +4049,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const hasFailureStartEdge = failureGraph.edges.some(
       (e) => e.from === failureGraph.entryNodeId
     );
-    if (
-      failureGraph.enabled &&
-      !dslHasOnFailure &&
-      !hasFailureStartEdge &&
-      preservedOnFailureDslRef.current
-    ) {
+    if (!dslHasOnFailure && !hasFailureStartEdge && preservedOnFailureDslRef.current) {
       dsl_json = { ...dsl_json, OnFailure: preservedOnFailureDslRef.current };
       dslHasOnFailure = true;
     }
@@ -5070,7 +5055,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     try {
       const nextDraft: WorkflowDraft = {
         workflowId,
-        dsl_json: pending.dsl,
+        dsl_json: JSON.parse(JSON.stringify(pending.dsl)) as Record<string, unknown>,
         view_json: {},
         updatedAt: new Date().toISOString()
       };

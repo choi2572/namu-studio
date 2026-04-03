@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { middlewareApi, workflowsApi, runsApi } from "@/api";
 import { downloadJsonFile, sanitizeDownloadFileBaseName } from "@/lib/downloadJsonFile";
 import { pickDuplicateWorkflowName } from "@/lib/workflowDuplicateName";
+import { dslJsonHasOnFailureKey, mergeDslOnFailureIfServerDropped } from "@/lib/dslOnFailure";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableCell, TableHead, TableRow } from "@/components/Table";
@@ -132,12 +133,31 @@ export function DashboardPage() {
       const newName = pickDuplicateWorkflowName(workflow.name, names);
       const created = await workflowsApi.create({ name: newName });
       const source = await workflowsApi.getDraft(workflow.workflowId);
-      await workflowsApi.saveDraft(created.workflowId, {
+      const sentDsl = JSON.parse(JSON.stringify(source.dsl_json ?? {})) as Record<
+        string,
+        unknown
+      >;
+      let saved = await workflowsApi.saveDraft(created.workflowId, {
         workflowId: created.workflowId,
-        dsl_json: source.dsl_json,
+        dsl_json: sentDsl,
         view_json: {},
         updatedAt: new Date().toISOString()
       });
+      const fixedDsl = mergeDslOnFailureIfServerDropped(
+        (saved.dsl_json ?? {}) as Record<string, unknown>,
+        sentDsl
+      );
+      if (
+        dslJsonHasOnFailureKey(sentDsl) &&
+        !dslJsonHasOnFailureKey(saved.dsl_json as Record<string, unknown>)
+      ) {
+        saved = await workflowsApi.saveDraft(created.workflowId, {
+          workflowId: created.workflowId,
+          dsl_json: fixedDsl,
+          view_json: {},
+          updatedAt: new Date().toISOString()
+        });
+      }
       return created;
     },
     onSuccess: () => {
@@ -438,9 +458,6 @@ export function DashboardPage() {
             <Table>
               <TableHead>
                 <tr className="border-b-2 border-slate-200">
-                  <th className="w-12 px-2 py-4 text-left text-sm font-bold text-slate-700">
-                    <span className="sr-only">More</span>
-                  </th>
                   <th className="px-5 py-4 text-left text-sm font-bold text-slate-700">
                     Workflow Name
                   </th>
@@ -452,6 +469,9 @@ export function DashboardPage() {
                   </th>
                   <th className="px-5 py-4 text-left text-sm font-bold text-slate-700">
                     Actions
+                  </th>
+                  <th className="w-12 px-2 py-4 text-left text-sm font-bold text-slate-700">
+                    <span className="sr-only">More</span>
                   </th>
                 </tr>
               </TableHead>
@@ -474,42 +494,6 @@ export function DashboardPage() {
                       }}
                       className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50"
                     >
-                    <TableCell
-                      className="w-12 px-2 py-4 align-top"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        className="inline-flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                        aria-label="More actions"
-                        aria-haspopup="menu"
-                        aria-expanded={rowMenu?.workflowId === workflow.workflowId}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          setRowMenu((prev) =>
-                            prev?.workflowId === workflow.workflowId
-                              ? null
-                              : {
-                                  workflowId: workflow.workflowId,
-                                  x: rect.left,
-                                  y: rect.bottom + 4
-                                }
-                          );
-                        }}
-                      >
-                        <svg
-                          className="h-5 w-5"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                          aria-hidden
-                        >
-                          <circle cx="10" cy="5" r="2" />
-                          <circle cx="10" cy="10" r="2" />
-                          <circle cx="10" cy="15" r="2" />
-                        </svg>
-                      </button>
-                    </TableCell>
                     <TableCell className="px-5 py-4">
                       <div className="space-y-1.5">
                         <p className="text-base font-bold text-slate-900">
@@ -597,6 +581,42 @@ export function DashboardPage() {
                           </svg>
                         </button>
                       </div>
+                    </TableCell>
+                    <TableCell
+                      className="w-12 px-2 py-4 align-top"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="inline-flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                        aria-label="More actions"
+                        aria-haspopup="menu"
+                        aria-expanded={rowMenu?.workflowId === workflow.workflowId}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setRowMenu((prev) =>
+                            prev?.workflowId === workflow.workflowId
+                              ? null
+                              : {
+                                  workflowId: workflow.workflowId,
+                                  x: rect.left,
+                                  y: rect.bottom + 4
+                                }
+                          );
+                        }}
+                      >
+                        <svg
+                          className="h-5 w-5"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                          aria-hidden
+                        >
+                          <circle cx="10" cy="5" r="2" />
+                          <circle cx="10" cy="10" r="2" />
+                          <circle cx="10" cy="15" r="2" />
+                        </svg>
+                      </button>
                     </TableCell>
                     </TableRow>
                   );
