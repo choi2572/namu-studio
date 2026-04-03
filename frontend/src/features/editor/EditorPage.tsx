@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  ChangeEvent,
   DragEvent,
   MouseEvent,
   PointerEvent as ReactPointerEvent
@@ -28,6 +29,7 @@ import {
 } from "@/lib/startEndDetection";
 import { getAvailableVariables } from "@/lib/variableReferences";
 import { ENABLE_VLM_NODES } from "@/lib/featureFlags";
+import { downloadJsonFile, sanitizeDownloadFileBaseName } from "@/lib/downloadJsonFile";
 
 type EditorPageProps = {
   workflowId: string;
@@ -2775,15 +2777,48 @@ function parseDslToEditor(
   };
 }
 
-function downloadJsonFile(fileName: string, data: Record<string, unknown>) {
-  const payload = JSON.stringify(data, null, 2);
-  const blob = new Blob([payload], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
+function validateImportedDslForEditor(
+  dslJson: Record<string, unknown>,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+): { ok: true } | { ok: false; errors: string[] } {
+  let parsed: ParsedEditorGraph | null;
+  try {
+    parsed = parseDslToEditor(dslJson, nodeTypeConfig);
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [
+        error instanceof Error
+          ? `Could not parse workflow DSL: ${error.message}`
+          : "Could not parse workflow DSL (unexpected error)."
+      ]
+    };
+  }
+  if (!parsed) {
+    return {
+      ok: false,
+      errors: [
+        "Invalid workflow DSL: expected a States map that the editor can read (check StartAt / States shape)."
+      ]
+    };
+  }
+  const unknownKinds = new Set<string>();
+  for (const node of parsed.nodes) {
+    if (!nodeTypeConfig[node.kind]) {
+      unknownKinds.add(node.kind);
+    }
+  }
+  if (unknownKinds.size > 0) {
+    return {
+      ok: false,
+      errors: [...unknownKinds].map((kind) =>
+        kind.startsWith("skill.")
+          ? `Unknown skill (not in catalog): ${kind}`
+          : `Unknown node type (not supported in this editor): ${kind}`
+      )
+    };
+  }
+  return { ok: true };
 }
 
 function NodeCard({
@@ -3708,6 +3743,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [failureGraph, setFailureGraph] = useState<FailureHandlingGraph>(() =>
     createInitialFailureGraph(false)
   );
+  const [importOverwriteConfirmOpen, setImportOverwriteConfirmOpen] = useState(false);
+  const [importValidationFailOpen, setImportValidationFailOpen] = useState(false);
+  const [importFailMessages, setImportFailMessages] = useState<string[]>([]);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingImportRef = useRef<{
+    dsl: Record<string, unknown>;
+    fileBaseName: string;
+  } | null>(null);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -3814,7 +3857,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
   }, []);
 
-  const applyDraftToEditor = useCallback((draftToApply: WorkflowDraft | null) => {
+  const applyDraftToEditor = useCallback((
+    draftToApply: WorkflowDraft | null,
+    options?: { markUnsaved?: boolean }
+  ) => {
+    const markUnsaved = options?.markUnsaved === true;
     const getSize = () => {
       const viewportSize = getViewportCanvasSize();
       return viewportSize;
@@ -3885,7 +3932,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setCanvasBase(getSize());
       setZoom(1);
       applyFailureStateFromDraft();
-      setHasUnsavedChanges(false);
+      setHasUnsavedChanges(markUnsaved);
       return;
     }
 
@@ -3930,7 +3977,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setSelectedEdgeId(null);
     setConnectingFrom(null);
     setEditingNodeId(null);
-    setHasUnsavedChanges(false);
+    setHasUnsavedChanges(markUnsaved);
   }, [nodeTypeConfig, nodeTypes, getViewportCanvasSize]);
 
   useEffect(() => {
@@ -4942,6 +4989,141 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   const handleConfirmPublish = () => {
     publishMutation.mutate();
+  };
+
+  const handleImportFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+    setShowWorkflowMenu(false);
+    if (!file) return;
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setImportFailMessages(["Could not read the selected file."]);
+      setImportValidationFailOpen(true);
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text) as unknown;
+    } catch {
+      setImportFailMessages(["The file is not valid JSON."]);
+      setImportValidationFailOpen(true);
+      return;
+    }
+    if (!isRecord(parsed)) {
+      setImportFailMessages(["Workflow import expects a JSON object at the root."]);
+      setImportValidationFailOpen(true);
+      return;
+    }
+    const fileBaseName = file.name.replace(/\.json$/i, "").trim() || "Imported workflow";
+    pendingImportRef.current = { dsl: parsed, fileBaseName };
+    setImportOverwriteConfirmOpen(true);
+  };
+
+  const cancelImportOverwrite = () => {
+    setImportOverwriteConfirmOpen(false);
+    pendingImportRef.current = null;
+  };
+
+  const confirmImportOverwrite = useCallback(() => {
+    setImportOverwriteConfirmOpen(false);
+    const pending = pendingImportRef.current;
+    pendingImportRef.current = null;
+    if (!pending) return;
+    if (!skillsetsResponse) {
+      setImportFailMessages([
+        "The skill catalog is still loading. Please try again in a moment."
+      ]);
+      setImportValidationFailOpen(true);
+      return;
+    }
+    const check = validateImportedDslForEditor(pending.dsl, nodeTypeConfig);
+    if (!check.ok) {
+      setImportFailMessages(check.errors);
+      setImportValidationFailOpen(true);
+      return;
+    }
+    const snapshot = {
+      nodes: structuredClone(nodes),
+      edges: structuredClone(edges),
+      failureGraph: structuredClone(failureGraph),
+      canvasBase: { ...canvasBase },
+      zoom,
+      workflowName,
+      originalWorkflowName,
+      draftOverride: draftOverride ? structuredClone(draftOverride) : null,
+      preservedOnFailureDsl: preservedOnFailureDslRef.current
+        ? structuredClone(preservedOnFailureDslRef.current)
+        : null,
+      nextNodeIndex: nextNodeIndex.current,
+      nextEdgeIndex: nextEdgeIndex.current,
+      nextConditionIndex: nextConditionIndex.current,
+      nextVariableRowIndex: nextVariableRowIndex.current,
+      nextFailureNodeIndex: nextFailureNodeIndex.current,
+      hasUnsavedChanges,
+      selectedNode,
+      selectedEdgeId
+    };
+    try {
+      const nextDraft: WorkflowDraft = {
+        workflowId,
+        dsl_json: pending.dsl,
+        view_json: {},
+        updatedAt: new Date().toISOString()
+      };
+      setDraftOverride(nextDraft);
+      applyDraftToEditor(nextDraft, { markUnsaved: true });
+      setWorkflowName(pending.fileBaseName);
+      setOriginalWorkflowName(pending.fileBaseName);
+    } catch (error) {
+      setNodes(snapshot.nodes);
+      setEdges(snapshot.edges);
+      setFailureGraph(snapshot.failureGraph);
+      setCanvasBase(snapshot.canvasBase);
+      setZoom(snapshot.zoom);
+      setWorkflowName(snapshot.workflowName);
+      setOriginalWorkflowName(snapshot.originalWorkflowName);
+      setDraftOverride(snapshot.draftOverride);
+      preservedOnFailureDslRef.current = snapshot.preservedOnFailureDsl;
+      nextNodeIndex.current = snapshot.nextNodeIndex;
+      nextEdgeIndex.current = snapshot.nextEdgeIndex;
+      nextConditionIndex.current = snapshot.nextConditionIndex;
+      nextVariableRowIndex.current = snapshot.nextVariableRowIndex;
+      nextFailureNodeIndex.current = snapshot.nextFailureNodeIndex;
+      setHasUnsavedChanges(snapshot.hasUnsavedChanges);
+      setSelectedNode(snapshot.selectedNode);
+      setSelectedEdgeId(snapshot.selectedEdgeId);
+      const message =
+        error instanceof Error ? error.message : "An unexpected error occurred while importing.";
+      setImportFailMessages([message]);
+      setImportValidationFailOpen(true);
+    }
+  }, [
+    skillsetsResponse,
+    nodeTypeConfig,
+    nodes,
+    edges,
+    failureGraph,
+    canvasBase,
+    zoom,
+    workflowName,
+    originalWorkflowName,
+    draftOverride,
+    hasUnsavedChanges,
+    selectedNode,
+    selectedEdgeId,
+    workflowId,
+    applyDraftToEditor
+  ]);
+
+  const handleEditorExport = () => {
+    setShowWorkflowMenu(false);
+    const { dsl_json } = buildCurrentDraftPayload();
+    const base = sanitizeDownloadFileBaseName(workflowName.trim() || "workflow");
+    downloadJsonFile(`${base}.json`, dsl_json);
   };
 
   /** 실패 캔버스에 팔레트에서 드롭한 노드 추가 */
@@ -6231,6 +6413,73 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-6">
+      <input
+        ref={importFileInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        aria-hidden
+        onChange={handleImportFileSelected}
+      />
+      {importOverwriteConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="import-overwrite-title"
+          onClick={cancelImportOverwrite}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <Card className="w-full max-w-sm p-4 shadow-xl">
+              <h2
+                id="import-overwrite-title"
+                className="text-lg font-semibold text-slate-800"
+              >
+                Replace editor contents?
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                The current workflow on the canvas will be discarded and replaced by the imported
+                file. Unsaved changes will be lost. Nothing is saved to the server until you choose
+                Save.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button variant="secondary" onClick={cancelImportOverwrite}>
+                  Cancel
+                </Button>
+                <Button onClick={confirmImportOverwrite}>OK</Button>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
+      {importValidationFailOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="import-fail-title"
+          onClick={() => setImportValidationFailOpen(false)}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <Card className="w-full max-w-md p-4 shadow-xl">
+              <h2
+                id="import-fail-title"
+                className="text-lg font-semibold text-slate-800"
+              >
+                Import failed
+              </h2>
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                {importFailMessages.map((msg, index) => (
+                  <li key={`${index}-${msg}`}>{msg}</li>
+                ))}
+              </ul>
+              <div className="mt-4 flex justify-end">
+                <Button onClick={() => setImportValidationFailOpen(false)}>OK</Button>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
       {showPublishConfirm && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
@@ -6433,6 +6682,30 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     disabled={hasErrors}
                   >
                     Publish
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                    title={
+                      skillsetsResponse
+                        ? undefined
+                        : "Skill catalog is still loading."
+                    }
+                    disabled={!skillsetsResponse}
+                    onClick={() => {
+                      if (!skillsetsResponse) return;
+                      setShowWorkflowMenu(false);
+                      importFileInputRef.current?.click();
+                    }}
+                  >
+                    Import…
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    onClick={handleEditorExport}
+                  >
+                    Export…
                   </button>
                   <div className="mt-1 border-t border-slate-100 pt-1">
                     <button

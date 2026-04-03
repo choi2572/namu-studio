@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { middlewareApi, workflowsApi, runsApi } from "@/api";
+import { downloadJsonFile, sanitizeDownloadFileBaseName } from "@/lib/downloadJsonFile";
+import { pickDuplicateWorkflowName } from "@/lib/workflowDuplicateName";
 import { Card } from "@/components/Card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Table, TableCell, TableHead, TableRow } from "@/components/Table";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { RunStatus, NodeStatus } from "@/domain/types";
-import type { RunSummary } from "@/domain/types";
+import type { RunSummary, WorkflowListItem } from "@/domain/types";
 import { Button } from "@/components/Button";
 import { cn } from "@/lib/cn";
 
@@ -24,6 +26,11 @@ export function DashboardPage() {
   const [workflowToDelete, setWorkflowToDelete] = useState<{
     id: string;
     name: string;
+  } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{
+    workflowId: string;
+    x: number;
+    y: number;
   } | null>(null);
 
   const { data: workflows = [] } = useQuery({
@@ -119,6 +126,32 @@ export function DashboardPage() {
     (node) => node.status === NodeStatus.RUNNING
   );
 
+  const duplicateMutation = useMutation({
+    mutationFn: async (workflow: WorkflowListItem) => {
+      const names = new Set(workflows.map((w) => w.name));
+      const newName = pickDuplicateWorkflowName(workflow.name, names);
+      const created = await workflowsApi.create({ name: newName });
+      const source = await workflowsApi.getDraft(workflow.workflowId);
+      await workflowsApi.saveDraft(created.workflowId, {
+        workflowId: created.workflowId,
+        dsl_json: source.dsl_json,
+        view_json: {},
+        updatedAt: new Date().toISOString()
+      });
+      return created;
+    },
+    onSuccess: () => {
+      setRowMenu(null);
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+    },
+    onError: (error: unknown) => {
+      console.error("Failed to duplicate workflow", error);
+      if (typeof window !== "undefined") {
+        window.alert("Failed to duplicate workflow.");
+      }
+    }
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (workflowId: string) => workflowsApi.delete(workflowId),
     onSuccess: () => {
@@ -142,6 +175,60 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {rowMenu ? (
+        <>
+          <div
+            className="fixed inset-0 z-20"
+            aria-hidden
+            onClick={() => setRowMenu(null)}
+          />
+          {(() => {
+            const menuWorkflow = workflows.find(
+              (w) => w.workflowId === rowMenu.workflowId
+            );
+            if (!menuWorkflow) return null;
+            return (
+              <div
+                className="fixed z-30 w-44 rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+                style={{ left: rowMenu.x, top: rowMenu.y }}
+                role="menu"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full cursor-pointer px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                  onClick={async (event) => {
+                    event.stopPropagation();
+                    setRowMenu(null);
+                    try {
+                      const draft = await workflowsApi.getDraft(menuWorkflow.workflowId);
+                      const base = sanitizeDownloadFileBaseName(menuWorkflow.name);
+                      downloadJsonFile(`${base}.json`, draft.dsl_json ?? {});
+                    } catch (error) {
+                      console.error("Failed to export workflow", error);
+                      window.alert("Failed to export workflow.");
+                    }
+                  }}
+                >
+                  Export
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full cursor-pointer px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                  disabled={duplicateMutation.isPending}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    duplicateMutation.mutate(menuWorkflow);
+                  }}
+                >
+                  {duplicateMutation.isPending ? "Duplicating…" : "Duplicate"}
+                </button>
+              </div>
+            );
+          })()}
+        </>
+      ) : null}
       {/* Stats Overview */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card className="border-slate-200 bg-white">
@@ -351,6 +438,9 @@ export function DashboardPage() {
             <Table>
               <TableHead>
                 <tr className="border-b-2 border-slate-200">
+                  <th className="w-12 px-2 py-4 text-left text-sm font-bold text-slate-700">
+                    <span className="sr-only">More</span>
+                  </th>
                   <th className="px-5 py-4 text-left text-sm font-bold text-slate-700">
                     Workflow Name
                   </th>
@@ -384,6 +474,42 @@ export function DashboardPage() {
                       }}
                       className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-slate-50"
                     >
+                    <TableCell
+                      className="w-12 px-2 py-4 align-top"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="inline-flex h-9 w-9 flex-shrink-0 cursor-pointer items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                        aria-label="More actions"
+                        aria-haspopup="menu"
+                        aria-expanded={rowMenu?.workflowId === workflow.workflowId}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setRowMenu((prev) =>
+                            prev?.workflowId === workflow.workflowId
+                              ? null
+                              : {
+                                  workflowId: workflow.workflowId,
+                                  x: rect.left,
+                                  y: rect.bottom + 4
+                                }
+                          );
+                        }}
+                      >
+                        <svg
+                          className="h-5 w-5"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                          aria-hidden
+                        >
+                          <circle cx="10" cy="5" r="2" />
+                          <circle cx="10" cy="10" r="2" />
+                          <circle cx="10" cy="15" r="2" />
+                        </svg>
+                      </button>
+                    </TableCell>
                     <TableCell className="px-5 py-4">
                       <div className="space-y-1.5">
                         <p className="text-base font-bold text-slate-900">
