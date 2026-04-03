@@ -1759,6 +1759,8 @@ type ParsedEditorGraph = {
   nodes: EditorNode[];
   edges: EditorEdge[];
   canvas?: { width: number; height: number; zoom: number };
+  /** 루트 `States` 키 → 에디터 노드 id (OnFailure DSL 복원용) */
+  rootStateNameToNodeId?: Map<string, string>;
 };
 
 function getContainerTypeById(nodes: EditorNode[]) {
@@ -2758,7 +2760,85 @@ function parseDslToEditor(
   return {
     nodes: nextNodes,
     edges: filterEdgesByContainerRules(nextNodes, edges),
-    canvas: { ...canvas, zoom: 1 }
+    canvas: { ...canvas, zoom: 1 },
+    rootStateNameToNodeId: workflowRootIdByState ?? new Map<string, string>()
+  };
+}
+
+/** `dsl_json.OnFailure`만 있고 view.failure가 없을 때 실패 핸들링 캔버스를 복구한다. */
+function failureGraphFromOnFailureDsl(
+  onFailureDsl: Record<string, unknown>,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+): FailureHandlingGraph | null {
+  const parsed = parseDslToEditor(onFailureDsl, nodeTypeConfig);
+  const stateMap = parsed?.rootStateNameToNodeId;
+  if (!parsed || !stateMap || parsed.nodes.length === 0) return null;
+  const startAt =
+    typeof onFailureDsl.StartAt === "string" ? onFailureDsl.StartAt.trim() : "";
+  if (!startAt) return null;
+  const startNodeId = stateMap.get(startAt);
+  if (!startNodeId) return null;
+
+  const entryId = "failure-entry-1";
+  const entryNode: EditorNode = {
+    id: entryId,
+    name: "On Workflow Failure",
+    kind: "system.on_failure_entry",
+    position: {
+      x: FAILURE_CANVAS_BASE.width / 2 - NODE_METRICS.width / 2,
+      y: 40
+    },
+    isExpanded: true,
+    params: {}
+  };
+
+  const idMap = new Map<string, string>();
+  idMap.set(entryId, entryId);
+  parsed.nodes.forEach((node, index) => {
+    idMap.set(node.id, `failure-node-${index + 1}`);
+  });
+
+  const remapNodeId = (id: string | null | undefined): string | null => {
+    if (id == null) return null;
+    return idMap.get(id) ?? id;
+  };
+
+  const remappedNodes: EditorNode[] = parsed.nodes.map((node) => ({
+    ...node,
+    id: idMap.get(node.id)!,
+    containerId: remapNodeId(node.containerId),
+    retryOwnerId:
+      node.retryOwnerId != null
+        ? idMap.get(node.retryOwnerId) ?? node.retryOwnerId
+        : node.retryOwnerId
+  }));
+
+  const remappedEdges: EditorEdge[] = [];
+  let edgeIx = 1;
+  remappedEdges.push({
+    id: `failure-edge-${edgeIx++}`,
+    from: entryId,
+    fromPort: "next",
+    to: idMap.get(startNodeId)!
+  });
+  for (const edge of parsed.edges) {
+    const from = idMap.get(edge.from);
+    const to = idMap.get(edge.to);
+    if (!from || !to) continue;
+    remappedEdges.push({
+      ...edge,
+      id: `failure-edge-${edgeIx++}`,
+      from,
+      to
+    });
+  }
+
+  return {
+    enabled: true,
+    drawerOpen: false,
+    entryNodeId: entryId,
+    nodes: [entryNode, ...remappedNodes],
+    edges: remappedEdges
   };
 }
 
@@ -3878,7 +3958,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         return;
       }
       const viewFailure = parsed?.failure;
-      if (viewFailure) {
+      const viewFailureHasFlow =
+        viewFailure &&
+        viewFailure.edges.some((e) => e.from === viewFailure.entryNodeId);
+      if (viewFailureHasFlow) {
         setFailureGraph({
           enabled: true,
           drawerOpen: false,
@@ -3891,8 +3974,20 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           "failure-node"
         );
       } else {
-        setFailureGraph(createInitialFailureGraph(true));
-        nextFailureNodeIndex.current = 1;
+        const rawOnFailure = draftToApply.dsl_json.OnFailure;
+        const onFailureDsl = isRecord(rawOnFailure) ? rawOnFailure : null;
+        const fromDsl =
+          onFailureDsl && failureGraphFromOnFailureDsl(onFailureDsl, nodeTypeConfig);
+        if (fromDsl) {
+          setFailureGraph(fromDsl);
+          nextFailureNodeIndex.current = getNextIndexFromIds(
+            fromDsl.nodes.map((n) => n.id),
+            "failure-node"
+          );
+        } else {
+          setFailureGraph(createInitialFailureGraph(true));
+          nextFailureNodeIndex.current = 1;
+        }
       }
     };
 

@@ -509,7 +509,7 @@ export function DashboardPage() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="px-5 py-4">
+                    <TableCell className="align-middle px-5 py-4">
                       {latestRunForWorkflow ? (
                         <StatusBadge status={latestRunForWorkflow.status} />
                       ) : (
@@ -518,7 +518,7 @@ export function DashboardPage() {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell className="px-5 py-4">
+                    <TableCell className="align-middle px-5 py-4">
                       {latestRunForWorkflow ? (
                         <span className="text-base font-semibold text-slate-700">
                           {formatDuration(latestRunForWorkflow.durationMs)}
@@ -527,8 +527,8 @@ export function DashboardPage() {
                         <span className="text-sm text-slate-400">-</span>
                       )}
                     </TableCell>
-                    <TableCell className="px-5 py-4">
-                      <div className="flex items-center gap-2">
+                    <TableCell className="align-middle px-5 py-4">
+                      <div className="flex h-9 items-center gap-2">
                         <button
                           type="button"
                           onClick={(event) => {
@@ -583,7 +583,7 @@ export function DashboardPage() {
                       </div>
                     </TableCell>
                     <TableCell
-                      className="w-12 px-2 py-4 align-top"
+                      className="w-12 align-middle px-2 py-4"
                       onClick={(event) => event.stopPropagation()}
                     >
                       <button
