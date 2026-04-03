@@ -7004,7 +7004,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               <p className="text-xs font-semibold text-slate-700">
                 {NODE_CATEGORY_LABELS[selectedCategory]}
               </p>
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 max-h-[23rem] space-y-2 overflow-y-auto overscroll-y-contain pr-1">
                 {nodeTypesByCategory[selectedCategory].map((kind) => {
                   const config = nodeTypeConfig[kind];
                   return (
