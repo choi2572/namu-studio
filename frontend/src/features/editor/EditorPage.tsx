@@ -241,11 +241,9 @@ type EditorViewJson = {
   edges: EditorEdge[];
   canvas?: { width: number; height: number; zoom: number };
   /**
-   * 실패 핸들링 에디터 전용 상태
-   * - 런타임 DSL(`dsl_json`)에는 영향을 주지 않고, 에디터에서만 사용
+   * 실패 핸들링 캔버스 레이아웃만 보관. On/Off는 `dsl_json.OnFailure` 유무가 진실.
    */
   failure?: {
-    enabled: boolean;
     entryNodeId: string;
     nodes: EditorNode[];
     edges: EditorEdge[];
@@ -543,6 +541,49 @@ const CANVAS_DEFAULT = {
 
 /** 실패 처리 캔버스 기본 크기 (상하 플로우용) */
 const FAILURE_CANVAS_BASE = { width: 800, height: 1200 };
+
+function dslJsonHasOnFailureKey(dslJson: unknown): boolean {
+  return (
+    dslJson !== null &&
+    typeof dslJson === "object" &&
+    Object.prototype.hasOwnProperty.call(dslJson as Record<string, unknown>, "OnFailure")
+  );
+}
+
+/** 저장 시 에디터 그래프가 비어 있어도 DSL의 OnFailure를 잃지 않기 위해 로드 시 복제해 둔다. */
+function cloneDslOnFailureBlock(dslJson: unknown): Record<string, unknown> | null {
+  if (!isRecord(dslJson)) return null;
+  const onFailure = dslJson.OnFailure;
+  if (!onFailure || !isRecord(onFailure)) return null;
+  try {
+    return structuredClone(onFailure) as Record<string, unknown>;
+  } catch {
+    return JSON.parse(JSON.stringify(onFailure)) as Record<string, unknown>;
+  }
+}
+
+function createInitialFailureGraph(enabled: boolean): FailureHandlingGraph {
+  const entryId = "failure-entry-1";
+  return {
+    enabled,
+    drawerOpen: false,
+    entryNodeId: entryId,
+    nodes: [
+      {
+        id: entryId,
+        name: "On Workflow Failure",
+        kind: "system.on_failure_entry",
+        position: {
+          x: FAILURE_CANVAS_BASE.width / 2 - NODE_METRICS.width / 2,
+          y: 40
+        },
+        isExpanded: true,
+        params: {}
+      }
+    ],
+    edges: []
+  };
+}
 
 const ZOOM_LIMITS = {
   min: 0.6,
@@ -1076,8 +1117,6 @@ function parseEditorView(
 
   let failure: EditorViewJson["failure"] | undefined;
   if (rawFailure) {
-    const enabled =
-      typeof rawFailure.enabled === "boolean" ? rawFailure.enabled : false;
     const entryNodeId =
       typeof rawFailure.entryNodeId === "string"
         ? rawFailure.entryNodeId
@@ -1131,7 +1170,6 @@ function parseEditorView(
 
     if (isValidFailureNodes && isValidFailureEdges) {
       failure = {
-        enabled,
         entryNodeId,
         nodes: normalizedFailureNodes as EditorNode[],
         edges: rawFailureEdges as EditorEdge[]
@@ -1659,9 +1697,11 @@ function buildViewJson(
   edges: EditorEdge[],
   canvasBase: { width: number; height: number },
   zoom: number,
-  failureGraph: FailureHandlingGraph
+  failureGraph: FailureHandlingGraph,
+  /** 최종 `dsl_json`에 OnFailure가 있을 때만 실패 캔버스 레이아웃을 남긴다. */
+  persistFailureLayout: boolean
 ): EditorViewJson {
-  return {
+  const base: EditorViewJson = {
     version: "v1",
     nodes,
     edges,
@@ -1669,14 +1709,16 @@ function buildViewJson(
       width: canvasBase.width,
       height: canvasBase.height,
       zoom
-    },
-    failure: {
-      enabled: failureGraph.enabled,
+    }
+  };
+  if (persistFailureLayout) {
+    base.failure = {
       entryNodeId: failureGraph.entryNodeId,
       nodes: failureGraph.nodes,
       edges: failureGraph.edges
-    }
-  };
+    };
+  }
+  return base;
 }
 
 type DslBranch = {
@@ -3640,29 +3682,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
   const [publishToast, setPublishToast] = useState(false);
   const [failureFlowToastMessage, setFailureFlowToastMessage] = useState<string | null>(null);
-  const [failureGraph, setFailureGraph] = useState<FailureHandlingGraph>(() => {
-    const entryId = "failure-entry-1";
-    return {
-      enabled: false,
-      drawerOpen: false,
-      entryNodeId: entryId,
-      nodes: [
-        {
-          id: entryId,
-          name: "On Workflow Failure",
-          kind: "system.on_failure_entry",
-          // 실패 캔버스 기준 중앙 상단
-          position: {
-            x: FAILURE_CANVAS_BASE.width / 2 - NODE_METRICS.width / 2,
-            y: 40
-          },
-          isExpanded: true,
-          params: {}
-        }
-      ],
-      edges: []
-    };
-  });
+  const [failureGraph, setFailureGraph] = useState<FailureHandlingGraph>(() =>
+    createInitialFailureGraph(false)
+  );
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -3675,6 +3697,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const nextRetryThemeIndex = useRef(0);
   const nextFailureNodeIndex = useRef(1);
   const loadedWorkflowId = useRef<string | null>(null);
+  const preservedOnFailureDslRef = useRef<Record<string, unknown> | null>(null);
 
   /** 실패 캔버스에서 연결 시작 중인 (nodeId, portKey). null이면 메인 캔버스 연결. */
   const [failureConnectingFrom, setFailureConnectingFrom] = useState<{
@@ -3775,6 +3798,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
 
     if (!draftToApply) {
+      preservedOnFailureDslRef.current = null;
       setNodes([]);
       setEdges([]);
       setCanvasBase(getSize());
@@ -3782,20 +3806,40 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setHasUnsavedChanges(false);
       return;
     }
-    // DSL에 OnFailure 블록이 있는지 여부 (view_json에 failure 정보가 없을 때 enabled 플래그 복원용)
-    const hasOnFailure =
-      draftToApply.dsl_json &&
-      typeof draftToApply.dsl_json === "object" &&
-      draftToApply.dsl_json !== null &&
-      Object.prototype.hasOwnProperty.call(
-        draftToApply.dsl_json as Record<string, unknown>,
-        "OnFailure"
-      );
+
+    preservedOnFailureDslRef.current = cloneDslOnFailureBlock(draftToApply.dsl_json);
+
+    const hasOnFailure = dslJsonHasOnFailureKey(draftToApply.dsl_json);
 
     const parsed = parseEditorView(draftToApply.view_json, nodeTypes);
     let loadedNodes: EditorNode[] = [];
     let loadedEdges: EditorEdge[] = [];
     let canvas = parsed?.canvas;
+
+    const applyFailureStateFromDraft = () => {
+      if (!hasOnFailure) {
+        setFailureGraph(createInitialFailureGraph(false));
+        nextFailureNodeIndex.current = 1;
+        return;
+      }
+      const viewFailure = parsed?.failure;
+      if (viewFailure) {
+        setFailureGraph({
+          enabled: true,
+          drawerOpen: false,
+          entryNodeId: viewFailure.entryNodeId,
+          nodes: viewFailure.nodes,
+          edges: viewFailure.edges
+        });
+        nextFailureNodeIndex.current = getNextIndexFromIds(
+          viewFailure.nodes.map((node) => node.id),
+          "failure-node"
+        );
+      } else {
+        setFailureGraph(createInitialFailureGraph(true));
+        nextFailureNodeIndex.current = 1;
+      }
+    };
 
     if (parsed) {
       const normalizedNodes = normalizeContainerFrames(
@@ -3803,27 +3847,6 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       );
       loadedNodes = normalizedNodes;
       loadedEdges = filterEdgesByContainerRules(normalizedNodes, parsed.edges);
-      if (parsed.failure) {
-        setFailureGraph((prev) => ({
-          enabled: parsed.failure?.enabled ?? false,
-          drawerOpen: false,
-          entryNodeId: parsed.failure?.entryNodeId ?? prev.entryNodeId,
-          nodes: parsed.failure?.nodes ?? prev.nodes,
-          edges: parsed.failure?.edges ?? prev.edges
-        }));
-        // Failure 노드 id(failure-node-*) 기반으로 nextFailureNodeIndex 갱신
-        nextFailureNodeIndex.current = getNextIndexFromIds(
-          parsed.failure.nodes.map((node) => node.id),
-          "failure-node"
-        );
-      } else {
-        // view_json에 failure 정보가 없으면 DSL의 OnFailure 유무를 기준으로 enabled만 복원
-        setFailureGraph((prev) => ({
-          ...prev,
-          enabled: hasOnFailure,
-          drawerOpen: false
-        }));
-      }
     } else {
       const imported = parseDslToEditor(draftToApply.dsl_json, nodeTypeConfig);
       if (imported) {
@@ -3838,9 +3861,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setEdges([]);
       setCanvasBase(getSize());
       setZoom(1);
+      applyFailureStateFromDraft();
       setHasUnsavedChanges(false);
       return;
     }
+
+    applyFailureStateFromDraft();
 
     setNodes(loadedNodes);
     setEdges(loadedEdges);
@@ -3955,8 +3981,32 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   });
 
   const buildCurrentDraftPayload = () => {
-    const view_json = buildViewJson(nodes, validEdges, canvasBase, zoom, failureGraph);
-    const dsl_json = buildDslJson(nodes, validEdges, skillsetMap, failureGraph);
+    let dsl_json = buildDslJson(nodes, validEdges, skillsetMap, failureGraph) as Record<
+      string,
+      unknown
+    >;
+    let dslHasOnFailure = dslJsonHasOnFailureKey(dsl_json);
+    const hasFailureStartEdge = failureGraph.edges.some(
+      (e) => e.from === failureGraph.entryNodeId
+    );
+    if (
+      failureGraph.enabled &&
+      !dslHasOnFailure &&
+      !hasFailureStartEdge &&
+      preservedOnFailureDslRef.current
+    ) {
+      dsl_json = { ...dsl_json, OnFailure: preservedOnFailureDslRef.current };
+      dslHasOnFailure = true;
+    }
+    const view_json = buildViewJson(
+      nodes,
+      validEdges,
+      canvasBase,
+      zoom,
+      failureGraph,
+      dslHasOnFailure
+    );
+    preservedOnFailureDslRef.current = cloneDslOnFailureBlock(dsl_json);
     const updatedAt = new Date().toISOString();
     return { view_json, dsl_json, updatedAt };
   };
@@ -6371,11 +6421,17 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       type="button"
                       className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
                       onClick={() => {
-                        setFailureGraph((prev) => ({
-                          ...prev,
-                          enabled: !prev.enabled,
-                          drawerOpen: prev.enabled ? false : prev.drawerOpen
-                        }));
+                        setFailureGraph((prev) => {
+                          const nextEnabled = !prev.enabled;
+                          if (!nextEnabled) {
+                            preservedOnFailureDslRef.current = null;
+                          }
+                          return {
+                            ...prev,
+                            enabled: nextEnabled,
+                            drawerOpen: prev.enabled ? false : prev.drawerOpen
+                          };
+                        });
                       }}
                     >
                       <input
