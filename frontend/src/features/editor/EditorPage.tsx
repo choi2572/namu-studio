@@ -828,6 +828,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const EDITOR_NODE_CLIPBOARD_PREFIX = "namu-studio:editor-node:";
 
+/** 노드 단축키와 충돌하지 않도록, 실제 키보드 포커스가 폼/편집 필드에 있는지 판별한다. */
+function isEditableKeyboardTarget(event: KeyboardEvent): boolean {
+  const isEditableElement = (el: HTMLElement): boolean => {
+    const tag = el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+      return true;
+    }
+    if (el.isContentEditable) {
+      return true;
+    }
+    return el.getAttribute("contenteditable") === "true";
+  };
+
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && isEditableElement(active)) {
+    return true;
+  }
+
+  return event.composedPath().some(
+    (node) => node instanceof HTMLElement && isEditableElement(node)
+  );
+}
+
 function serializeEditorNodeClipboard(node: EditorNode): string {
   return EDITOR_NODE_CLIPBOARD_PREFIX + JSON.stringify({ v: 1, node });
 }
@@ -5777,12 +5800,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isTypingTarget =
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable);
+      const isTypingTarget = isEditableKeyboardTarget(event);
 
       const mod = event.metaKey || event.ctrlKey;
       if (mod) {
