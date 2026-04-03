@@ -2365,7 +2365,8 @@ function getCanvasSizeForNodes(
 
 function parseDslToEditor(
   dslJson: Record<string, unknown>,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
+  options?: { applyImportedLayout?: boolean }
 ): ParsedEditorGraph | null {
   if (!isRecord(dslJson)) return null;
   const states = (dslJson as { States?: Record<string, DslState> }).States;
@@ -2754,15 +2755,126 @@ function parseDslToEditor(
     }
   }
 
-  let nextNodes = applyImportedLayout(nodes, edges, nodeTypeConfig);
-  nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nextNodes));
+  let nextNodes: EditorNode[];
+  if (options?.applyImportedLayout === false) {
+    nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nodes));
+  } else {
+    nextNodes = applyImportedLayout(nodes, edges, nodeTypeConfig);
+    nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nextNodes));
+  }
+  const displayEdges = filterEdgesByContainerRules(nextNodes, edges);
   const canvas = getCanvasSizeForNodes(nextNodes, nodeTypeConfig);
   return {
     nodes: nextNodes,
-    edges: filterEdgesByContainerRules(nextNodes, edges),
+    edges: displayEdges,
     canvas: { ...canvas, zoom: 1 },
     rootStateNameToNodeId: workflowRootIdByState ?? new Map<string, string>()
   };
+}
+
+/** import·DSL 복원용: 엔트리에서 `Next` 체인 최장 거리로 레이어(행) 부여 */
+function assignFailureLayersFromEntry(
+  entryId: string,
+  nodeIds: Set<string>,
+  edges: EditorEdge[]
+): Map<string, number> {
+  const outgoing = new Map<string, string[]>();
+  nodeIds.forEach((id) => outgoing.set(id, []));
+  for (const e of edges) {
+    if (nodeIds.has(e.from) && nodeIds.has(e.to)) {
+      outgoing.get(e.from)!.push(e.to);
+    }
+  }
+  const layers = new Map<string, number>();
+  if (nodeIds.has(entryId)) {
+    layers.set(entryId, 0);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [from, tos] of outgoing.entries()) {
+      const base = layers.get(from);
+      if (base === undefined) continue;
+      for (const to of tos) {
+        const nextL = base + 1;
+        const cur = layers.get(to) ?? -1;
+        if (nextL > cur) {
+          layers.set(to, nextL);
+          changed = true;
+        }
+      }
+    }
+  }
+  const reachable = new Set<string>();
+  const stack = [entryId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (!nodeIds.has(id) || reachable.has(id)) continue;
+    reachable.add(id);
+    for (const to of outgoing.get(id) ?? []) {
+      stack.push(to);
+    }
+  }
+  let maxL = 0;
+  layers.forEach((v) => {
+    maxL = Math.max(maxL, v);
+  });
+  for (const id of nodeIds) {
+    if (!reachable.has(id)) {
+      layers.set(id, maxL + 1);
+    } else if (!layers.has(id)) {
+      layers.set(id, 0);
+    }
+  }
+  return layers;
+}
+
+/** view.failure 없이 OnFailure DSL만 있을 때: 위→아래 중앙 정렬 기본 레이아웃 */
+function layoutFailureGraphImportedDefaultVertical(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  entryNodeId: string,
+  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
+): EditorNode[] {
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  if (!nodeIds.has(entryNodeId)) return nodes;
+  const layers = assignFailureLayersFromEntry(entryNodeId, nodeIds, edges);
+  const byLayer = new Map<number, EditorNode[]>();
+  for (const node of nodes) {
+    const L = layers.get(node.id) ?? 0;
+    const g = byLayer.get(L) ?? [];
+    g.push(node);
+    byLayer.set(L, g);
+  }
+  const sortedLayerKeys = [...byLayer.keys()].sort((a, b) => a - b);
+  const positions = new Map<string, { x: number; y: number }>();
+  const canvasCenterX = FAILURE_CANVAS_BASE.width / 2;
+  let yCursor = 40;
+  const colGap = 28;
+  const rowGap = 56;
+
+  for (const L of sortedLayerKeys) {
+    const group = (byLayer.get(L) ?? []).sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    );
+    const maxH = Math.max(
+      ...group.map((n) => getNodeHeight(n, nodeTypeConfig)),
+      NODE_METRICS.collapsedHeight
+    );
+    const rowW =
+      group.length * NODE_METRICS.width + Math.max(0, group.length - 1) * colGap;
+    let x = canvasCenterX - rowW / 2;
+    for (const node of group) {
+      positions.set(node.id, { x, y: yCursor });
+      x += NODE_METRICS.width + colGap;
+    }
+    yCursor += maxH + rowGap;
+  }
+
+  return nodes.map((n) => {
+    const p = positions.get(n.id);
+    return p ? { ...n, position: p } : n;
+  });
 }
 
 /** `dsl_json.OnFailure`만 있고 view.failure가 없을 때 실패 핸들링 캔버스를 복구한다. */
@@ -2770,7 +2882,9 @@ function failureGraphFromOnFailureDsl(
   onFailureDsl: Record<string, unknown>,
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
 ): FailureHandlingGraph | null {
-  const parsed = parseDslToEditor(onFailureDsl, nodeTypeConfig);
+  const parsed = parseDslToEditor(onFailureDsl, nodeTypeConfig, {
+    applyImportedLayout: false
+  });
   const stateMap = parsed?.rootStateNameToNodeId;
   if (!parsed || !stateMap || parsed.nodes.length === 0) return null;
   const startAt =
@@ -2833,11 +2947,19 @@ function failureGraphFromOnFailureDsl(
     });
   }
 
+  const nodesBeforeLayout = [entryNode, ...remappedNodes];
+  const laidOutNodes = layoutFailureGraphImportedDefaultVertical(
+    nodesBeforeLayout,
+    remappedEdges,
+    entryId,
+    nodeTypeConfig
+  );
+
   return {
     enabled: true,
     drawerOpen: false,
     entryNodeId: entryId,
-    nodes: [entryNode, ...remappedNodes],
+    nodes: laidOutNodes,
     edges: remappedEdges
   };
 }
