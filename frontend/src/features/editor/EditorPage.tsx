@@ -1424,7 +1424,7 @@ function buildStateRecords(
         Type: "Retry",
         MaxAttempts: maxAttempts,
         StartAt: mainScope.startAt ?? undefined,
-        State: mainScope.states
+        States: mainScope.states
       };
       if (next) state.Next = next;
       else state.End = true;
@@ -1745,7 +1745,11 @@ type DslState = {
   Count?: number;
   RepeatCount?: number;
   StartAt?: string;
+  MaxAttempts?: number;
+  /** Retry 본문 (Repeat·Parallel과 동일 키). 레거시 export 키 `State`도 import 시 허용 */
   States?: Record<string, DslState> | Array<Record<string, DslState>>;
+  State?: Record<string, DslState>;
+  BeforeRetryAfterFailure?: Record<string, DslState>;
   Parameters?: Record<string, unknown>;
   Choices?: Array<Record<string, unknown>>;
   Expressions?: Array<{ operator?: string | null; expression?: string }>;
@@ -1954,7 +1958,7 @@ function getRetryScopeEndNodeId(
   return last;
 }
 
-/** Retry 한쪽 스코프(메인 또는 실패)의 서브플로우 State 맵과 StartAt 반환 */
+/** Retry 한쪽 스코프(메인 또는 실패)의 서브플로우 States 맵과 StartAt 반환 */
 function buildRetryScopeSubflow(
   retryNodeId: string,
   scopeType: "main" | "failure",
@@ -2363,6 +2367,71 @@ function getCanvasSizeForNodes(
   return { width: maxX, height: maxY };
 }
 
+function getRetryNestedStatesMap(state: DslState): Record<string, DslState> | undefined {
+  if (Array.isArray(state.States)) {
+    const merged: Record<string, DslState> = {};
+    for (const item of state.States) {
+      if (isRecord(item)) {
+        Object.assign(merged, item as Record<string, DslState>);
+      }
+    }
+    return Object.keys(merged).length > 0 ? merged : undefined;
+  }
+  if (isRecord(state.States)) {
+    return state.States as Record<string, DslState>;
+  }
+  if (isRecord(state.State)) {
+    return state.State as Record<string, DslState>;
+  }
+  return undefined;
+}
+
+function inferDslSubflowStartAt(body: Record<string, DslState>): string | null {
+  const keys = Object.keys(body);
+  if (keys.length === 0) return null;
+  if (keys.length === 1) return keys[0];
+  const targeted = new Set<string>();
+  for (const st of Object.values(body)) {
+    if (!st || typeof st !== "object") continue;
+    if (typeof st.Next === "string") targeted.add(st.Next);
+    if (st.Type === "Condition" && isRecord(st.If) && typeof st.If.Then === "string") {
+      targeted.add(st.If.Then);
+    }
+    if (typeof st.Else === "string") targeted.add(st.Else);
+  }
+  const roots = keys.filter((k) => !targeted.has(k));
+  if (roots.length === 1) return roots[0];
+  if (roots.length > 0) return [...roots].sort()[0];
+  return [...keys].sort()[0];
+}
+
+function findRetryLinearTerminal(
+  body: Record<string, DslState>,
+  startName: string,
+  innerIdByState: Map<string, string>
+): { stateName: string; nodeId: string } | null {
+  if (!startName || !innerIdByState.has(startName)) return null;
+  let currentName: string | null = startName;
+  const visited = new Set<string>();
+  while (currentName !== null && innerIdByState.has(currentName) && !visited.has(currentName)) {
+    visited.add(currentName);
+    const step: DslState | undefined = body[currentName];
+    if (!step) break;
+    if (step.Type === "Condition" || step.Type === "Choice") {
+      return { stateName: currentName, nodeId: innerIdByState.get(currentName)! };
+    }
+    if (step.End === true) {
+      return { stateName: currentName, nodeId: innerIdByState.get(currentName)! };
+    }
+    const nextName: string | null = typeof step.Next === "string" ? step.Next : null;
+    if (!nextName || !body[nextName]) {
+      return { stateName: currentName, nodeId: innerIdByState.get(currentName)! };
+    }
+    currentName = nextName;
+  }
+  return null;
+}
+
 function parseDslToEditor(
   dslJson: Record<string, unknown>,
   nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
@@ -2477,14 +2546,21 @@ function parseDslToEditor(
     }
     if (state.Type === "Parallel") return "flow_control.parallel";
     if (state.Type === "Repeat") return "flow_control.repeat";
+    if (state.Type === "Retry") return "flow_control.retry";
     const skillName = typeof state.Skill === "string" ? state.Skill : stateName;
     return `skill.${skillName}` as NodeKind;
   };
 
   const parseStateGroup = (
     groupStates: Record<string, DslState>,
-    context?: { containerId?: string; containerType?: ContainerType; branchIndex?: number }
-  ): Map<string, string> | undefined => {
+    context?: {
+      containerId?: string;
+      containerType?: ContainerType;
+      branchIndex?: number;
+      retryOwnerId?: string;
+      retryScopeType?: "main" | "failure";
+    }
+  ): Map<string, string> => {
     const idByState = new Map<string, string>();
     Object.entries(groupStates).forEach(([stateName, state]) => {
       const kind = createNodeKind(state, stateName);
@@ -2508,6 +2584,19 @@ function parseDslToEditor(
         if (repeatCount !== undefined) {
           params.count = `${repeatCount}`;
         }
+      }
+      if (kind === "flow_control.retry") {
+        const ma = state.MaxAttempts;
+        const n =
+          typeof ma === "number" && Number.isFinite(ma)
+            ? Math.max(1, Math.floor(ma))
+            : 2;
+        params.maxAttempts = String(n);
+        const fail = state.BeforeRetryAfterFailure;
+        const hasFail = isRecord(fail) && Object.keys(fail).length > 0;
+        params.onFailureEnabled = hasFail ? "true" : "false";
+        params.mainScopeEndId = "";
+        params.failureScopeEndId = "";
       }
       let conditionExpressions: ConditionExpression[] | undefined;
       if (kind === "flow_control.condition") {
@@ -2569,6 +2658,7 @@ function parseDslToEditor(
           ];
         }
       }
+      const inRetryScope = Boolean(context?.retryOwnerId);
       nodes.push({
         id,
         name:
@@ -2588,10 +2678,13 @@ function parseDslToEditor(
             : kind === "flow_control.output"
               ? []
               : undefined,
-        containerId: context?.containerId ?? null,
-        containerType: context?.containerType ?? null,
-        branchIndex:
-          context?.containerType === "parallel" ? context.branchIndex ?? 0 : null,
+        containerId: inRetryScope ? null : (context?.containerId ?? null),
+        containerType: inRetryScope ? null : (context?.containerType ?? null),
+        branchIndex: inRetryScope
+          ? null
+          : context?.containerType === "parallel"
+            ? context.branchIndex ?? 0
+            : null,
         containerFrame:
           kind === "flow_control.parallel"
             ? {
@@ -2607,7 +2700,16 @@ function parseDslToEditor(
               }
             : kind === "flow_control.repeat"
               ? getDefaultContainerFrameSize("repeat", 1)
-              : undefined
+              : undefined,
+        retryOwnerId: context?.retryOwnerId ?? null,
+        retryScopeType: context?.retryScopeType ?? null,
+        isRetryScopeEnd: false,
+        ...(kind === "flow_control.retry" && !inRetryScope
+          ? {
+              retryThemeColor:
+                RETRY_THEME_COLORS[stateName.length % RETRY_THEME_COLORS.length]!.key
+            }
+          : {})
       });
     });
 
@@ -2671,7 +2773,11 @@ function parseDslToEditor(
             to: falseTarget
           });
         }
-      } else if (typeof state.Next === "string" && idByState.has(state.Next)) {
+      } else if (
+        state.Type !== "Retry" &&
+        typeof state.Next === "string" &&
+        idByState.has(state.Next)
+      ) {
         edges.push({
           id: `edge-${edgeIndex++}`,
           from: fromId,
@@ -2716,12 +2822,93 @@ function parseDslToEditor(
           });
         });
       }
+      if (state.Type === "Retry") {
+        const retryId = idByState.get(stateName);
+        if (!retryId) return;
+        const mainBody = getRetryNestedStatesMap(state);
+        const startAt =
+          typeof state.StartAt === "string" && mainBody && mainBody[state.StartAt]
+            ? state.StartAt
+            : mainBody
+              ? inferDslSubflowStartAt(mainBody)
+              : null;
+        if (mainBody && startAt) {
+          const innerMap = parseStateGroup(mainBody, {
+            retryOwnerId: retryId,
+            retryScopeType: "main"
+          });
+          const mainStartNodeId = innerMap.get(startAt);
+          if (mainStartNodeId) {
+            edges.push({
+              id: `edge-${edgeIndex++}`,
+              from: retryId,
+              fromPort: "main",
+              to: mainStartNodeId
+            });
+          }
+          const terminal = findRetryLinearTerminal(mainBody, startAt, innerMap);
+          if (terminal) {
+            const ti = nodes.findIndex((n) => n.id === terminal.nodeId);
+            if (ti >= 0) {
+              nodes[ti] = { ...nodes[ti]!, isRetryScopeEnd: true };
+            }
+            const ri = nodes.findIndex((n) => n.id === retryId);
+            if (ri >= 0) {
+              const rn = nodes[ri]!;
+              nodes[ri] = {
+                ...rn,
+                params: { ...rn.params, mainScopeEndId: terminal.nodeId }
+              };
+            }
+            if (typeof state.Next === "string" && idByState.has(state.Next)) {
+              edges.push({
+                id: `edge-${edgeIndex++}`,
+                from: terminal.nodeId,
+                fromPort: "next",
+                to: idByState.get(state.Next) as string
+              });
+            }
+          }
+        }
+        const failRaw = state.BeforeRetryAfterFailure;
+        if (isRecord(failRaw) && Object.keys(failRaw).length > 0) {
+          const failBody = failRaw as Record<string, DslState>;
+          const fStart = inferDslSubflowStartAt(failBody);
+          if (fStart) {
+            const innerFailMap = parseStateGroup(failBody, {
+              retryOwnerId: retryId,
+              retryScopeType: "failure"
+            });
+            const failStartId = innerFailMap.get(fStart);
+            if (failStartId) {
+              edges.push({
+                id: `edge-${edgeIndex++}`,
+                from: retryId,
+                fromPort: "failure",
+                to: failStartId
+              });
+            }
+            const fTerminal = findRetryLinearTerminal(failBody, fStart, innerFailMap);
+            if (fTerminal) {
+              const fi = nodes.findIndex((n) => n.id === fTerminal.nodeId);
+              if (fi >= 0) {
+                nodes[fi] = { ...nodes[fi]!, isRetryScopeEnd: true };
+              }
+              const ri = nodes.findIndex((n) => n.id === retryId);
+              if (ri >= 0) {
+                const rn = nodes[ri]!;
+                nodes[ri] = {
+                  ...rn,
+                  params: { ...rn.params, failureScopeEndId: fTerminal.nodeId }
+                };
+              }
+            }
+          }
+        }
+      }
     });
 
-    if (context === undefined) {
-      return idByState;
-    }
-    return undefined;
+    return idByState;
   };
 
   const workflowRootIdByState = parseStateGroup(states);

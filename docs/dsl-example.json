@@ -92,7 +92,7 @@
       "Type": "Retry",
       "MaxAttempts": 2,
       "StartAt": "CriticalAction_1",
-      "State": {
+      "States": {
         "CriticalAction_1": {
           "Type": "Skill",
           "Skill": "robot.ExecuteAction",
