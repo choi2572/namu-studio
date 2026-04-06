@@ -18,6 +18,7 @@ export const workflowVersions: Record<string, WorkflowVersionSummary> = {
   }
 };
 
+/** 백엔드 `app/seed.py` 시드 워크플로 개수(4)와 맞춤 — Mock 모드에서도 Total Workflows 카드가 E2E와 동일하게 보이도록 */
 export const workflowList: WorkflowListItem[] = [
   {
     workflowId: "workflow-001",
@@ -41,6 +42,28 @@ export const workflowList: WorkflowListItem[] = [
       failureCode: null,
       failureMessage: null
     }
+  },
+  {
+    workflowId: "workflow-003",
+    name: "Seeded Condition + Parallel Workflow",
+    state: "PUBLISHED",
+    latestVersion: {
+      versionId: "version-003",
+      versionNumber: "v1",
+      publishedAt: "2026-01-15T10:00:00Z"
+    },
+    latestRun: null
+  },
+  {
+    workflowId: "workflow-004",
+    name: "Seeded Wait Workflow",
+    state: "PUBLISHED",
+    latestVersion: {
+      versionId: "version-004",
+      versionNumber: "v1",
+      publishedAt: "2026-01-15T11:00:00Z"
+    },
+    latestRun: null
   }
 ];
 
