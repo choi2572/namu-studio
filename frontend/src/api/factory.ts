@@ -31,10 +31,12 @@ export function createMiddlewareApi(): MiddlewareApi {
     return mockMiddlewareApi;
   }
   if (process.env.NODE_ENV === "development") {
-    console.log("[API Factory] Using HTTP middleware API");
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api";
+    console.log("[API Factory] Using HTTP middleware API (REST via backend /api/v1 proxy)");
+    console.log(`[API Factory] Backend API base: ${apiBase}`);
     console.log(
-      `[API Factory] Middleware Base URL: ${
-        process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api"
+      `[API Factory] Monitor WebSocket (browser → middleware): ${
+        process.env.NEXT_PUBLIC_MIDDLEWARE_BASE_URL || "http://127.0.0.1:8000"
       }`
     );
   }

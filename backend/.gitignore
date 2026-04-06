@@ -25,3 +25,7 @@ wheels/
 .coverage
 htmlcov/
 data.json
+
+# Playwright E2E 전용 SQLite (+ WAL)
+data/e2e-playwright.db
+data/e2e-playwright.db-*
