@@ -154,3 +154,4 @@ test.describe("Smoke: Editor · 앱 셸 내비게이션", () => {
     await expect(page.getByTestId("dashboard-page")).toBeVisible();
   });
 });
+

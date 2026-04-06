@@ -9,6 +9,8 @@
     "start": "next start",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test tests/e2e/smoke.*.spec.ts",
+    "test:e2e:regression": "playwright test tests/e2e/editor.regression.spec.ts",
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
