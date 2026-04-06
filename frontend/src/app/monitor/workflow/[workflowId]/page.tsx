@@ -140,7 +140,7 @@ export default function MonitorWorkflowPage() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden" data-testid="monitor-workflow-page">
       <div className="flex-shrink-0 border-b border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h1 className="text-xl font-semibold">{workflowName}</h1>

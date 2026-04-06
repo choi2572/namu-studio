@@ -950,7 +950,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   }, [actionStatusToast]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden" data-testid="monitor-run-page">
       {/* Top Bar: Left - Workflow name, Right - Run state + Cancel/Replay controls */}
       <div className="flex-shrink-0 border-b border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
