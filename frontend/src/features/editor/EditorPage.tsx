@@ -3354,9 +3354,7 @@ function NodeCard({
       indicator: theme.indicator
     };
   }
-  const nodeTypeLabel = node.kind === "flow_control.condition" 
-    ? "Condition" 
-    : NODE_CATEGORY_LABELS[config.category];
+  const nodeTypeLabel = NODE_CATEGORY_LABELS[config.category];
 
   // 툴팁 내용 생성 (type은 namespace.name 형태로 표시)
   const tooltipContent = skillset
