@@ -74,6 +74,7 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       env: {
+        NEXT_E2E: "true",
         NEXT_PUBLIC_USE_MOCK_API: "false",
         NEXT_PUBLIC_API_BASE_URL: "http://127.0.0.1:5000/api",
         NEXT_PUBLIC_MIDDLEWARE_BASE_URL: "http://127.0.0.1:8000"
