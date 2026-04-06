@@ -194,7 +194,7 @@ export function DashboardPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="dashboard-page">
       {rowMenu ? (
         <>
           <div

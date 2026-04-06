@@ -10,6 +10,11 @@ build/
 out/
 coverage/
 
+# Playwright
+playwright-report/
+test-results/
+blob-report/
+
 # Tooling caches
 .turbo/
 .cache/

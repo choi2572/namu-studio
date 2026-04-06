@@ -6799,7 +6799,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   }, [failureFlowToastMessage]);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col gap-6">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-6" data-testid="editor-page">
       <input
         ref={importFileInputRef}
         type="file"
@@ -7029,6 +7029,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               onClick={() => setShowWorkflowMenu((prev) => !prev)}
               className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border-2 border-slate-300 bg-slate-100 text-slate-700 hover:border-slate-400 hover:bg-slate-200"
               aria-label="Workflow menu"
+              data-testid="workflow-menu-button"
               title="Workflow menu (Save, Publish, Failure Handling)"
             >
               <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
@@ -7051,6 +7052,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   <button
                     type="button"
                     className="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                    data-testid="workflow-menu-save"
                     onClick={() => {
                       setShowWorkflowMenu(false);
                       handleSave();
@@ -7061,6 +7063,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   <button
                     type="button"
                     className="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                    data-testid="workflow-menu-publish"
                     onClick={() => {
                       if (hasErrors) return;
                       setShowWorkflowMenu(false);

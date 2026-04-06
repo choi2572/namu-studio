@@ -58,7 +58,7 @@ export function HistoryPage() {
   }, [runs, runsPage]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="run-history-page">
       <div>
         <p className="text-xs text-slate-500">Run History</p>
         <h1 className="text-xl font-semibold">All Runs</h1>

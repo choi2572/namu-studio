@@ -1,5 +1,10 @@
 import { MiddlewareApi, RunsApi, SkillsetsApi, WorkflowsApi } from "@/api/interfaces";
-import { mockMiddlewareApi, mockRunsApi, mockWorkflowsApi } from "@/api/mock/mockApi";
+import {
+  mockMiddlewareApi,
+  mockRunsApi,
+  mockSkillsetsApi,
+  mockWorkflowsApi
+} from "@/api/mock/mockApi";
 import { httpMiddlewareApi, httpRunsApi, httpSkillsetsApi, httpWorkflowsApi } from "@/api/http/httpApi";
 
 const USE_MOCK_API = process.env.NEXT_PUBLIC_USE_MOCK_API === "true";
@@ -51,6 +56,12 @@ export function createRunsApi(): RunsApi {
 }
 
 export function createSkillsetsApi(): SkillsetsApi {
+  if (USE_MOCK_API) {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[API Factory] Using mock skillsets API");
+    }
+    return mockSkillsetsApi;
+  }
   // Skillsets: frontend → backend → middleware GET /api/v1/skill-set
   if (process.env.NODE_ENV === "development") {
     console.log("[API Factory] Using HTTP skillsets API (GET /capabilities/skill-set → middleware)");

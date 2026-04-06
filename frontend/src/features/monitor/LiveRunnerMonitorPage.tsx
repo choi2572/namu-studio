@@ -910,7 +910,7 @@ export function LiveRunnerMonitorPage() {
         : "Disconnected";
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden" data-testid="monitor-page">
       <div className="flex-shrink-0 border-b border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -1103,7 +1103,10 @@ export function LiveRunnerMonitorPage() {
             Loading workflow definition…
           </div>
         ) : showEmpty ? (
-          <div className="flex flex-1 items-center justify-center text-slate-500">
+          <div
+            className="flex flex-1 items-center justify-center text-slate-500"
+            data-testid="monitor-empty-state"
+          >
             No workflow is currently running
           </div>
         ) : (
