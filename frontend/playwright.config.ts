@@ -7,7 +7,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = __dirname;
 const backendRoot = path.resolve(__dirname, "..", "backend");
 
-const reuseExistingServer = !process.env.CI;
+/**
+ * 기본값은 재사용하지 않음.
+ *
+ * 로컬에서 이미 3000/5000/8000에 떠 있는 프로세스를 재사용하면, Playwright가 여기서
+ * 넘기는 `SEED_DATA`, `DB_PATH`, `NEXT_PUBLIC_*` 등이 적용되지 않아 시드 E2E가 전부 실패할 수 있다.
+ * 재사용은 `PLAYWRIGHT_REUSE_SERVER=1` 일 때만 (빠른 반복용).
+ * CI에서는 `CI=true`이며 재사용하지 않는다.
+ */
+const reuseExistingServer =
+  process.env.CI !== "true" && process.env.PLAYWRIGHT_REUSE_SERVER === "true";
 
 /**
  * E2E 기본 스택: mock_middleware(8000) + Flask 백엔드(SQLite, middleware 엔진) + Next.js(3000)
