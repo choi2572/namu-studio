@@ -19,6 +19,7 @@ The server listens at **http://localhost:8000**.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/v1/workflows/run` | Start or cancel workflow. Body: `request_type` (`"start"` \| `"cancel"`), `workflow_json` (DSL) for start. |
+| `GET` | `/api/v1/skill-sets` | Skill catalog (`{ "skill_sets": [...] }`). Matches backend `MiddlewareClient.get_skill_set()`. |
 | `GET` | `/api/v1/runner/status` | Runner status: `idle` \| `running` \| `error`, plus workflow progress when running. |
 | `GET` | `/api/v1/workflows/<workflow_id>` | Workflow info: `node_history`, `progress`, etc. |
 | `WS` | `/api/v1/workflows/monitor` | WebSocket: initial state, then `node_status_change`, `workflow_completed` (simulated). Node duration: 3s when `MOCK_VLM_DYNAMIC_PATCH=true`, else 2s. Optional: `graph_patch` sequence when `MOCK_VLM_DYNAMIC_PATCH=true`. |

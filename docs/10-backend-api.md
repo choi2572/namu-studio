@@ -101,7 +101,7 @@
 ## 4. Capabilities API (`/api/capabilities`)
 
 ### `GET /api/capabilities/skill-set`
-- middleware `GET /api/v1/skill-set` 프록시 결과 반환
+- middleware `GET /api/v1/skill-sets` 프록시 결과 반환
 
 ### `GET /api/capabilities/skills`
 - 더미 skill 목록 반환 (현재 하드코딩)

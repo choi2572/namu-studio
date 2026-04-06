@@ -130,8 +130,8 @@ class MiddlewareClient:
         )
 
     def get_skill_set(self) -> Dict[str, Any]:
-        """GET /api/v1/skill-set from middleware (skillsets list)."""
-        return self._request("GET", "/api/v1/skill-set")
+        """GET /api/v1/skill-sets from middleware (skillsets list)."""
+        return self._request("GET", "/api/v1/skill-sets")
 
 
 def _apply_initial_to_db(

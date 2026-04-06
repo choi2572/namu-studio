@@ -92,7 +92,7 @@
 
 ## 4. 스킬셋 조회
 
-### `GET /api/v1/skill-set`
+### `GET /api/v1/skill-sets`
 - 스킬셋 목록 반환
 - 프론트 `skillsetsApi`가 사용
 

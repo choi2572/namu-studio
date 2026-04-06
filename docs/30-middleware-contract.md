@@ -26,7 +26,7 @@
 - `POST /api/v1/workflows/run` (`request_type=start|cancel`)
 - `GET /api/v1/workflows/{workflow_id}`
 - `GET /api/v1/workflows/{workflow_id}/json`
-- `GET /api/v1/skill-set`
+- `GET /api/v1/skill-sets`
 - `POST /api/v1/workflows/action-status`
 
 백엔드 외부 노출 프록시:

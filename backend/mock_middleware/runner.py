@@ -1,5 +1,47 @@
-"""Simulate workflow execution order from DSL (StartAt, Next, Condition, Parallel)."""
+"""Simulate workflow execution order from DSL (StartAt, Next, Condition, Parallel, Repeat, Retry)."""
 from typing import Any, Dict, List, Optional, Tuple
+
+
+def _eval_if_condition(if_block: Dict[str, Any]) -> bool:
+    """Evaluate If.Condition (Variable, Operator, Value) like the real runner; default True if malformed."""
+    cond = (if_block or {}).get("Condition")
+    if not isinstance(cond, dict):
+        return True
+    var = cond.get("Variable")
+    op = str(cond.get("Operator") or "==").strip()
+    val = cond.get("Value")
+
+    def as_num(x: Any) -> Optional[float]:
+        if isinstance(x, bool):
+            return None
+        if isinstance(x, (int, float)):
+            return float(x)
+        if isinstance(x, str):
+            try:
+                return float(x)
+            except ValueError:
+                return None
+        return None
+
+    vn, nn = as_num(var), as_num(val)
+    if vn is not None and nn is not None:
+        if op == ">=":
+            return vn >= nn
+        if op == "<=":
+            return vn <= nn
+        if op == ">":
+            return vn > nn
+        if op == "<":
+            return vn < nn
+        if op == "==":
+            return vn == nn
+        if op == "!=":
+            return vn != nn
+    if op == "==":
+        return var == val
+    if op == "!=":
+        return var != val
+    return False
 
 
 def _resolve_start_state(dsl: Dict[str, Any], states: Dict[str, Any]) -> Optional[str]:
@@ -66,10 +108,10 @@ def get_execution_order(dsl: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]
             return
         if stype == "Condition":
             order.append((name, state))
-            # Mock: always take Then
-            then_next = (state.get("If") or {}).get("Then")
+            if_block = state.get("If") or {}
+            then_next = if_block.get("Then")
             else_next = state.get("Else")
-            next_name = then_next or else_next
+            next_name = (then_next if _eval_if_condition(if_block) else else_next) or ""
             if next_name:
                 collect_from(next_name)
         elif stype == "Parallel":
@@ -78,7 +120,17 @@ def get_execution_order(dsl: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]
             next_name = state.get("Next")
             if next_name:
                 collect_from(next_name)
-        elif stype in ("Skill", "Pass", "Wait"):
+        elif stype == "Repeat":
+            order.append((name, state))
+            next_name = state.get("Next")
+            if next_name:
+                collect_from(next_name)
+        elif stype == "Retry":
+            order.append((name, state))
+            next_name = state.get("Next")
+            if next_name:
+                collect_from(next_name)
+        elif stype in ("Skill", "Pass", "Wait", "Succeed", "Fail"):
             order.append((name, state))
             next_name = state.get("Next")
             if next_name:

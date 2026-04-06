@@ -62,7 +62,7 @@ export function createSkillsetsApi(): SkillsetsApi {
     }
     return mockSkillsetsApi;
   }
-  // Skillsets: frontend → backend → middleware GET /api/v1/skill-set
+  // Skillsets: frontend → backend → middleware GET /api/v1/skill-sets
   if (process.env.NODE_ENV === "development") {
     console.log("[API Factory] Using HTTP skillsets API (GET /capabilities/skill-set → middleware)");
     console.log(`[API Factory] Base URL: ${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api"}`);

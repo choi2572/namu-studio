@@ -38,6 +38,26 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _patch_latest_running_history(
+    state_name: str,
+    *,
+    status: str,
+    completed_at: str,
+    duration_ms: Optional[int] = None,
+    output: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Repeat 등으로 동일 state_name이 연속 실행될 때, 가장 최근 RUNNING 행만 완료 처리한다."""
+    for n in reversed(_state["node_history"]):
+        if n.get("node_name") == state_name and (n.get("status") or "").upper() == "RUNNING":
+            n["status"] = status
+            n["completed_at"] = completed_at
+            if duration_ms is not None:
+                n["duration_ms"] = duration_ms
+            if output is not None:
+                n["output"] = output
+            break
+
+
 def _broadcast(data: Dict[str, Any]) -> None:
     msg = json.dumps(data)
     with _ws_clients_lock:
@@ -217,13 +237,13 @@ def _broadcast_dynamic_node_status(
             })
         else:
             _state["current_node"] = None
-            for n in _state["node_history"]:
-                if n.get("node_name") == node_name:
-                    n["status"] = status
-                    n["completed_at"] = ts
-                    n["duration_ms"] = duration_ms
-                    n["output"] = output or {}
-                    break
+            _patch_latest_running_history(
+                node_name,
+                status=status,
+                completed_at=ts,
+                duration_ms=duration_ms,
+                output=output or {},
+            )
 
 
 def _run_dynamic_nodes_sequence(workflow_id: str, node_names: List[str]) -> None:
@@ -422,13 +442,13 @@ def _run_one_node(
         "duration_ms": duration_ms,
     })
     with _state["lock"]:
-        for n in _state["node_history"]:
-            if n.get("node_name") == state_name:
-                n["status"] = "SUCCESS"
-                n["completed_at"] = completed_at
-                n["duration_ms"] = duration_ms
-                n["output"] = output
-                break
+        _patch_latest_running_history(
+            state_name,
+            status="SUCCESS",
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            output=output,
+        )
         _state["current_node"] = None
         _state["updated_at"] = completed_at
 
@@ -458,8 +478,8 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         (name for name, def_ in reversed(order) if def_.get("End")),
         None,
     )
-    total_duration_ms = 0
     total_duration_ms_ref = [0]
+    history_count_at_finish = 0
 
     cancelled = False
     for state_name, state_def in order:
@@ -564,16 +584,183 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                 "duration_ms": duration_ms,
             })
             with _state["lock"]:
-                for n in _state["node_history"]:
-                    if n.get("node_name") == state_name:
-                        n["status"] = "SUCCESS"
-                        n["completed_at"] = parallel_end
-                        n["duration_ms"] = duration_ms
-                        n["output"] = output
-                        break
+                _patch_latest_running_history(
+                    state_name,
+                    status="SUCCESS",
+                    completed_at=parallel_end,
+                    duration_ms=duration_ms,
+                    output=output,
+                )
                 _state["current_node"] = None
                 _state["updated_at"] = parallel_end
             total_duration_ms_ref[0] += duration_ms
+            continue
+
+        if stype == "Repeat":
+            try:
+                repeat_count = max(1, int(state_def.get("RepeatCount") or 1))
+            except (TypeError, ValueError):
+                repeat_count = 1
+            inner_states = state_def.get("States") or {}
+            inner_start = state_def.get("StartAt")
+            inner_order = get_branch_order(
+                deepcopy({"States": inner_states, "StartAt": inner_start})
+            )
+            repeat_start = _now_iso()
+            with _state["lock"]:
+                if _state["cancelled"]:
+                    cancelled = True
+                    break
+                _state["current_node"] = state_name
+                _state["updated_at"] = repeat_start
+            _broadcast({
+                "type": "node_status_change",
+                "workflow_id": workflow_id,
+                "timestamp": repeat_start,
+                "node_name": state_name,
+                "prev_status": "IDLE",
+                "status": "RUNNING",
+                "input": {"RepeatCount": repeat_count, "inner_states": len(inner_order)},
+            })
+            with _state["lock"]:
+                _state["node_history"].append({
+                    "node_name": state_name,
+                    "status": "RUNNING",
+                    "started_at": repeat_start,
+                    "completed_at": None,
+                    "duration_ms": None,
+                    "input": {"RepeatCount": repeat_count},
+                    "output": None,
+                })
+                _state["updated_at"] = repeat_start
+            repeat_broken = False
+            for _ in range(repeat_count):
+                for inner_name, inner_def in inner_order:
+                    with _state["lock"]:
+                        if _state["cancelled"]:
+                            cancelled = True
+                            repeat_broken = True
+                            break
+                    if repeat_broken:
+                        break
+                    _run_one_node(workflow_id, inner_name, inner_def, total_duration_ms_ref)
+                if repeat_broken:
+                    break
+            if cancelled:
+                break
+            repeat_end = _now_iso()
+            try:
+                ra = datetime.fromisoformat(repeat_start.replace("Z", "+00:00"))
+                rb = datetime.fromisoformat(repeat_end.replace("Z", "+00:00"))
+                repeat_duration_ms = int((rb - ra).total_seconds() * 1000)
+            except Exception:
+                repeat_duration_ms = 2000 * repeat_count * max(len(inner_order), 1)
+            repeat_output = {"result": "ok", "repeat_count": repeat_count, "inner_steps": len(inner_order)}
+            _broadcast({
+                "type": "node_status_change",
+                "workflow_id": workflow_id,
+                "timestamp": repeat_end,
+                "node_name": state_name,
+                "prev_status": "RUNNING",
+                "status": "SUCCESS",
+                "output": repeat_output,
+                "duration_ms": repeat_duration_ms,
+            })
+            with _state["lock"]:
+                _patch_latest_running_history(
+                    state_name,
+                    status="SUCCESS",
+                    completed_at=repeat_end,
+                    duration_ms=repeat_duration_ms,
+                    output=repeat_output,
+                )
+                _state["current_node"] = None
+                _state["updated_at"] = repeat_end
+            total_duration_ms_ref[0] += repeat_duration_ms
+            if state_def.get("End") and state_name == workflow_terminal:
+                break
+            continue
+
+        if stype == "Retry":
+            inner_states = state_def.get("States") or {}
+            inner_start = state_def.get("StartAt")
+            inner_order = get_branch_order(
+                deepcopy({"States": inner_states, "StartAt": inner_start})
+            )
+            retry_start = _now_iso()
+            with _state["lock"]:
+                if _state["cancelled"]:
+                    cancelled = True
+                    break
+                _state["current_node"] = state_name
+                _state["updated_at"] = retry_start
+            max_attempts = state_def.get("MaxAttempts", 1)
+            try:
+                max_attempts_int = max(1, int(max_attempts))
+            except (TypeError, ValueError):
+                max_attempts_int = 1
+            _broadcast({
+                "type": "node_status_change",
+                "workflow_id": workflow_id,
+                "timestamp": retry_start,
+                "node_name": state_name,
+                "prev_status": "IDLE",
+                "status": "RUNNING",
+                "input": {"MaxAttempts": max_attempts_int},
+            })
+            with _state["lock"]:
+                _state["node_history"].append({
+                    "node_name": state_name,
+                    "status": "RUNNING",
+                    "started_at": retry_start,
+                    "completed_at": None,
+                    "duration_ms": None,
+                    "input": {"MaxAttempts": max_attempts_int},
+                    "output": None,
+                })
+                _state["updated_at"] = retry_start
+            for inner_name, inner_def in inner_order:
+                with _state["lock"]:
+                    if _state["cancelled"]:
+                        cancelled = True
+                        break
+                if cancelled:
+                    break
+                _run_one_node(workflow_id, inner_name, inner_def, total_duration_ms_ref)
+            if cancelled:
+                break
+            # 성공 경로: 첫 시도에서 메인 스코프 완료 (docs/dsl-example.json). BeforeRetryAfterFailure는 실패 재시도 시에만 의미 있음.
+            retry_end = _now_iso()
+            try:
+                ra = datetime.fromisoformat(retry_start.replace("Z", "+00:00"))
+                rb = datetime.fromisoformat(retry_end.replace("Z", "+00:00"))
+                retry_duration_ms = int((rb - ra).total_seconds() * 1000)
+            except Exception:
+                retry_duration_ms = 2000 * max(len(inner_order), 1)
+            retry_output = {"result": "ok", "attempts_used": 1, "max_attempts": max_attempts_int}
+            _broadcast({
+                "type": "node_status_change",
+                "workflow_id": workflow_id,
+                "timestamp": retry_end,
+                "node_name": state_name,
+                "prev_status": "RUNNING",
+                "status": "SUCCESS",
+                "output": retry_output,
+                "duration_ms": retry_duration_ms,
+            })
+            with _state["lock"]:
+                _patch_latest_running_history(
+                    state_name,
+                    status="SUCCESS",
+                    completed_at=retry_end,
+                    duration_ms=retry_duration_ms,
+                    output=retry_output,
+                )
+                _state["current_node"] = None
+                _state["updated_at"] = retry_end
+            total_duration_ms_ref[0] += retry_duration_ms
+            if state_def.get("End") and state_name == workflow_terminal:
+                break
             continue
 
         _run_one_node(workflow_id, state_name, state_def, total_duration_ms_ref)
@@ -586,6 +773,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         _run_vlm_dynamic_scenario_scheduler(workflow_id)
 
     with _state["lock"]:
+        history_count_at_finish = len(_state["node_history"])
         _state["runner_status"] = "idle"
         _state["workflow_id"] = None
         _state["workflow_dsl"] = None
@@ -607,69 +795,181 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
             "status": "succeeded",
             "final_stats": {
                 "total_duration_ms": total_duration_ms_ref[0],
-                "total_nodes": len(order),
-                "successful_nodes": len(order),
+                "total_nodes": max(history_count_at_finish, 1),
+                "successful_nodes": max(history_count_at_finish, 1),
                 "failed_nodes": 0,
             },
         })
 
 
-# Mock skill-set for GET /api/v1/skill-set (middleware). name, version, description, namespace + parameters, outputs, etc.
+def _mock_skill_entry(
+    namespace: str,
+    name: str,
+    description: str,
+    parameters: Dict[str, Any],
+    outputs: Optional[Dict[str, Any]] = None,
+    *,
+    allow_status_external_change: bool = False,
+) -> Dict[str, Any]:
+    return {
+        "namespace": namespace,
+        "name": name,
+        "version": "0.0.1",
+        "description": description,
+        "allow_status_external_change": allow_status_external_change,
+        "parameters": parameters,
+        "outputs": outputs or {},
+        "feedback": [],
+        "pre_conditions": [],
+        "post_effects": [],
+    }
+
+
+# GET /api/v1/skill-sets — docs/middleware-api-spec.md, backend MiddlewareClient (shape: skill_sets[])
+# 스킬 목록은 docs/dsl-example.json 및 VLM graph_patch 시나리오(Pick/Place)와 맞춘다.
 MOCK_SKILL_SET = {
     "skill_sets": [
-        {
-            "namespace": "default",
-            "name": "PickObject",
-            "version": "0.0.1",
-            "description": "Pick an object from a target location",
-            "allow_status_external_change": True,
-            "parameters": {
+        _mock_skill_entry(
+            "vision",
+            "PreprocessFrame",
+            "Preprocess a frame for downstream vision",
+            {
+                "target": {"type": "string", "description": "Target object id"},
+                "normalize": {"type": "bool", "description": "Normalize pixel values"},
+            },
+            {"frame_id": {"type": "string", "description": "Processed frame id"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "qa",
+            "ValidateFrame",
+            "Validate frame quality",
+            {"threshold": {"type": "double", "description": "Quality threshold"}},
+            {"valid": {"type": "bool", "description": "Whether frame passed"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "analysis",
+            "DetectObjects",
+            "Run object detection",
+            {"model": {"type": "string", "description": "Detector model id"}},
+            {"detections": {"type": "object", "description": "Detection list"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "tracking",
+            "TrackTargets",
+            "Track targets in scene",
+            {"maxTargets": {"type": "int", "description": "Max concurrent targets"}},
+            {"tracks": {"type": "object", "description": "Active tracks"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "robot",
+            "ExecuteAction",
+            "Execute a robot action",
+            {
+                "target": {"type": "string", "description": "Target id"},
+                "safeMode": {"type": "bool", "description": "Use safe motion limits"},
+            },
+            {"ok": {"type": "bool", "description": "Action completed"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "qa",
+            "VerifyResult",
+            "Verify a step result",
+            {"mustPass": {"type": "bool", "description": "Treat failure as fatal"}},
+            {"passed": {"type": "bool", "description": "Verification outcome"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "system",
+            "CleanupTemp",
+            "Clean temporary resources",
+            {"aggressive": {"type": "bool", "description": "Aggressive cleanup"}},
+            {"cleaned": {"type": "bool", "description": "Cleanup ran"}},
+            allow_status_external_change=False,
+        ),
+        _mock_skill_entry(
+            "system",
+            "NotifyOps",
+            "Notify operations channel",
+            {
+                "channel": {"type": "string", "description": "Notification channel"},
+                "severity": {"type": "string", "description": "Severity"},
+                "message": {"type": "string", "description": "Message body"},
+            },
+            {"notified": {"type": "bool", "description": "Notification sent"}},
+            allow_status_external_change=False,
+        ),
+        _mock_skill_entry(
+            "system",
+            "CreateIncidentTicket",
+            "Create an incident ticket",
+            {
+                "project": {"type": "string", "description": "Project key"},
+                "autoAssign": {"type": "bool", "description": "Auto-assign owner"},
+            },
+            {"ticket_id": {"type": "string", "description": "Created ticket id"}},
+            allow_status_external_change=False,
+        ),
+        # VLM dynamic graph_patch 노드 (skill 필드가 Pick / Place)
+        _mock_skill_entry(
+            "default",
+            "Pick",
+            "Pick skill for simulated VLM DAG",
+            {"target": {"type": "string", "description": "Pick target reference"}},
+            {"grasped": {"type": "bool", "description": "Whether grasp succeeded"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "default",
+            "Place",
+            "Place skill for simulated VLM DAG",
+            {"destination": {"type": "string", "description": "Place destination"}},
+            {"placed": {"type": "bool", "description": "Whether place succeeded"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "default",
+            "PickObject",
+            "Pick an object from a target location",
+            {
                 "target_object": {"type": "string", "description": "The target object identifier to pick"},
                 "location": {"type": "string", "description": "The location where the object is located"},
             },
-            "outputs": {
-                "object_weight": {"type": "int", "description": "The weight of the picked object in grams"},
-            },
-            "feedback": [],
-            "pre_conditions": ["Object must be visible", "Gripper must be ready"],
-            "post_effects": ["Object is held by gripper", "Location is now empty"],
-        },
-        {
-            "namespace": "default",
-            "name": "PlaceObject",
-            "version": "0.0.1",
-            "description": "Place an object at a destination location",
-            "parameters": {
+            {"object_weight": {"type": "int", "description": "The weight of the picked object in grams"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "default",
+            "PlaceObject",
+            "Place an object at a destination location",
+            {
                 "target_object": {"type": "string", "description": "The object identifier to place"},
                 "destination": {"type": "string", "description": "The destination location identifier"},
                 "orientation": {"type": "string", "description": "The orientation of the object (north, south, east, west)"},
             },
-            "outputs": {
-                "placement_success": {"type": "bool", "description": "Whether the placement was successful"},
-            },
-            "feedback": [],
-            "pre_conditions": ["Object must be held by gripper", "Destination must be available"],
-            "post_effects": ["Object is placed at destination", "Gripper is now empty"],
-        },
-        {
-            "namespace": "default",
-            "name": "MoveObject",
-            "version": "0.0.1",
-            "description": "Move an object from one location to another",
-            "parameters": {
+            {"placement_success": {"type": "bool", "description": "Whether the placement was successful"}},
+            allow_status_external_change=True,
+        ),
+        _mock_skill_entry(
+            "default",
+            "MoveObject",
+            "Move an object from one location to another",
+            {
                 "target_object": {"type": "string", "description": "The object identifier to move"},
                 "source_location": {"type": "string", "description": "The source location identifier"},
                 "target_location": {"type": "string", "description": "The target location identifier"},
             },
-            "outputs": {
+            {
                 "move_distance": {"type": "float", "description": "The distance moved in meters"},
                 "move_duration": {"type": "int", "description": "The time taken to move in milliseconds"},
             },
-            "feedback": [],
-            "pre_conditions": ["Object must exist at source location", "Target location must be available"],
-            "post_effects": ["Object is now at target location", "Source location is now empty"],
-        },
-    ]
+            allow_status_external_change=True,
+        ),
+    ],
 }
 
 
@@ -684,6 +984,7 @@ def create_app() -> Flask:
 
     @app.route("/api/v1/skill-sets", methods=["GET"])
     def skill_set():
+        """스킬 카탈로그 (docs/middleware-api-spec.md)."""
         return jsonify(MOCK_SKILL_SET)
 
     @app.route("/api/v1/runner/status", methods=["GET"])
