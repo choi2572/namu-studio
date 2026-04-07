@@ -74,7 +74,8 @@ PUBLISHED_DSL = {
     },
 }
 
-# DSL v1: Simple draft (linear)
+# DSL v1: Draft intentionally missing End/Next on Skill so POST /validate returns errors.
+# (Editor loads canvas from view_json; E2E expects Publish disabled while server DSL is invalid.)
 DRAFT_DSL = {
     "StartAt": "DraftStart",
     "States": {
@@ -82,7 +83,6 @@ DRAFT_DSL = {
             "Type": "Skill",
             "Skill": "Pick",
             "Parameters": {"target": "bin-A"},
-            "End": True,
         },
     },
 }

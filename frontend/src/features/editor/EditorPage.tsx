@@ -19,15 +19,12 @@ import {
   type ResizeHandle
 } from "@/components/ContainerFrame";
 import { StatusBadge } from "@/components/StatusBadge";
-import { VariableInput } from "@/components/VariableInput";
-import { ValidationError, WorkflowDraft } from "@/domain/types";
+import { ValidationError, type Skillset, WorkflowDraft } from "@/domain/types";
 import { cn } from "@/lib/cn";
-import { formatDateTime } from "@/lib/format";
 import {
   computeStartEndForScope,
   type ScopeGraph
 } from "@/lib/startEndDetection";
-import { getAvailableVariables } from "@/lib/variableReferences";
 import { ENABLE_VLM_NODES } from "@/lib/featureFlags";
 import { downloadJsonFile, sanitizeDownloadFileBaseName } from "@/lib/downloadJsonFile";
 import {
@@ -36,784 +33,128 @@ import {
   mergeDslOnFailureIfServerDropped
 } from "@/lib/dslOnFailure";
 
+import {
+  CANVAS_DEFAULT,
+  CANVAS_PADDING,
+  CONTAINER_FRAME_DEFAULTS,
+  CONTAINER_FRAME_METRICS,
+  CONTAINER_LAYOUT,
+  DEFAULT_PARALLEL_BRANCHES,
+  FAILURE_CANVAS_BASE,
+  NODE_METRICS,
+  RETRY_THEME_COLORS,
+  RIBBON_EXTRA_HEIGHT,
+  STATIC_NODE_TYPE_CONFIG,
+  ZOOM_LIMITS
+} from "./editorConstants";
+import {
+  canvasPointToNewNodeTopLeft,
+  clientToUnscaledCanvasSpace,
+  failureCanvasLocalDropPosition,
+  parentLocalPositionFromPointer,
+  scrollViewportCenterToUnscaledCanvasPosition
+} from "./editorCanvasCoordinates";
+import {
+  buildEditorImportRollbackSnapshot,
+  clampEditorNodePositionToCanvas,
+  collectChildNodeIdsForContainer,
+  mergePreservedOnFailureIntoDraftDsl,
+  restoreEditorFromImportRollbackSnapshot
+} from "./editorPageOrchestration";
+import { createInitialFailureGraph } from "./editorFailureGraphInit";
+import {
+  getEffectiveNodeHeight,
+  getNodeHeight,
+  getPortOffsets
+} from "./editorNodeLayout";
+import {
+  applyImportedLayout,
+  filterEdgesByContainerRules,
+  getCanvasBounds,
+  getCanvasSizeForNodes,
+  getContainerBranchCount,
+  getContainerFrameLayout,
+  getContainerHeaderLabel,
+  getContainerType,
+  getContainerTypeById,
+  getDefaultContainerFrameSize,
+  getNodeContainerKey,
+  isContainerNode,
+  normalizeContainerAssignments,
+  normalizeContainerFrames
+} from "./editorContainerLayout";
+import { buildDslJson, buildStateNameMap, buildViewJson } from "./editorDslBuild";
+import {
+  failureGraphFromOnFailureDsl,
+  parseDslToEditor,
+  validateImportedDslForEditor
+} from "./editorDslParse";
+import {
+  assignEditorCountersAfterDraftLoad,
+  clamp,
+  getNextIndexFromIds,
+  isRecord,
+  parseEditorNodeClipboard,
+  serializeEditorNodeClipboard
+} from "./editorPureUtils";
+import { parseEditorView } from "./editorViewJson";
+import {
+  getRetryScopeNodeIds,
+  isForbiddenInRetryScope,
+  recomputeRetryScopeMembership
+} from "./editorRetryScope";
+import {
+  createNodeTypeConfigFromSkillsets,
+  getSkillDisplayType,
+  getSkillNodeKind
+} from "./editorSkillset";
+import type {
+  ConditionExpression,
+  ConditionOperator,
+  ConnectingState,
+  ContainerFrameData,
+  ContainerType,
+  DragState,
+  EditorEdge,
+  EditorNode,
+  EditorViewJson,
+  EdgeDragPayload,
+  FailureHandlingGraph,
+  NodeCategory,
+  NodeKind,
+  NodeTypeConfig,
+  ResizeState,
+  VariableRow,
+  VariableValueType
+} from "./editorTypes";
+import { EditorNoticeToasts } from "./components/EditorNoticeToasts";
+import { EditorPalette } from "./components/EditorPalette";
+import { ImportOverwriteDialog } from "./components/dialogs/ImportOverwriteDialog";
+import { ImportValidationFailDialog } from "./components/dialogs/ImportValidationFailDialog";
+import { PublishConfirmDialog } from "./components/dialogs/PublishConfirmDialog";
+import { NodeCard } from "./components/NodeCard";
+import {
+  applyAddConditionExpression,
+  applyConditionExpressionFieldChange,
+  applyRemoveConditionExpression
+} from "./state/conditionMutations";
+import {
+  applyAddVariableRow,
+  applyRemoveVariableRow,
+  applyVariableRowChange
+} from "./state/variableMutations";
+import {
+  applyNameChangeToNodes,
+  applyParamChangeToNodes,
+  applyRetryScopeEndChangeToNodes,
+  mapNodesForToggleExpand,
+  reduceMainGraphNodesAfterDelete
+} from "./state/nodeMutations";
+import { useFailureGraphCanvasHandlers } from "./useFailureGraphCanvasHandlers";
+
 type EditorPageProps = {
   workflowId: string;
 };
-
-type NodeKind =
-  | `skill.${string}`
-  | "flow_control.input"
-  | "flow_control.condition"
-  | "flow_control.output"
-  | "flow_control.repeat"
-  | "flow_control.parallel"
-  | "flow_control.retry"
-  | "flow_control.vlm"
-  | "event.webhook"
-  | "system.on_failure_entry";
-
-type NodeCategory = "skill" | "flow_control" | "event";
-
-type ContainerType = "repeat" | "parallel";
-
-type ContainerFrameData = {
-  width: number;
-  height: number;
-  branchCount?: number;
-};
-
-type NodeParamField = {
-  key: string;
-  label: string;
-  placeholder: string;
-};
-
-type NodeOutputPort = {
-  key: string;
-  label: string;
-};
-
-type ConditionOperator = "AND" | "OR";
-
-const CONDITION_COMPARISON_OPERATORS = ["==", "!=", ">=", "<=", ">", "<"] as const;
-type ConditionComparisonOperator = (typeof CONDITION_COMPARISON_OPERATORS)[number];
-
-/** 에디터 연산자(==, != 등) → DSL JSON 연산자(Equals, NotEquals 등) */
-const EDITOR_OP_TO_DSL: Record<string, string> = {
-  "==": "Equals",
-  "!=": "NotEquals",
-  "<": "LessThan",
-  ">": "GreaterThan",
-  "<=": "LessThanOrEqual",
-  ">=": "GreaterThanOrEqual"
-};
-
-/** DSL JSON 연산자 → 에디터 연산자 */
-const DSL_OP_TO_EDITOR: Record<string, string> = {
-  Equals: "==",
-  NotEquals: "!=",
-  LessThan: "<",
-  GreaterThan: ">",
-  LessThanOrEqual: "<=",
-  GreaterThanOrEqual: ">="
-};
-
-function comparisonOperatorToDsl(editorOp: string): string {
-  return EDITOR_OP_TO_DSL[editorOp] ?? "Equals";
-}
-
-function dslOperatorToEditor(dslOp: string): string {
-  return DSL_OP_TO_EDITOR[dslOp] ?? "==";
-}
-
-// Condition 노드의 개별 표현식: variable, comparisonOperator, value 각각 별도 필드
-type ConditionExpression = {
-  id: string;
-  // 첫 번째 표현식은 null, 두 번째부터 AND/OR
-  operator: ConditionOperator | null;
-  variable: string;
-  comparisonOperator: string;
-  value: string;
-};
-
-type VariableValueType = "int" | "bool" | "double" | "string";
-
-type VariableRow = {
-  id: string;
-  name: string;
-  value: string;
-  valueType: VariableValueType;
-};
-
-type SearchableNodeDropdownProps = {
-  nodes: EditorNode[];
-  selectedId: string;
-  placeholder?: string;
-  onChange: (id: string) => void;
-};
-
-function SearchableNodeDropdown({
-  nodes,
-  selectedId,
-  placeholder,
-  onChange
-}: SearchableNodeDropdownProps) {
-  const [query, setQuery] = useState(() => {
-    const selected = nodes.find((n) => n.id === selectedId);
-    return selected?.name ?? "";
-  });
-  const filtered = useMemo(
-    () =>
-      nodes.filter((n) =>
-        (n.name ?? "").toLowerCase().includes(query.toLowerCase())
-      ),
-    [nodes, query]
-  );
-  const selected = nodes.find((n) => n.id === selectedId) ?? null;
-
-  const [open, setOpen] = useState(false);
-
-  // selectedId가 외부에서 바뀐 경우 input 표시 값 동기화
-  useEffect(() => {
-    const next = nodes.find((n) => n.id === selectedId);
-    if (next) {
-      setQuery(next.name ?? "");
-    }
-  }, [nodes, selectedId]);
-
-  return (
-    <div className="relative space-y-1">
-      <input
-        data-no-drag
-        type="text"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        placeholder={placeholder ?? "Select node"}
-        className="w-full rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-700 focus:border-slate-400 focus:outline-none"
-      />
-      {open && filtered.length > 0 && query.length > 0 && (
-        <div
-          className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-md border border-slate-200 bg-white text-[11px] text-slate-700 shadow-lg"
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          {filtered.map((n) => (
-            <button
-              key={n.id}
-              type="button"
-              data-no-drag
-              className={cn(
-                "flex w-full cursor-pointer items-center px-2 py-1 text-left hover:bg-slate-100",
-                n.id === selected?.id ? "bg-slate-100 font-semibold" : ""
-              )}
-              onClick={() => {
-                setQuery(n.name ?? "");
-                onChange(n.id);
-                setOpen(false);
-              }}
-            >
-              {n.name || n.id}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-type NodeTypeConfig = {
-  label: string;
-  category: NodeCategory;
-  iconText: string;
-  colorClass: string;
-  paramFields: NodeParamField[];
-  outputs: NodeOutputPort[];
-  inputEnabled?: boolean;
-};
-
-type EditorNode = {
-  id: string;
-  name: string;
-  kind: NodeKind;
-  position: { x: number; y: number };
-  isExpanded: boolean;
-  params: Record<string, string>;
-  conditionExpressions?: ConditionExpression[];
-  variableRows?: VariableRow[];
-  containerId?: string | null;
-  containerType?: ContainerType | null;
-  branchIndex?: number | null;
-  containerFrame?: ContainerFrameData;
-  /** Retry 스코프 메타데이터 (v0) */
-  retryOwnerId?: string | null;
-  retryScopeType?: "main" | "failure" | null;
-  isRetryScopeEnd?: boolean;
-  /** Retry 노드 전용 색상 테마 키 (예: emerald, indigo 등) */
-  retryThemeColor?: string | null;
-};
-
-type EditorEdge = {
-  id: string;
-  from: string;
-  fromPort: string;
-  to: string;
-};
-
-type EditorViewJson = {
-  version: "v1";
-  nodes: EditorNode[];
-  edges: EditorEdge[];
-  canvas?: { width: number; height: number; zoom: number };
-  /**
-   * 실패 핸들링 캔버스 레이아웃만 보관. On/Off는 `dsl_json.OnFailure` 유무가 진실.
-   */
-  failure?: {
-    entryNodeId: string;
-    nodes: EditorNode[];
-    edges: EditorEdge[];
-  };
-};
-
-type FailureHandlingGraph = {
-  enabled: boolean;
-  drawerOpen: boolean;
-  nodes: EditorNode[];
-  edges: EditorEdge[];
-  entryNodeId: string;
-};
-
-type DragState = {
-  nodeId: string;
-  offsetX: number;
-  offsetY: number;
-  height: number;
-};
-
-type ResizeState = {
-  nodeId: string;
-  handle: ResizeHandle;
-  startPoint: { x: number; y: number };
-  startWidth: number;
-  startHeight: number;
-};
-
-type ConnectingState = {
-  nodeId: string;
-  portKey: string;
-} | null;
-
-type EdgeDragPayload = {
-  nodeId: string;
-  portKey: string;
-};
-
-// NODE_TYPES는 skillset에서 동적으로 생성됩니다
-
-const NODE_CATEGORIES: { id: NodeCategory; label: string }[] = [
-  { id: "skill", label: "Skill" },
-  { id: "flow_control", label: "Flow Control" },
-  { id: "event", label: "Event" }
-];
-
-const NODE_CATEGORY_LABELS: Record<NodeCategory, string> = {
-  skill: "Skill",
-  flow_control: "Flow Control",
-  event: "Event"
-};
-
-// 정적 노드 타입 설정 (flow_control, event)
-const STATIC_NODE_TYPE_CONFIG: Partial<Record<NodeKind, NodeTypeConfig>> = {
-  "system.on_failure_entry": {
-    label: "On Workflow Failure",
-    category: "flow_control",
-    iconText: "WF",
-    colorClass: "border-slate-300 bg-slate-100 text-slate-700",
-    paramFields: [],
-    outputs: [{ key: "next", label: "Next" }],
-    inputEnabled: false
-  },
-  "flow_control.input": {
-    label: "Input",
-    category: "flow_control",
-    iconText: "IN",
-    colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
-    paramFields: [],
-    outputs: [{ key: "next", label: "Next" }],
-    inputEnabled: false
-  },
-  "flow_control.retry": {
-    label: "Retry",
-    category: "flow_control",
-    iconText: "RT",
-    colorClass: "border-emerald-300 bg-emerald-50 text-emerald-700",
-    paramFields: [
-      { key: "maxAttempts", label: "MaxAttempts", placeholder: "2" }
-    ],
-    outputs: [
-      { key: "main", label: "Main" },
-      { key: "failure", label: "On Failure" }
-    ]
-  },
-  "flow_control.condition": {
-    label: "Condition",
-    category: "flow_control",
-    iconText: "IF",
-    colorClass: "border-amber-200 bg-amber-100 text-amber-700",
-    paramFields: [],
-    outputs: [
-      { key: "true", label: "True" },
-      { key: "false", label: "False" }
-    ]
-  },
-  "flow_control.output": {
-    label: "Output",
-    category: "flow_control",
-    iconText: "OUT",
-    colorClass: "border-rose-200 bg-rose-100 text-rose-700",
-    paramFields: [],
-    outputs: []
-  },
-  "flow_control.repeat": {
-    label: "Repeat",
-    category: "flow_control",
-    iconText: "RP",
-    colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
-    paramFields: [
-      { key: "count", label: "Repeat Count", placeholder: "3" }
-    ],
-    outputs: [{ key: "next", label: "Next" }]
-  },
-  "flow_control.parallel": {
-    label: "Parallel",
-    category: "flow_control",
-    iconText: "PA",
-    colorClass: "border-cyan-200 bg-cyan-100 text-cyan-700",
-    paramFields: [],
-    outputs: [{ key: "next", label: "Next" }]
-  },
-  "flow_control.vlm": {
-    label: "VLM Planner",
-    category: "flow_control",
-    iconText: "VLM",
-    colorClass: "border-violet-200 bg-violet-100 text-violet-700",
-    paramFields: [],
-    outputs: [{ key: "next", label: "Next" }]
-  },
-  "event.webhook": {
-    label: "Webhook",
-    category: "event",
-    iconText: "WH",
-    colorClass: "border-purple-200 bg-purple-100 text-purple-700",
-    paramFields: [
-      { key: "url", label: "URL", placeholder: "https://hooks.example" },
-      { key: "method", label: "Method", placeholder: "POST" }
-    ],
-    outputs: [{ key: "next", label: "Next" }]
-  }
-};
-
-/** skill 노드 kind: skill.${namespace}.${name} */
-function getSkillNodeKind(skillset: import("@/domain/types").Skillset): NodeKind {
-  return `skill.${skillset.namespace}.${skillset.name}` as NodeKind;
-}
-
-/** 에디터에서 표시할 타입 문자열 (namespace.name) */
-function getSkillDisplayType(skillset: import("@/domain/types").Skillset): string {
-  return `${skillset.namespace}.${skillset.name}`;
-}
-
-// Skillset 기반으로 노드 타입 설정 생성
-function createNodeTypeConfigFromSkillset(skillset: import("@/domain/types").Skillset): NodeTypeConfig {
-  const skillName = skillset.name;
-  const iconText = skillName
-    .split(/(?=[A-Z])/)
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-  
-  // 색상 클래스는 skill 이름의 해시 기반으로 결정 (간단한 방법)
-  const colorClasses = [
-    "border-blue-200 bg-blue-100 text-blue-700",
-    "border-emerald-200 bg-emerald-100 text-emerald-700",
-    "border-purple-200 bg-purple-100 text-purple-700",
-    "border-orange-200 bg-orange-100 text-orange-700",
-    "border-pink-200 bg-pink-100 text-pink-700",
-    "border-indigo-200 bg-indigo-100 text-indigo-700"
-  ];
-  const colorIndex = skillName.length % colorClasses.length;
-  
-  const paramFields: NodeParamField[] = Object.entries(skillset.parameters).map(([key, param]) => ({
-    key,
-    label: key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
-    placeholder: param.type || key
-  }));
-  
-  // Skill 노드는 transition 표현이므로 next 포트 하나만 사용
-  const outputs: NodeOutputPort[] = [{ key: "next", label: "Next" }];
-  
-  return {
-    label: skillName.replace(/([A-Z])/g, " $1").trim(),
-    category: "skill",
-    iconText,
-    colorClass: colorClasses[colorIndex],
-    paramFields,
-    outputs
-  };
-}
-
-// Skillset 배열로부터 전체 노드 타입 설정 생성
-function createNodeTypeConfigFromSkillsets(
-  skillsets: import("@/domain/types").Skillset[]
-): Record<string, NodeTypeConfig> {
-  const config: Record<string, NodeTypeConfig> = {
-    ...(STATIC_NODE_TYPE_CONFIG as unknown as Record<string, NodeTypeConfig>)
-  };
-  
-  skillsets.forEach((skillset) => {
-    const nodeKind = getSkillNodeKind(skillset);
-    config[nodeKind] = createNodeTypeConfigFromSkillset(skillset);
-  });
-  
-  return config as Record<NodeKind, NodeTypeConfig>;
-}
-
-const NODE_METRICS = {
-  width: 220,
-  collapsedHeight: 86,
-  expandedTopPadding: 12,
-  fieldHeight: 44,
-  fieldGap: 8,
-  conditionButtonHeight: 28
-};
-
-/** Retry 노드 전용 색상 팔레트 (강한 대비 색상들, 순환 사용) */
-const RETRY_THEME_COLORS: Array<{
-  key: string;
-  border: string;
-  bg: string;
-  text: string;
-  indicator: string;
-}> = [
-  {
-    key: "emerald",
-    border: "border-emerald-300",
-    bg: "bg-emerald-50",
-    text: "text-emerald-700",
-    indicator: "bg-emerald-500"
-  },
-  {
-    key: "indigo",
-    border: "border-indigo-300",
-    bg: "bg-indigo-50",
-    text: "text-indigo-700",
-    indicator: "bg-indigo-500"
-  },
-  {
-    key: "orange",
-    border: "border-orange-300",
-    bg: "bg-orange-50",
-    text: "text-orange-700",
-    indicator: "bg-orange-500"
-  },
-  {
-    key: "rose",
-    border: "border-rose-300",
-    bg: "bg-rose-50",
-    text: "text-rose-700",
-    indicator: "bg-rose-500"
-  }
-];
-
-/** 리본(START/END)이 있을 때 카드 상단에 추가되는 높이 (리본 h-6 + pt-6) */
-const RIBBON_EXTRA_HEIGHT = 20;
-
-const CONTAINER_FRAME_DEFAULTS = {
-  width: 520,
-  height: 320,
-  branchWidth: 280
-};
-
-const CONTAINER_FRAME_METRICS = {
-  offsetY: 12,
-  headerHeight: 28,
-  // 컨테이너 안쪽 여백과 기본/최소 크기를 넉넉하게 조정
-  padding: 20,
-  minWidth: 380,
-  minHeight: 240
-};
-
-const DEFAULT_PARALLEL_BRANCHES = 2;
-
-const CONTAINER_LAYOUT = {
-  // 컨테이너 내부에서 노드 사이 간격 및 내부 패딩
-  rowGap: 32,
-  padding: 20,
-  columnGap: 140
-};
-
-const CANVAS_PADDING = {
-  // 오토 레이아웃 시 노드/컨테이너와 캔버스 경계 사이 여백
-  x: 40,
-  y: 40
-};
-
-const CANVAS_DEFAULT = {
-  width: 1000,
-  height: 600
-};
-
-/** 실패 처리 캔버스 기본 크기 (상하 플로우용) */
-const FAILURE_CANVAS_BASE = { width: 800, height: 1200 };
-
-function createInitialFailureGraph(enabled: boolean): FailureHandlingGraph {
-  const entryId = "failure-entry-1";
-  return {
-    enabled,
-    drawerOpen: false,
-    entryNodeId: entryId,
-    nodes: [
-      {
-        id: entryId,
-        name: "On Workflow Failure",
-        kind: "system.on_failure_entry",
-        position: {
-          x: FAILURE_CANVAS_BASE.width / 2 - NODE_METRICS.width / 2,
-          y: 40
-        },
-        isExpanded: true,
-        params: {}
-      }
-    ],
-    edges: []
-  };
-}
-
-const ZOOM_LIMITS = {
-  min: 0.6,
-  max: 1.6,
-  step: 0.1
-};
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function getExpandedContentHeight(
-  node: EditorNode,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
-) {
-  if (node.kind === "flow_control.condition") {
-    const expressionCount = Math.max(1, node.conditionExpressions?.length ?? 1);
-    // 각 expression 은 2줄(row)로 렌더링되므로, 기존보다 2배 높이를 잡아준다.
-    // 1 expression 기준:
-    //   - 첫 줄: fieldHeight
-    //   - 둘째 줄: fieldHeight
-    //   - 두 줄 사이 gap: fieldGap
-    // expression 들 사이 gap: fieldGap
-    const perExpressionHeight =
-      2 * NODE_METRICS.fieldHeight + NODE_METRICS.fieldGap;
-    const expressionsHeight =
-      expressionCount * perExpressionHeight +
-      Math.max(0, expressionCount - 1) * NODE_METRICS.fieldGap;
-    const buttonsHeight = NODE_METRICS.conditionButtonHeight + NODE_METRICS.fieldGap;
-    return NODE_METRICS.expandedTopPadding + expressionsHeight + buttonsHeight;
-  }
-
-  if (node.kind === "flow_control.input" || node.kind === "flow_control.output") {
-    const rowCount = node.variableRows?.length ?? 0;
-    const rowsHeight =
-      rowCount * NODE_METRICS.fieldHeight +
-      Math.max(0, rowCount - 1) * NODE_METRICS.fieldGap;
-    const addButtonHeight = NODE_METRICS.fieldHeight + NODE_METRICS.fieldGap;
-    return NODE_METRICS.expandedTopPadding + rowsHeight + addButtonHeight;
-  }
-
-  const config = nodeTypeConfig[node.kind];
-  if (!config) return 0;
-  if (node.kind === "flow_control.retry") {
-    const paramHeight =
-      config.paramFields.length > 0
-        ? NODE_METRICS.expandedTopPadding +
-          config.paramFields.length * NODE_METRICS.fieldHeight +
-          Math.max(0, config.paramFields.length - 1) * NODE_METRICS.fieldGap
-        : NODE_METRICS.expandedTopPadding;
-    const onFailureRow = NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
-
-    // main scope end 입력 한 줄
-    let extra = NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
-    // failure scope end 입력 한 줄 (onFailureEnabled !== "false" 일 때만)
-    if (node.params.onFailureEnabled !== "false") {
-      extra += NODE_METRICS.fieldGap + NODE_METRICS.fieldHeight;
-    }
-
-    return paramHeight + onFailureRow + extra;
-  }
-  const fieldCount = config.paramFields.length;
-  if (fieldCount === 0) return 0;
-  // 기본 파라미터 필드 높이
-  let height =
-    NODE_METRICS.expandedTopPadding +
-    fieldCount * NODE_METRICS.fieldHeight +
-    Math.max(0, fieldCount - 1) * NODE_METRICS.fieldGap;
-
-  // Skill 노드는 펼쳤을 때 타입 배지 아래에 Skill 이름 한 줄이 추가되므로
-  // 그만큼 여유 높이를 조금 더 준다.
-  if (node.kind.startsWith("skill.")) {
-    height += NODE_METRICS.fieldGap + 12;
-  }
-  return height;
-}
-
-function getNodeHeight(
-  node: EditorNode,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
-) {
-  if (!node.isExpanded) return NODE_METRICS.collapsedHeight;
-  return NODE_METRICS.collapsedHeight + getExpandedContentHeight(node, nodeTypeConfig);
-}
-
-function getEffectiveNodeHeight(
-  node: EditorNode,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
-  hasRibbon: boolean
-) {
-  const base = getNodeHeight(node, nodeTypeConfig);
-  return hasRibbon ? base + RIBBON_EXTRA_HEIGHT : base;
-}
-
-function getNodeTypeLabel(
-  kind: NodeKind,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
-) {
-  const config = nodeTypeConfig[kind];
-  if (!config) return kind;
-  return `${NODE_CATEGORY_LABELS[config.category]} - ${config.label}`;
-}
-
-const CONTAINER_TYPE_BY_KIND: Partial<Record<NodeKind, ContainerType>> = {
-  "flow_control.repeat": "repeat",
-  "flow_control.parallel": "parallel"
-};
-
-function getContainerType(kind: NodeKind): ContainerType | null {
-  return CONTAINER_TYPE_BY_KIND[kind] ?? null;
-}
-
-function isContainerNode(node: EditorNode) {
-  return getContainerType(node.kind) !== null;
-}
-
-function getRepeatCount(node: EditorNode) {
-  const raw = node.params.count ?? "1";
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 1) return 1;
-  return Math.floor(parsed);
-}
-
-function getContainerBranchCount(node: EditorNode) {
-  const containerType = getContainerType(node.kind);
-  if (containerType !== "parallel") return 1;
-  const requested = node.containerFrame?.branchCount ?? DEFAULT_PARALLEL_BRANCHES;
-  return Math.max(DEFAULT_PARALLEL_BRANCHES, requested);
-}
-
-function getContainerHeaderLabel(node: EditorNode, branchCount: number) {
-  const containerType = getContainerType(node.kind);
-  if (containerType === "repeat") {
-    return `Repeat x${getRepeatCount(node)}`;
-  }
-  if (containerType === "parallel") {
-    return branchCount > 2 ? `Parallel (${branchCount})` : "Parallel";
-  }
-  return node.name;
-}
-
-function getContainerBranchLabel(containerType: ContainerType, index: number) {
-  if (containerType === "repeat") {
-    return "Body";
-  }
-  return `Branch ${index + 1}`;
-}
-
-function getDefaultContainerFrameSize(containerType: ContainerType, branchCount: number) {
-  const baseWidth =
-    containerType === "parallel"
-      ? Math.max(
-          CONTAINER_FRAME_DEFAULTS.width,
-          branchCount * CONTAINER_FRAME_DEFAULTS.branchWidth
-        )
-      : CONTAINER_FRAME_DEFAULTS.width;
-  return {
-    width: Math.max(baseWidth, CONTAINER_FRAME_METRICS.minWidth),
-    height: Math.max(CONTAINER_FRAME_DEFAULTS.height, CONTAINER_FRAME_METRICS.minHeight)
-  };
-}
-
-function getContainerFrameLayout(
-  node: EditorNode,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
-) {
-  const containerType = getContainerType(node.kind);
-  if (!containerType) return null;
-  const branchCount = getContainerBranchCount(node);
-  const defaults = getDefaultContainerFrameSize(containerType, branchCount);
-  const frameWidth = Math.max(
-    node.containerFrame?.width ?? defaults.width,
-    CONTAINER_FRAME_METRICS.minWidth
-  );
-  const frameHeight = Math.max(
-    node.containerFrame?.height ?? defaults.height,
-    CONTAINER_FRAME_METRICS.minHeight
-  );
-  // 컨테이너 노드 자체에 START/END 리본이 붙는 경우를 감안해서 여유 높이 추가
-  const nodeHeight = getNodeHeight(node, nodeTypeConfig) + RIBBON_EXTRA_HEIGHT;
-  const frameX = node.position.x;
-  const frameY = node.position.y + nodeHeight + CONTAINER_FRAME_METRICS.offsetY;
-  const headerHeight = CONTAINER_FRAME_METRICS.headerHeight;
-  const bodyX = frameX + CONTAINER_FRAME_METRICS.padding;
-  const bodyY = frameY + headerHeight + CONTAINER_FRAME_METRICS.padding;
-  const bodyWidth = Math.max(0, frameWidth - CONTAINER_FRAME_METRICS.padding * 2);
-  const bodyHeight = Math.max(
-    0,
-    frameHeight - headerHeight - CONTAINER_FRAME_METRICS.padding * 2
-  );
-  // Repeat: 단일 body 영역, Parallel: 브랜치를 세로로 스택 배치
-  const regions: ContainerFrameRegion[] =
-    branchCount > 0
-      ? Array.from({ length: branchCount }, (_, index) => {
-          const isParallel = containerType === "parallel";
-          const regionHeight = isParallel ? bodyHeight / branchCount : bodyHeight;
-          return {
-            index,
-            label: getContainerBranchLabel(containerType, index),
-            bounds: {
-              x: bodyX,
-              y: isParallel ? bodyY + regionHeight * index : bodyY,
-              width: bodyWidth,
-              height: isParallel ? regionHeight : bodyHeight
-            }
-          };
-        })
-      : [];
-  return {
-    frame: { x: frameX, y: frameY, width: frameWidth, height: frameHeight },
-    headerHeight,
-    regions
-  };
-}
-
-function getPortOffsets(nodeHeight: number, count: number) {
-  if (count <= 0) return [];
-  if (count === 1) {
-    return [nodeHeight / 2];
-  }
-  const gap = nodeHeight / (count + 1);
-  return Array.from({ length: count }, (_, index) => gap * (index + 1));
-}
-
-function getCanvasBounds(
-  canvasBase: { width: number; height: number },
-  nodeHeight: number
-) {
-  const minX = CANVAS_PADDING.x;
-  const minY = CANVAS_PADDING.y;
-  const maxX = Math.max(
-    minX,
-    canvasBase.width - NODE_METRICS.width - CANVAS_PADDING.x
-  );
-  const maxY = Math.max(minY, canvasBase.height - nodeHeight - CANVAS_PADDING.y);
-  return { minX, minY, maxX, maxY };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-const EDITOR_NODE_CLIPBOARD_PREFIX = "namu-studio:editor-node:";
 
 /** 노드 단축키와 충돌하지 않도록, 실제 키보드 포커스가 폼/편집 필드에 있는지 판별한다. */
 function isEditableKeyboardTarget(event: KeyboardEvent): boolean {
@@ -835,3250 +176,6 @@ function isEditableKeyboardTarget(event: KeyboardEvent): boolean {
 
   return event.composedPath().some(
     (node) => node instanceof HTMLElement && isEditableElement(node)
-  );
-}
-
-function serializeEditorNodeClipboard(node: EditorNode): string {
-  return EDITOR_NODE_CLIPBOARD_PREFIX + JSON.stringify({ v: 1, node });
-}
-
-function parseEditorNodeClipboard(text: string): EditorNode | null {
-  if (!text.startsWith(EDITOR_NODE_CLIPBOARD_PREFIX)) return null;
-  try {
-    const parsed: unknown = JSON.parse(
-      text.slice(EDITOR_NODE_CLIPBOARD_PREFIX.length)
-    );
-    if (!isRecord(parsed) || parsed.v !== 1) return null;
-    const raw = parsed.node;
-    if (!isRecord(raw)) return null;
-    if (typeof raw.id !== "string") return null;
-    if (typeof raw.name !== "string") return null;
-    if (typeof raw.kind !== "string") return null;
-    if (!isRecord(raw.position)) return null;
-    if (typeof raw.position.x !== "number" || typeof raw.position.y !== "number") {
-      return null;
-    }
-    if (!isRecord(raw.params)) return null;
-    return JSON.parse(JSON.stringify(raw)) as EditorNode;
-  } catch {
-    return null;
-  }
-}
-
-function isValidEditorEdge(value: unknown): value is EditorEdge {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.id === "string" &&
-    typeof value.from === "string" &&
-    typeof value.fromPort === "string" &&
-    typeof value.to === "string"
-  );
-}
-
-function parseConditionExpressionString(expr: string): {
-  variable: string;
-  comparisonOperator: string;
-  value: string;
-} {
-  const s = (expr ?? "").trim();
-  if (!s) return { variable: "", comparisonOperator: "==", value: "" };
-  // Longest first so ">=" is matched before ">"
-  for (const op of CONDITION_COMPARISON_OPERATORS) {
-    const i = s.indexOf(op);
-    if (i !== -1) {
-      return {
-        variable: s.slice(0, i).trim(),
-        comparisonOperator: op,
-        value: s.slice(i + op.length).trim()
-      };
-    }
-  }
-  // DSL 단어형 연산자(Equals, NotEquals 등) 인식
-  const dslOpPatterns = [
-    "LessThanOrEqual",
-    "GreaterThanOrEqual",
-    "NotEquals",
-    "LessThan",
-    "GreaterThan",
-    "Equals"
-  ] as const;
-  for (const dslOp of dslOpPatterns) {
-    const i = s.indexOf(dslOp);
-    if (i !== -1) {
-      const editorOp = dslOperatorToEditor(dslOp);
-      return {
-        variable: s.slice(0, i).trim(),
-        comparisonOperator: editorOp,
-        value: s.slice(i + dslOp.length).trim()
-      };
-    }
-  }
-  return { variable: s, comparisonOperator: "==", value: "" };
-}
-
-function isValidConditionExpression(value: unknown): value is ConditionExpression {
-  if (!isRecord(value)) return false;
-  const operator = value.operator;
-  return (
-    typeof value.id === "string" &&
-    (operator === null || operator === "AND" || operator === "OR") &&
-    typeof value.variable === "string" &&
-    typeof value.comparisonOperator === "string" &&
-    typeof value.value === "string"
-  );
-}
-
-function isValidVariableRow(value: unknown): value is VariableRow {
-  if (!isRecord(value)) return false;
-  const rawType = (value as { valueType?: unknown }).valueType;
-  const isValidType =
-    rawType === undefined ||
-    rawType === "int" ||
-    rawType === "bool" ||
-    rawType === "double" ||
-    rawType === "string";
-  return (
-    typeof value.id === "string" &&
-    typeof value.name === "string" &&
-    typeof value.value === "string" &&
-    isValidType
-  );
-}
-
-/** view JSON에서 온 variableRow를 정규화. 검증 실패 시 전체 parse가 DSL 폴백되지 않도록. */
-function normalizeVariableRowFromView(raw: unknown): VariableRow | null {
-  if (!isRecord(raw)) return null;
-  const id = typeof raw.id === "string" ? raw.id : "";
-  const name = typeof raw.name === "string" ? raw.name : "";
-  const value = typeof raw.value === "string" ? raw.value : "";
-  const rawType = (raw as { valueType?: unknown }).valueType;
-  const valueType: VariableValueType =
-    rawType === "int" || rawType === "integer"
-      ? "int"
-      : rawType === "bool"
-        ? "bool"
-        : rawType === "double"
-          ? "double"
-          : rawType === "string"
-            ? "string"
-            : "string";
-  if (!id) return null;
-  return { id, name, value, valueType };
-}
-
-function isValidContainerFrameData(value: unknown): value is ContainerFrameData {
-  if (!isRecord(value)) return false;
-  const width = value.width;
-  const height = value.height;
-  if (typeof width !== "number" || typeof height !== "number") return false;
-  const branchCount = (value as { branchCount?: unknown }).branchCount;
-  if (
-    branchCount !== undefined &&
-    (typeof branchCount !== "number" || branchCount < 1)
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function isValidEditorNode(
-  value: unknown,
-  nodeTypes: NodeKind[]
-): value is EditorNode {
-  if (!isRecord(value)) return false;
-  if (typeof value.id !== "string" || typeof value.name !== "string") return false;
-  if (typeof value.kind !== "string" || !nodeTypes.includes(value.kind as NodeKind)) {
-    return false;
-  }
-  if (
-    !isRecord(value.position) ||
-    typeof value.position.x !== "number" ||
-    typeof value.position.y !== "number"
-  ) {
-    return false;
-  }
-  if (typeof value.isExpanded !== "boolean") return false;
-  if (!isRecord(value.params)) return false;
-  if (
-    value.conditionExpressions !== undefined &&
-    (!Array.isArray(value.conditionExpressions) ||
-      !value.conditionExpressions.every(isValidConditionExpression))
-  ) {
-    return false;
-  }
-  if (
-    value.variableRows !== undefined &&
-    (!Array.isArray(value.variableRows) ||
-      !value.variableRows.every(isValidVariableRow))
-  ) {
-    return false;
-  }
-  const containerId = (value as { containerId?: unknown }).containerId;
-  if (containerId !== undefined && containerId !== null && typeof containerId !== "string") {
-    return false;
-  }
-  const containerType = (value as { containerType?: unknown }).containerType;
-  if (
-    containerType !== undefined &&
-    containerType !== null &&
-    containerType !== "repeat" &&
-    containerType !== "parallel"
-  ) {
-    return false;
-  }
-  const branchIndex = (value as { branchIndex?: unknown }).branchIndex;
-  if (
-    branchIndex !== undefined &&
-    branchIndex !== null &&
-    (typeof branchIndex !== "number" || branchIndex < 0)
-  ) {
-    return false;
-  }
-  const containerFrame = (value as { containerFrame?: unknown }).containerFrame;
-  if (containerFrame !== undefined && !isValidContainerFrameData(containerFrame)) {
-    return false;
-  }
-  return true;
-}
-
-function normalizeConditionExpressionFromView(
-  raw: Record<string, unknown>
-): ConditionExpression {
-  if (
-    typeof raw.variable === "string" &&
-    typeof raw.comparisonOperator === "string" &&
-    typeof raw.value === "string"
-  ) {
-    return {
-      id: String(raw.id),
-      operator:
-        raw.operator === "AND" || raw.operator === "OR" ? raw.operator : null,
-      variable: raw.variable,
-      comparisonOperator: raw.comparisonOperator,
-      value: raw.value
-    };
-  }
-  const parsed = parseConditionExpressionString(String(raw.expression ?? ""));
-  return {
-    id: String(raw.id),
-    operator:
-      raw.operator === "AND" || raw.operator === "OR" ? raw.operator : null,
-    variable: parsed.variable,
-    comparisonOperator: parsed.comparisonOperator,
-    value: parsed.value
-  };
-}
-
-function parseEditorView(
-  viewJson: Record<string, unknown>,
-  nodeTypes: NodeKind[]
-): EditorViewJson | null {
-  const rawNodes = viewJson.nodes;
-  const rawEdges = viewJson.edges;
-  if (!Array.isArray(rawNodes) || !Array.isArray(rawEdges)) return null;
-  const normalizedNodes = rawNodes.map((node) => {
-    if (!isRecord(node)) return node;
-    const conditionExpressions = node.conditionExpressions;
-    const conditionPart =
-      Array.isArray(conditionExpressions)
-        ? {
-            conditionExpressions: conditionExpressions.map((expr) =>
-              normalizeConditionExpressionFromView(
-                isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
-              )
-            )
-          }
-        : {};
-    const rawRows = (node as { variableRows?: unknown }).variableRows;
-    const variableRowsPart =
-      Array.isArray(rawRows)
-        ? {
-            variableRows: rawRows
-              .map(normalizeVariableRowFromView)
-              .filter((row): row is VariableRow => row !== null)
-          }
-        : {};
-    return {
-      ...node,
-      ...conditionPart,
-      ...variableRowsPart
-    };
-  });
-  if (!normalizedNodes.every((node) => isValidEditorNode(node, nodeTypes)) || !rawEdges.every(isValidEditorEdge)) {
-    return null;
-  }
-  const rawCanvas = isRecord(viewJson.canvas) ? viewJson.canvas : null;
-  const canvas = rawCanvas
-    ? {
-        width:
-          typeof rawCanvas.width === "number" ? rawCanvas.width : CANVAS_DEFAULT.width,
-        height:
-          typeof rawCanvas.height === "number"
-            ? rawCanvas.height
-            : CANVAS_DEFAULT.height,
-        zoom: typeof rawCanvas.zoom === "number" ? rawCanvas.zoom : 1
-      }
-    : undefined;
-
-  // 실패 핸들링용 failure 그래프 복원 (있으면)
-  const rawFailure = isRecord((viewJson as { failure?: unknown }).failure)
-    ? ((viewJson as { failure?: unknown }).failure as Record<string, unknown>)
-    : null;
-
-  let failure: EditorViewJson["failure"] | undefined;
-  if (rawFailure) {
-    const entryNodeId =
-      typeof rawFailure.entryNodeId === "string"
-        ? rawFailure.entryNodeId
-        : "failure-entry-1";
-    const rawFailureNodes = Array.isArray(rawFailure.nodes)
-      ? rawFailure.nodes
-      : [];
-    const rawFailureEdges = Array.isArray(rawFailure.edges)
-      ? rawFailure.edges
-      : [];
-
-    const normalizedFailureNodes = rawFailureNodes.map((node) => {
-      if (!isRecord(node)) return node;
-      const conditionExpressions = node.conditionExpressions;
-      const conditionPart =
-        Array.isArray(conditionExpressions)
-          ? {
-              conditionExpressions: conditionExpressions.map((expr) =>
-                normalizeConditionExpressionFromView(
-                  isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
-                )
-              )
-            }
-          : {};
-      const rawRows = (node as { variableRows?: unknown }).variableRows;
-      const variableRowsPart =
-        Array.isArray(rawRows)
-          ? {
-              variableRows: rawRows
-                .map(normalizeVariableRowFromView)
-                .filter((row): row is VariableRow => row !== null)
-            }
-          : {};
-      return {
-        ...node,
-        ...conditionPart,
-        ...variableRowsPart
-      };
-    });
-
-    // 실패 플로우는 system.on_failure_entry 노드를 포함하므로,
-    // 메인 캔버스 nodeTypes에 이 kind가 없으면 추가해서 검증한다.
-    const failureNodeTypes = nodeTypes.includes("system.on_failure_entry" as NodeKind)
-      ? nodeTypes
-      : ([...nodeTypes, "system.on_failure_entry"] as NodeKind[]);
-
-    const isValidFailureNodes = normalizedFailureNodes.every((node) =>
-      isValidEditorNode(node, failureNodeTypes)
-    );
-    const isValidFailureEdges = rawFailureEdges.every(isValidEditorEdge);
-
-    if (isValidFailureNodes && isValidFailureEdges) {
-      failure = {
-        entryNodeId,
-        nodes: normalizedFailureNodes as EditorNode[],
-        edges: rawFailureEdges as EditorEdge[]
-      };
-    }
-  }
-
-  return {
-    version: "v1",
-    nodes: normalizedNodes as EditorNode[],
-    edges: rawEdges as EditorEdge[],
-    canvas,
-    failure
-  };
-}
-
-function getNextIndexFromIds(ids: string[], prefix: string) {
-  const prefixToken = `${prefix}-`;
-  const numbers = ids
-    .filter((id) => id.startsWith(prefixToken))
-    .map((id) => Number(id.slice(prefixToken.length)))
-    .filter((value) => Number.isFinite(value));
-  return numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
-}
-
-function buildStateNameMap(nodes: EditorNode[]) {
-  const usedNames = new Set<string>();
-  const nameMap = new Map<string, string>();
-  nodes.forEach((node) => {
-    const trimmed = node.name.trim();
-    const base = trimmed ? trimmed.replace(/[^A-Za-z0-9_]+/g, "_") : node.id;
-    const baseName = base || node.id;
-    let name = baseName;
-    let index = 1;
-    while (usedNames.has(name)) {
-      name = `${baseName}_${index}`;
-      index += 1;
-    }
-    usedNames.add(name);
-    nameMap.set(node.id, name);
-  });
-  return nameMap;
-}
-
-type ContainerDslPayload = {
-  type: ContainerType;
-  repeatCount?: number;
-  startAt?: string | null;
-  states?: Record<string, Record<string, unknown>>;
-  branches?: Array<{ StartAt: string | null; States: Record<string, Record<string, unknown>> }>;
-};
-
-function findStartNode(nodes: EditorNode[], edges: EditorEdge[]) {
-  if (nodes.length === 0) return null;
-  const inputNode = nodes.find((node) => node.kind === "flow_control.input");
-  if (inputNode) return inputNode;
-  const incoming = new Set(edges.map((edge) => edge.to));
-  const candidate = nodes.find((node) => !incoming.has(node.id));
-  return candidate ?? nodes[0];
-}
-
-/** Input 행 → DSL Condition 등에 넣을 타입이 있는 JSON 값 */
-function typedValueFromInputVariableRow(
-  valueType: VariableValueType,
-  value: string
-): number | boolean | string {
-  switch (valueType) {
-    case "int": {
-      const n = Number.parseInt(value, 10);
-      return Number.isFinite(n) ? n : 0;
-    }
-    case "double": {
-      const n = Number.parseFloat(value);
-      return Number.isFinite(n) ? n : 0;
-    }
-    case "bool":
-      return value === "true" || value === "1";
-    default:
-      return value;
-  }
-}
-
-function buildInputValuesMapFromNode(
-  inputNode: EditorNode | undefined
-): Map<string, number | boolean | string> {
-  const map = new Map<string, number | boolean | string>();
-  inputNode?.variableRows?.forEach(({ name, value, valueType }) => {
-    if (!name.trim()) return;
-    map.set(name.trim(), typedValueFromInputVariableRow(valueType, value));
-  });
-  return map;
-}
-
-const CONDITION_INPUTS_REF = /^\$\.Inputs\.([A-Za-z_][A-Za-z0-9_]*)$/;
-
-/** Condition·Skill 파라미터 문자열: `$.Inputs.x`는 입력 기본값으로 치환, 그 외 `$` 경로는 유지, 리터럴은 숫자·불로 직렬화 */
-function conditionFieldToDslValue(
-  raw: string,
-  inputValues: Map<string, number | boolean | string> | undefined
-): string | number | boolean {
-  const trimmed = (raw ?? "").trim();
-  if (trimmed === "") return "";
-  if (trimmed.startsWith("$")) {
-    const m = trimmed.match(CONDITION_INPUTS_REF);
-    if (m && inputValues?.has(m[1])) {
-      return inputValues.get(m[1])!;
-    }
-    return trimmed;
-  }
-  if (trimmed === "true" || trimmed === "false") return trimmed === "true";
-  const n = Number(trimmed);
-  if (Number.isFinite(n) && trimmed !== "") {
-    if (/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
-      return n;
-    }
-  }
-  return trimmed;
-}
-
-function buildStateRecords(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  stateNameMap: Map<string, string>,
-  containerPayloads?: Map<string, ContainerDslPayload>,
-  skillsetMap?: Map<string, import("@/domain/types").Skillset>,
-  allNodes?: EditorNode[],
-  allEdges?: EditorEdge[],
-  inputValuesForConditions?: Map<string, number | boolean | string>
-) {
-  const fullNodes = allNodes ?? nodes;
-  const fullEdges = allEdges ?? edges;
-  const edgesByFrom = new Map<string, EditorEdge[]>();
-  edges.forEach((edge) => {
-    if (!stateNameMap.has(edge.from) || !stateNameMap.has(edge.to)) return;
-    const list = edgesByFrom.get(edge.from) ?? [];
-    list.push(edge);
-    edgesByFrom.set(edge.from, list);
-  });
-  const states: Record<string, Record<string, unknown>> = {};
-  nodes.forEach((node) => {
-    if (node.kind === "flow_control.input") {
-      return;
-    }
-    const stateName = stateNameMap.get(node.id);
-    if (!stateName) return;
-    const outgoing = edgesByFrom.get(node.id) ?? [];
-    const getNext = (portKey: string) => {
-      const edge = outgoing.find((item) => item.fromPort === portKey);
-      if (!edge) return null;
-      return stateNameMap.get(edge.to) ?? null;
-    };
-    let state: Record<string, unknown>;
-    if (node.kind === "flow_control.output") {
-      state = { Type: "Succeed" };
-    } else if (node.kind === "flow_control.condition") {
-      const trueTarget = getNext("true");
-      const falseTarget = getNext("false");
-      const firstExpr = node.conditionExpressions?.[0];
-      const variableRaw = firstExpr?.variable?.trim() ?? "";
-      const Operator = comparisonOperatorToDsl(firstExpr?.comparisonOperator ?? "==");
-      const Variable = conditionFieldToDslValue(
-        variableRaw,
-        inputValuesForConditions
-      );
-      const valueRaw = firstExpr?.value ?? "";
-      const Value = conditionFieldToDslValue(
-        valueRaw,
-        inputValuesForConditions
-      );
-      state = {
-        Type: "Condition",
-        If: {
-          Condition: { Variable, Operator, Value },
-          Then: trueTarget ?? ""
-        },
-        Else: falseTarget ?? ""
-      };
-    } else if (node.kind === "flow_control.repeat") {
-      const payload = containerPayloads?.get(node.id);
-      const next = getNext("next");
-      state = {
-        Type: "Repeat",
-        RepeatCount: payload?.repeatCount ?? getRepeatCount(node),
-        StartAt: payload?.startAt ?? null,
-        States: payload?.states ?? {}
-      };
-      if (next) {
-        state.Next = next;
-      } else {
-        state.End = true;
-      }
-    } else if (node.kind === "flow_control.parallel") {
-      const payload = containerPayloads?.get(node.id);
-      const next = getNext("next");
-      state = {
-        Type: "Parallel",
-        Branches: payload?.branches ?? []
-      };
-      if (next) {
-        state.Next = next;
-      } else {
-        state.End = true;
-      }
-    } else if (node.kind === "flow_control.retry") {
-      const onFailureEnabled = node.params.onFailureEnabled !== "false";
-      const containerPayloadsMap = containerPayloads ?? new Map();
-      const mainScopeIds = getRetryScopeNodeIds(node.id, "main", fullNodes, fullEdges);
-      const mainScopeEndId = getRetryScopeEndNodeId(node.id, "main", fullNodes, fullEdges);
-      let next: string | null = null;
-      if (mainScopeEndId) {
-        const outEdge = fullEdges.find((e) => e.from === mainScopeEndId);
-        if (outEdge && !mainScopeIds.has(outEdge.to))
-          next = stateNameMap.get(outEdge.to) ?? null;
-      }
-      const mainScope = buildRetryScopeSubflow(
-        node.id,
-        "main",
-        fullNodes,
-        fullEdges,
-        stateNameMap,
-        containerPayloadsMap,
-        skillsetMap,
-        inputValuesForConditions
-      );
-      const failureScope = onFailureEnabled
-        ? buildRetryScopeSubflow(
-            node.id,
-            "failure",
-            fullNodes,
-            fullEdges,
-            stateNameMap,
-            containerPayloadsMap,
-            skillsetMap,
-            inputValuesForConditions
-          )
-        : null;
-      const maxAttempts = Math.max(
-        1,
-        Number.parseInt(node.params.maxAttempts ?? "2", 10) || 2
-      );
-      state = {
-        Type: "Retry",
-        MaxAttempts: maxAttempts,
-        StartAt: mainScope.startAt ?? undefined,
-        States: mainScope.states
-      };
-      if (next) state.Next = next;
-      else state.End = true;
-      if (
-        failureScope &&
-        Object.keys(failureScope.states).length > 0
-      ) {
-        state.BeforeRetryAfterFailure = failureScope.states;
-      }
-    } else if (node.kind === "flow_control.vlm") {
-      const next = getNext("next");
-      state = { Type: "Pass", Parameters: {} };
-      if (next) {
-        state.Next = next;
-      } else {
-        state.End = true;
-      }
-    } else {
-      const next = getNext("next");
-      // DSL Skill 값: 표시와 동일하게 namespace.skilltype( namespace.name ) 형태
-      const skillset = skillsetMap?.get(node.kind);
-      const skillName =
-        skillset != null
-          ? getSkillDisplayType(skillset)
-          : node.kind.startsWith("skill.")
-            ? node.kind.replace("skill.", "")
-            : node.kind;
-      const skillParameters = Object.fromEntries(
-        Object.entries(node.params).map(([paramKey, paramVal]) => [
-          paramKey,
-          conditionFieldToDslValue(paramVal, inputValuesForConditions)
-        ])
-      );
-      state = {
-        Type: "Skill",
-        Skill: skillName,
-        Parameters: skillParameters
-      };
-      if (next) {
-        state.Next = next;
-      } else {
-        state.End = true;
-      }
-    }
-    state.Label = node.name;
-    states[stateName] = state;
-  });
-  return states;
-}
-
-function buildDslJson(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  skillsetMap?: Map<string, import("@/domain/types").Skillset>,
-  failureGraph?: FailureHandlingGraph
-) {
-  if (nodes.length === 0) {
-    return {};
-  }
-  const containerNodes = nodes.filter(isContainerNode);
-  const containerIds = new Set(containerNodes.map((node) => node.id));
-  const topLevelNodes = nodes.filter(
-    (node) =>
-      (!node.containerId || !containerIds.has(node.containerId)) &&
-      !node.retryOwnerId
-  );
-  const topLevelNodeIds = new Set(topLevelNodes.map((node) => node.id));
-  const topLevelEdges = edges.filter(
-    (edge) => topLevelNodeIds.has(edge.from) && topLevelNodeIds.has(edge.to)
-  );
-  const stateNameMap = buildStateNameMap(nodes);
-  const inputNode = topLevelNodes.find((n) => n.kind === "flow_control.input");
-  const inputValuesForConditions = buildInputValuesMapFromNode(inputNode);
-  const containerPayloads = new Map<string, ContainerDslPayload>();
-
-  containerNodes.forEach((container) => {
-    const containerType = getContainerType(container.kind);
-    if (!containerType) return;
-    if (containerType === "repeat") {
-      const bodyNodes = nodes.filter((node) => node.containerId === container.id);
-      const bodyNodeIds = new Set(bodyNodes.map((node) => node.id));
-      const bodyEdges = edges.filter(
-        (edge) => bodyNodeIds.has(edge.from) && bodyNodeIds.has(edge.to)
-      );
-      const bodyStartNode = findStartNode(bodyNodes, bodyEdges);
-      const bodyStates = buildStateRecords(
-        bodyNodes,
-        bodyEdges,
-        stateNameMap,
-        containerPayloads,
-        skillsetMap,
-        undefined,
-        undefined,
-        inputValuesForConditions
-      );
-      containerPayloads.set(container.id, {
-        type: "repeat",
-        repeatCount: getRepeatCount(container),
-        startAt: bodyStartNode ? stateNameMap.get(bodyStartNode.id) ?? null : null,
-        states: bodyStates
-      });
-      return;
-    }
-    const branchCount = getContainerBranchCount(container);
-    const branches = Array.from({ length: branchCount }, (_, index) => {
-      const branchNodes = nodes.filter(
-        (node) =>
-          node.containerId === container.id &&
-          (node.branchIndex ?? 0) === index
-      );
-      const branchNodeIds = new Set(branchNodes.map((node) => node.id));
-      const branchEdges = edges.filter(
-        (edge) => branchNodeIds.has(edge.from) && branchNodeIds.has(edge.to)
-      );
-      const branchStartNode = findStartNode(branchNodes, branchEdges);
-      const branchStates = buildStateRecords(
-        branchNodes,
-        branchEdges,
-        stateNameMap,
-        containerPayloads,
-        skillsetMap,
-        undefined,
-        undefined,
-        inputValuesForConditions
-      );
-      return {
-        StartAt: branchStartNode
-          ? stateNameMap.get(branchStartNode.id) ?? null
-          : null,
-        States: branchStates
-      };
-    });
-    containerPayloads.set(container.id, {
-      type: "parallel",
-      branches
-    });
-  });
-
-  const startNode = findStartNode(topLevelNodes, topLevelEdges);
-  const states = buildStateRecords(
-    topLevelNodes,
-    topLevelEdges,
-    stateNameMap,
-    containerPayloads,
-    skillsetMap,
-    nodes,
-    edges,
-    inputValuesForConditions
-  );
-  const inputNextEdge = inputNode
-    ? topLevelEdges.find((e) => e.from === inputNode.id && e.fromPort === "next")
-    : undefined;
-  const inputNextStateName = inputNextEdge
-    ? stateNameMap.get(inputNextEdge.to)
-    : undefined;
-
-  const inputsParameters: Record<string, { Type: string; Value: number | boolean | string }> =
-    {};
-  inputNode?.variableRows?.forEach(({ name, value, valueType }) => {
-    if (!name.trim()) return;
-    const Type = valueType;
-    const Value = typedValueFromInputVariableRow(valueType, value);
-    inputsParameters[name.trim()] = { Type, Value };
-  });
-
-  const workflowStartAt = inputNode
-    ? inputNextStateName
-    : startNode
-      ? stateNameMap.get(startNode.id)
-      : undefined;
-
-  const inputsBlock: Record<string, unknown> | null =
-    inputNode != null
-      ? {
-          Type: "Pass",
-          Skill: "flow_control.input",
-          ...(inputNextStateName ? { Next: inputNextStateName } : {}),
-          Parameters: inputsParameters
-        }
-      : null;
-
-  const baseDsl: Record<string, unknown> = {
-    Comment: "Generated from editor",
-    StartAt: workflowStartAt,
-    ...(inputsBlock ? { Inputs: inputsBlock } : {}),
-    States: states
-  };
-
-  if (!failureGraph || !failureGraph.enabled) {
-    return baseDsl;
-  }
-
-  const onFailure = buildOnFailureDsl(
-    failureGraph,
-    stateNameMap,
-    inputValuesForConditions
-  );
-  if (!onFailure) {
-    return baseDsl;
-  }
-
-  return {
-    ...baseDsl,
-    OnFailure: onFailure
-  };
-}
-
-function buildOnFailureDsl(
-  failureGraph: FailureHandlingGraph,
-  stateNameMap: Map<string, string>,
-  inputValuesForConditions?: Map<string, number | boolean | string>
-) {
-  const { nodes, edges, entryNodeId } = failureGraph;
-  if (!nodes.length) return null;
-
-  const entry = nodes.find((n) => n.id === entryNodeId);
-  if (!entry) return null;
-
-  const firstEdge = edges.find((e) => e.from === entry.id);
-  if (!firstEdge) {
-    // enable 되었지만 유저 정의 노드가 하나도 없는 경우: OnFailure 직렬화 생략
-    return null;
-  }
-
-  const startNode = nodes.find((n) => n.id === firstEdge.to);
-  if (!startNode) return null;
-
-  const failureNodes = nodes.filter((n) => n.id !== entry.id);
-  const failureNodeIds = new Set(failureNodes.map((n) => n.id));
-  const failureEdges = edges.filter(
-    (e) => failureNodeIds.has(e.from) && failureNodeIds.has(e.to)
-  );
-
-  const failureStateNameMap = new Map<string, string>();
-  Array.from(failureNodeIds).forEach((id, index) => {
-    const existing = stateNameMap.get(id);
-    failureStateNameMap.set(id, existing ?? `OnFailure_${index + 1}`);
-  });
-
-  const states = buildStateRecords(
-    failureNodes,
-    failureEdges,
-    failureStateNameMap,
-    new Map(),
-    undefined,
-    undefined,
-    undefined,
-    inputValuesForConditions
-  );
-
-  const startStateName = failureStateNameMap.get(startNode.id);
-  if (!startStateName) return null;
-
-  const visited = new Set<string>();
-  let currentName: string | undefined | null = startStateName;
-  let lastName: string | null = null;
-  while (currentName && !visited.has(currentName)) {
-    visited.add(currentName);
-    lastName = currentName;
-    const state = states[currentName] as
-      | (Record<string, unknown> & { Next?: string })
-      | undefined;
-    if (!state || !state.Next) break;
-    currentName = state.Next;
-  }
-  if (lastName && states[lastName]) {
-    if (!states[lastName].Next) {
-      states[lastName].End = true;
-    }
-  }
-
-  return {
-    StartAt: startStateName,
-    States: states
-  };
-}
-
-function buildViewJson(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  canvasBase: { width: number; height: number },
-  zoom: number,
-  failureGraph: FailureHandlingGraph,
-  /** 최종 `dsl_json`에 OnFailure가 있을 때만 실패 캔버스 레이아웃을 남긴다. */
-  persistFailureLayout: boolean
-): EditorViewJson {
-  const base: EditorViewJson = {
-    version: "v1",
-    nodes,
-    edges,
-    canvas: {
-      width: canvasBase.width,
-      height: canvasBase.height,
-      zoom
-    }
-  };
-  if (persistFailureLayout) {
-    base.failure = {
-      entryNodeId: failureGraph.entryNodeId,
-      nodes: failureGraph.nodes,
-      edges: failureGraph.edges
-    };
-  }
-  return base;
-}
-
-type DslBranch = {
-  StartAt?: string;
-  States?: Record<string, DslState>;
-};
-
-type DslState = {
-  Type?: string;
-  Next?: string;
-  End?: boolean;
-  Label?: string;
-  Skill?: string;
-  Count?: number;
-  RepeatCount?: number;
-  StartAt?: string;
-  MaxAttempts?: number;
-  /** Retry 본문 (Repeat·Parallel과 동일 키). 레거시 export 키 `State`도 import 시 허용 */
-  States?: Record<string, DslState> | Array<Record<string, DslState>>;
-  State?: Record<string, DslState>;
-  BeforeRetryAfterFailure?: Record<string, DslState>;
-  Parameters?: Record<string, unknown>;
-  Choices?: Array<Record<string, unknown>>;
-  Expressions?: Array<{ operator?: string | null; expression?: string }>;
-  If?: { Condition?: { Variable?: string; Operator?: string; Value?: unknown }; Then?: string };
-  Else?: string;
-  Branches?: DslBranch[];
-  Body?: DslBranch;
-};
-
-type ParsedEditorGraph = {
-  nodes: EditorNode[];
-  edges: EditorEdge[];
-  canvas?: { width: number; height: number; zoom: number };
-  /** 루트 `States` 키 → 에디터 노드 id (OnFailure DSL 복원용) */
-  rootStateNameToNodeId?: Map<string, string>;
-};
-
-function getContainerTypeById(nodes: EditorNode[]) {
-  const map = new Map<string, ContainerType>();
-  nodes.forEach((node) => {
-    const type = getContainerType(node.kind);
-    if (type) {
-      map.set(node.id, type);
-    }
-  });
-  return map;
-}
-
-function getNodeContainerKey(
-  node: EditorNode,
-  containerTypeById: Map<string, ContainerType>
-) {
-  const containerId = node.containerId;
-  if (!containerId) return null;
-  const containerType = node.containerType ?? containerTypeById.get(containerId);
-  if (!containerType) return null;
-  if (containerType === "parallel") {
-    const branchIndex = node.branchIndex ?? 0;
-    return `${containerId}:branch:${branchIndex}`;
-  }
-  return `${containerId}:body`;
-}
-
-function filterEdgesByContainerRules(nodes: EditorNode[], edges: EditorEdge[]) {
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const containerTypeById = getContainerTypeById(nodes);
-  return edges.filter((edge) => {
-    const fromNode = nodeMap.get(edge.from);
-    const toNode = nodeMap.get(edge.to);
-    if (!fromNode || !toNode) return false;
-    const fromKey = getNodeContainerKey(fromNode, containerTypeById);
-    const toKey = getNodeContainerKey(toNode, containerTypeById);
-    if (!fromKey && !toKey) return true;
-    return fromKey !== null && fromKey === toKey;
-  });
-}
-
-/** v0: Retry 스코프 안에 넣을 수 없는 노드 kind */
-const RETRY_SCOPE_FORBIDDEN_KINDS: NodeKind[] = [
-  "flow_control.condition",
-  "flow_control.parallel",
-  "flow_control.repeat",
-  "flow_control.retry"
-];
-
-function isForbiddenInRetryScope(kind: NodeKind): boolean {
-  return RETRY_SCOPE_FORBIDDEN_KINDS.includes(kind);
-}
-
-function recomputeRetryScopeMembership(
-  prevNodes: EditorNode[],
-  retryNodeId: string,
-  scopeType: "main" | "failure",
-  edges: EditorEdge[]
-): EditorNode[] {
-  const retryNode = prevNodes.find(
-    (n) => n.id === retryNodeId && n.kind === "flow_control.retry"
-  );
-  if (!retryNode) return prevNodes;
-
-  const endKey = scopeType === "main" ? "mainScopeEndId" : "failureScopeEndId";
-  const endId = retryNode.params[endKey] || null;
-
-  const nodeMap = new Map(prevNodes.map((n) => [n.id, n]));
-  const outEdges = new Map<string, string>();
-  edges.forEach((e) => {
-    if (nodeMap.has(e.from) && nodeMap.has(e.to)) {
-      outEdges.set(e.from, e.to);
-    }
-  });
-
-  const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
-  if (!startId) {
-    // 시작점이 없으면 해당 스코프 멤버십 전부 제거
-    return prevNodes.map((n) =>
-      n.retryOwnerId === retryNodeId && n.retryScopeType === scopeType
-        ? { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false }
-        : n
-    );
-  }
-
-  const scopeIds = new Set<string>();
-  let current: string | null = startId;
-  while (current) {
-    const node = nodeMap.get(current);
-    if (!node) break;
-    // flow_control 노드를 만나면 그 전까지만 포함
-    if (node.kind.startsWith("flow_control.")) break;
-    scopeIds.add(current);
-    if (endId && current === endId) break;
-    const next: string | null = outEdges.get(current) ?? null;
-    if (!next) break;
-    current = next;
-  }
-
-  return prevNodes.map((n) => {
-    const inScope = scopeIds.has(n.id);
-    const wasInScope = n.retryOwnerId === retryNodeId && n.retryScopeType === scopeType;
-    if (!inScope && wasInScope) {
-      return {
-        ...n,
-        retryOwnerId: null,
-        retryScopeType: null,
-        isRetryScopeEnd: false
-      };
-    }
-    if (inScope) {
-      return {
-        ...n,
-        retryOwnerId: retryNodeId,
-        retryScopeType: scopeType,
-        isRetryScopeEnd: endId ? n.id === endId : false
-      };
-    }
-    return n;
-  });
-}
-
-/** Retry 스코프(메인/실패)의 시작 노드 id: Retry의 main/failure 포트에서 나간 edge의 to */
-function getRetryScopeStartNodeId(
-  retryNodeId: string,
-  portKey: "main" | "failure",
-  edges: EditorEdge[]
-): string | null {
-  const edge = edges.find(
-    (e) => e.from === retryNodeId && e.fromPort === portKey
-  );
-  return edge?.to ?? null;
-}
-
-/** Retry 스코프에 속한 노드 id 집합 (선형: start부터 scope end까지. isRetryScopeEnd인 노드에서 순회 중단) */
-function getRetryScopeNodeIds(
-  retryNodeId: string,
-  scopeType: "main" | "failure",
-  nodes: EditorNode[],
-  edges: EditorEdge[]
-): Set<string> {
-  const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
-  if (!startId) return new Set();
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const outEdges = new Map<string, EditorEdge>();
-  edges.forEach((e) => {
-    if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, e);
-  });
-  const ids = new Set<string>();
-  let current: string | null = startId;
-  while (current) {
-    const node = nodeMap.get(current);
-    if (!node) break;
-    // flow_control 노드는 스코프 계산에서 제외하고, 중간에 만나면 그 전까지만 포함
-    if (node.kind.startsWith("flow_control.")) break;
-    if (node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
-    ids.add(current);
-    if (node.isRetryScopeEnd) break;
-    current = outEdges.get(current)?.to ?? null;
-  }
-  return ids;
-}
-
-/** Retry 스코프에서 scope end 노드 id (체인 순서상 마지막 노드) */
-function getRetryScopeEndNodeId(
-  retryNodeId: string,
-  scopeType: "main" | "failure",
-  nodes: EditorNode[],
-  edges: EditorEdge[]
-): string | null {
-  const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
-  if (!startId) return null;
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-  const outEdges = new Map<string, EditorEdge>();
-  edges.forEach((e) => {
-    if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, e);
-  });
-  let current: string | null = startId;
-  let last: string | null = startId;
-  while (current) {
-    const node = nodeMap.get(current);
-    if (!node) break;
-    // flow_control 노드는 스코프 계산에서 제외하고, 중간에 만나면 그 전까지만 포함
-    if (node.kind.startsWith("flow_control.")) break;
-    if (node.retryOwnerId !== retryNodeId || node.retryScopeType !== scopeType) break;
-    last = current;
-    if (node.isRetryScopeEnd) break;
-    current = outEdges.get(current)?.to ?? null;
-  }
-  return last;
-}
-
-/** Retry 한쪽 스코프(메인 또는 실패)의 서브플로우 States 맵과 StartAt 반환 */
-function buildRetryScopeSubflow(
-  retryNodeId: string,
-  scopeType: "main" | "failure",
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  stateNameMap: Map<string, string>,
-  containerPayloads: Map<string, ContainerDslPayload>,
-  skillsetMap?: Map<string, import("@/domain/types").Skillset>,
-  inputValuesForConditions?: Map<string, number | boolean | string>
-): { startAt: string | null; states: Record<string, Record<string, unknown>> } {
-  const scopeNodeIds = getRetryScopeNodeIds(retryNodeId, scopeType, nodes, edges);
-  if (scopeNodeIds.size === 0) return { startAt: null, states: {} };
-  const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
-  if (!startId) return { startAt: null, states: {} };
-  const scopeNodes = nodes.filter((n) => scopeNodeIds.has(n.id));
-  const scopeEdges = edges.filter(
-    (e) => scopeNodeIds.has(e.from) && scopeNodeIds.has(e.to)
-  );
-  const states = buildStateRecords(
-    scopeNodes,
-    scopeEdges,
-    stateNameMap,
-    containerPayloads,
-    skillsetMap,
-    undefined,
-    undefined,
-    inputValuesForConditions
-  );
-  const startAt = stateNameMap.get(startId) ?? null;
-  return { startAt, states };
-}
-
-function normalizeContainerAssignments(nodes: EditorNode[]) {
-  const containerTypeById = getContainerTypeById(nodes);
-  return nodes.map((node) => {
-    if (!node.containerId) return node;
-    const containerType = node.containerType ?? containerTypeById.get(node.containerId);
-    if (!containerType) {
-      return {
-        ...node,
-        containerId: null,
-        containerType: null,
-        branchIndex: null
-      };
-    }
-    const branchIndex =
-      containerType === "parallel"
-        ? typeof node.branchIndex === "number"
-          ? node.branchIndex
-          : 0
-        : null;
-    return {
-      ...node,
-      containerType,
-      branchIndex
-    };
-  });
-}
-
-function normalizeContainerFrames(nodes: EditorNode[]) {
-  return nodes.map((node) => {
-    const containerType = getContainerType(node.kind);
-    if (!containerType) return node;
-    const branchCount = containerType === "parallel" ? getContainerBranchCount(node) : 1;
-    const defaults = getDefaultContainerFrameSize(containerType, branchCount);
-    const width = node.containerFrame?.width ?? defaults.width;
-    const height = node.containerFrame?.height ?? defaults.height;
-    const nextFrame: ContainerFrameData = {
-      width,
-      height,
-      ...(containerType === "parallel" ? { branchCount } : {})
-    };
-    if (
-      node.containerFrame &&
-      node.containerFrame.width === nextFrame.width &&
-      node.containerFrame.height === nextFrame.height &&
-      node.containerFrame.branchCount === nextFrame.branchCount
-    ) {
-      return node;
-    }
-    return { ...node, containerFrame: nextFrame };
-  });
-}
-
-function getTopologicalOrder(nodes: EditorNode[], edges: EditorEdge[]) {
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const nodeIds = nodes.map((node) => node.id);
-  const inDegree = new Map<string, number>();
-  const outgoing = new Map<string, string[]>();
-
-  nodeIds.forEach((id) => {
-    inDegree.set(id, 0);
-    outgoing.set(id, []);
-  });
-
-  edges.forEach((edge) => {
-    if (!inDegree.has(edge.to) || !outgoing.has(edge.from)) return;
-    inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
-    outgoing.get(edge.from)?.push(edge.to);
-  });
-
-  const queue = nodeIds
-    .filter((id) => (inDegree.get(id) ?? 0) === 0)
-    .sort((a, b) => (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? ""));
-  const ordered: string[] = [];
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current) break;
-    ordered.push(current);
-    outgoing.get(current)?.forEach((to) => {
-      inDegree.set(to, (inDegree.get(to) ?? 0) - 1);
-      if (inDegree.get(to) === 0) {
-        queue.push(to);
-        queue.sort((a, b) => (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? ""));
-      }
-    });
-  }
-
-  const remaining = nodeIds.filter((id) => !ordered.includes(id));
-  if (remaining.length > 0) {
-    remaining.sort((a, b) => (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? ""));
-  }
-  return [...ordered, ...remaining];
-}
-
-function layoutNodesByLayers(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
-  options: { padding: number; spacingX: number; rowGap: number }
-) {
-  const positions = new Map<string, { x: number; y: number }>();
-  if (nodes.length === 0) return positions;
-  const inDegree = new Map<string, number>();
-  const outgoing = new Map<string, string[]>();
-
-  nodes.forEach((node) => {
-    inDegree.set(node.id, 0);
-    outgoing.set(node.id, []);
-  });
-
-  edges.forEach((edge) => {
-    if (!inDegree.has(edge.to) || !outgoing.has(edge.from)) return;
-    inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
-    outgoing.get(edge.from)?.push(edge.to);
-  });
-
-  const queue = Array.from(inDegree.entries())
-    .filter(([, value]) => value === 0)
-    .map(([id]) => id);
-  const layers = new Map<string, number>();
-  queue.forEach((id) => layers.set(id, 0));
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current) break;
-    const nextLayer = (layers.get(current) ?? 0) + 1;
-    outgoing.get(current)?.forEach((to) => {
-      layers.set(to, Math.max(layers.get(to) ?? 0, nextLayer));
-      inDegree.set(to, (inDegree.get(to) ?? 1) - 1);
-      if (inDegree.get(to) === 0) {
-        queue.push(to);
-      }
-    });
-  }
-
-  nodes.forEach((node) => {
-    if (!layers.has(node.id)) layers.set(node.id, 0);
-  });
-
-  const grouped = new Map<number, EditorNode[]>();
-  nodes.forEach((node) => {
-    const layer = layers.get(node.id) ?? 0;
-    const group = grouped.get(layer) ?? [];
-    group.push(node);
-    grouped.set(layer, group);
-  });
-
-  Array.from(grouped.entries())
-    .sort(([a], [b]) => a - b)
-    .forEach(([layer, group]) => {
-      const sortedGroup = [...group].sort((a, b) => a.name.localeCompare(b.name));
-      let yCursor = options.padding;
-      sortedGroup.forEach((node) => {
-        const nodeHeight = getNodeHeight(node, nodeTypeConfig);
-        const x = options.padding + layer * options.spacingX;
-        const y = yCursor;
-        yCursor += nodeHeight + options.rowGap;
-        positions.set(node.id, { x, y });
-      });
-    });
-
-  return positions;
-}
-
-function layoutNodesInRegion(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  region: ContainerFrameRegion,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
-  direction: "vertical" | "horizontal"
-) {
-  const positions = new Map<string, { x: number; y: number }>();
-  const ordered = getTopologicalOrder(nodes, edges);
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  let yCursor = region.bounds.y + CONTAINER_LAYOUT.padding;
-  let xCursor = region.bounds.x + CONTAINER_LAYOUT.padding;
-  const anchorY = yCursor;
-  const anchorX = xCursor;
-  ordered.forEach((id) => {
-    const node = nodeMap.get(id);
-    if (!node) return;
-    if (direction === "horizontal") {
-      positions.set(id, { x: xCursor, y: anchorY });
-      xCursor += NODE_METRICS.width + CONTAINER_LAYOUT.columnGap;
-      return;
-    }
-    positions.set(id, { x: anchorX, y: yCursor });
-    yCursor += getNodeHeight(node, nodeTypeConfig) + CONTAINER_LAYOUT.rowGap;
-  });
-  return positions;
-}
-
-function expandContainerFrameForNodes(
-  containerNode: EditorNode,
-  nodes: EditorNode[]
-) {
-  const containerType = getContainerType(containerNode.kind);
-  if (!containerType) return containerNode;
-  const branchCount = containerType === "parallel" ? getContainerBranchCount(containerNode) : 1;
-  const branchCounts = Array.from({ length: branchCount }, (_, index) => {
-    if (containerType === "repeat") {
-      return nodes.filter((node) => node.containerId === containerNode.id).length;
-    }
-    return nodes.filter(
-      (node) =>
-        node.containerId === containerNode.id &&
-        (node.branchIndex ?? 0) === index
-    ).length;
-  });
-  const maxNodes = Math.max(1, ...branchCounts);
-  // START/END 리본이 있는 노드를 고려한 카드의 실질 높이
-  const nodeVisualHeight = NODE_METRICS.collapsedHeight + RIBBON_EXTRA_HEIGHT;
-  let requiredWidth = CONTAINER_FRAME_DEFAULTS.width;
-  let requiredHeight =
-    CONTAINER_FRAME_METRICS.headerHeight +
-    CONTAINER_FRAME_METRICS.padding * 2 +
-    maxNodes * (nodeVisualHeight + CONTAINER_LAYOUT.rowGap) -
-    CONTAINER_LAYOUT.rowGap +
-    CONTAINER_LAYOUT.padding;
-
-  if (containerType === "repeat") {
-    // Repeat body: 노드 가로 배치 → 폭은 노드 수에 비례, 높이는 한 줄
-    requiredWidth = Math.max(
-      CONTAINER_FRAME_DEFAULTS.width,
-      CONTAINER_FRAME_METRICS.padding * 2 +
-        maxNodes * (NODE_METRICS.width + CONTAINER_LAYOUT.columnGap) -
-        CONTAINER_LAYOUT.columnGap +
-        CONTAINER_LAYOUT.padding
-    );
-    requiredHeight =
-      CONTAINER_FRAME_METRICS.headerHeight +
-      CONTAINER_FRAME_METRICS.padding * 2 +
-      nodeVisualHeight +
-      CONTAINER_LAYOUT.padding;
-  } else if (containerType === "parallel") {
-    // Parallel: 브랜치는 세로 스택, 각 브랜치 안에서 노드들은 가로로 배치.
-    // - 가로(width): 어떤 브랜치든 가장 많은 노드 수 기준으로 계산
-    // - 세로(height): 브랜치 수 * 노드 높이 (+ 브랜치 간 rowGap)
-    const perBranchWidth =
-      CONTAINER_FRAME_METRICS.padding * 2 +
-      maxNodes * (NODE_METRICS.width + CONTAINER_LAYOUT.columnGap) -
-      CONTAINER_LAYOUT.columnGap +
-      // 브랜치 우측에 여유 공간
-      CONTAINER_LAYOUT.padding;
-    requiredWidth = Math.max(CONTAINER_FRAME_DEFAULTS.width, perBranchWidth);
-
-    const baseHeightForBranches =
-      branchCount * nodeVisualHeight +
-      Math.max(0, branchCount - 1) * CONTAINER_LAYOUT.rowGap +
-      // 마지막 브랜치 하단 여유
-      CONTAINER_LAYOUT.padding;
-    requiredHeight =
-      CONTAINER_FRAME_METRICS.headerHeight +
-      CONTAINER_FRAME_METRICS.padding * 2 +
-      baseHeightForBranches;
-  }
-
-  const nextFrame: ContainerFrameData = {
-    width: Math.max(requiredWidth, CONTAINER_FRAME_METRICS.minWidth),
-    height: Math.max(requiredHeight, CONTAINER_FRAME_METRICS.minHeight),
-    ...(containerType === "parallel" ? { branchCount } : {})
-  };
-  return { ...containerNode, containerFrame: nextFrame };
-}
-
-function applyImportedLayout(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
-) {
-  let nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nodes));
-  const containerTypeById = getContainerTypeById(nextNodes);
-  const containerIds = new Set(containerTypeById.keys());
-  nextNodes = nextNodes.map((node) =>
-    isContainerNode(node) ? expandContainerFrameForNodes(node, nextNodes) : node
-  );
-
-  const topLevelNodes = nextNodes.filter(
-    (node) => !node.containerId || !containerIds.has(node.containerId)
-  );
-  const topLevelNodeIds = new Set(topLevelNodes.map((node) => node.id));
-  const topLevelEdges = edges.filter(
-    (edge) => topLevelNodeIds.has(edge.from) && topLevelNodeIds.has(edge.to)
-  );
-  const topLevelPositions = layoutNodesByLayers(topLevelNodes, topLevelEdges, nodeTypeConfig, {
-    padding: 80,
-    spacingX: 320,
-    rowGap: 60
-  });
-
-  nextNodes = nextNodes.map((node) => {
-    if (topLevelPositions.has(node.id)) {
-      return { ...node, position: topLevelPositions.get(node.id)! };
-    }
-    return node;
-  });
-
-  containerIds.forEach((containerId) => {
-    const containerNode = nextNodes.find((node) => node.id === containerId);
-    if (!containerNode) return;
-    const layout = getContainerFrameLayout(containerNode, nodeTypeConfig);
-    if (!layout) return;
-    const containerType = getContainerType(containerNode.kind);
-    if (!containerType) return;
-    if (containerType === "repeat") {
-      const bodyNodes = nextNodes.filter((node) => node.containerId === containerId);
-      const bodyNodeIds = new Set(bodyNodes.map((node) => node.id));
-      const bodyEdges = edges.filter(
-        (edge) => bodyNodeIds.has(edge.from) && bodyNodeIds.has(edge.to)
-      );
-      const positions = layoutNodesInRegion(
-        bodyNodes,
-        bodyEdges,
-        layout.regions[0],
-        nodeTypeConfig,
-        "horizontal"
-      );
-      nextNodes = nextNodes.map((node) =>
-        positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node
-      );
-      return;
-    }
-    layout.regions.forEach((region) => {
-      const branchNodes = nextNodes.filter(
-        (node) =>
-          node.containerId === containerId &&
-          (node.branchIndex ?? 0) === region.index
-      );
-      const branchNodeIds = new Set(branchNodes.map((node) => node.id));
-      const branchEdges = edges.filter(
-        (edge) => branchNodeIds.has(edge.from) && branchNodeIds.has(edge.to)
-      );
-      const positions = layoutNodesInRegion(
-        branchNodes,
-        branchEdges,
-        region,
-        nodeTypeConfig,
-        "horizontal"
-      );
-      nextNodes = nextNodes.map((node) =>
-        positions.has(node.id) ? { ...node, position: positions.get(node.id)! } : node
-      );
-    });
-  });
-
-  return nextNodes;
-}
-
-function getCanvasSizeForNodes(
-  nodes: EditorNode[],
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
-  heightMap?: Map<string, number>
-) {
-  let maxX = CANVAS_DEFAULT.width;
-  let maxY = CANVAS_DEFAULT.height;
-  nodes.forEach((node) => {
-    const nodeHeight = heightMap?.get(node.id) ?? getNodeHeight(node, nodeTypeConfig);
-    maxX = Math.max(maxX, node.position.x + NODE_METRICS.width + CANVAS_PADDING.x);
-    maxY = Math.max(maxY, node.position.y + nodeHeight + CANVAS_PADDING.y);
-    if (isContainerNode(node)) {
-      const layout = getContainerFrameLayout(node, nodeTypeConfig);
-      if (layout) {
-        maxX = Math.max(
-          maxX,
-          layout.frame.x + layout.frame.width + CANVAS_PADDING.x
-        );
-        maxY = Math.max(
-          maxY,
-          layout.frame.y + layout.frame.height + CANVAS_PADDING.y
-        );
-      }
-    }
-  });
-  return { width: maxX, height: maxY };
-}
-
-function getRetryNestedStatesMap(state: DslState): Record<string, DslState> | undefined {
-  if (Array.isArray(state.States)) {
-    const merged: Record<string, DslState> = {};
-    for (const item of state.States) {
-      if (isRecord(item)) {
-        Object.assign(merged, item as Record<string, DslState>);
-      }
-    }
-    return Object.keys(merged).length > 0 ? merged : undefined;
-  }
-  if (isRecord(state.States)) {
-    return state.States as Record<string, DslState>;
-  }
-  if (isRecord(state.State)) {
-    return state.State as Record<string, DslState>;
-  }
-  return undefined;
-}
-
-function inferDslSubflowStartAt(body: Record<string, DslState>): string | null {
-  const keys = Object.keys(body);
-  if (keys.length === 0) return null;
-  if (keys.length === 1) return keys[0];
-  const targeted = new Set<string>();
-  for (const st of Object.values(body)) {
-    if (!st || typeof st !== "object") continue;
-    if (typeof st.Next === "string") targeted.add(st.Next);
-    if (st.Type === "Condition" && isRecord(st.If) && typeof st.If.Then === "string") {
-      targeted.add(st.If.Then);
-    }
-    if (typeof st.Else === "string") targeted.add(st.Else);
-  }
-  const roots = keys.filter((k) => !targeted.has(k));
-  if (roots.length === 1) return roots[0];
-  if (roots.length > 0) return [...roots].sort()[0];
-  return [...keys].sort()[0];
-}
-
-function findRetryLinearTerminal(
-  body: Record<string, DslState>,
-  startName: string,
-  innerIdByState: Map<string, string>
-): { stateName: string; nodeId: string } | null {
-  if (!startName || !innerIdByState.has(startName)) return null;
-  let currentName: string | null = startName;
-  const visited = new Set<string>();
-  while (currentName !== null && innerIdByState.has(currentName) && !visited.has(currentName)) {
-    visited.add(currentName);
-    const step: DslState | undefined = body[currentName];
-    if (!step) break;
-    if (step.Type === "Condition" || step.Type === "Choice") {
-      return { stateName: currentName, nodeId: innerIdByState.get(currentName)! };
-    }
-    if (step.End === true) {
-      return { stateName: currentName, nodeId: innerIdByState.get(currentName)! };
-    }
-    const nextName: string | null = typeof step.Next === "string" ? step.Next : null;
-    if (!nextName || !body[nextName]) {
-      return { stateName: currentName, nodeId: innerIdByState.get(currentName)! };
-    }
-    currentName = nextName;
-  }
-  return null;
-}
-
-function parseDslToEditor(
-  dslJson: Record<string, unknown>,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>,
-  options?: { applyImportedLayout?: boolean }
-): ParsedEditorGraph | null {
-  if (!isRecord(dslJson)) return null;
-  const states = (dslJson as { States?: Record<string, DslState> }).States;
-  if (!states || !isRecord(states)) return null;
-
-  const rawInputs = (dslJson as { Inputs?: unknown }).Inputs;
-
-  const mapEntryToVariableRow = (
-    name: string,
-    entry: unknown,
-    varRowIndex: { current: number }
-  ): VariableRow | null => {
-    if (!name.trim()) return null;
-    const item = isRecord(entry) ? entry : {};
-    const rawType = item.Type;
-    const valueType: VariableValueType =
-      rawType === "int" || rawType === "integer"
-        ? "int"
-        : rawType === "bool"
-          ? "bool"
-          : rawType === "double"
-            ? "double"
-            : rawType === "string"
-              ? "string"
-              : "string";
-    const rawValue = item.Value;
-    const value =
-      typeof rawValue === "string"
-        ? rawValue
-        : typeof rawValue === "number"
-          ? String(rawValue)
-          : typeof rawValue === "boolean"
-            ? rawValue
-              ? "true"
-              : "false"
-            : "";
-    return {
-      id: `var-${varRowIndex.current++}`,
-      name: name.trim(),
-      value,
-      valueType
-    };
-  };
-
-  const varRowCounter = { current: 1 };
-  let inputVariableRows: VariableRow[] = [];
-  let syntheticInputFromBlock = false;
-  let inputNextFromDsl: string | null = null;
-
-  if (isRecord(rawInputs) && isRecord(rawInputs.Parameters)) {
-    syntheticInputFromBlock = true;
-    inputVariableRows = Object.entries(rawInputs.Parameters)
-      .map(([name, entry]) => mapEntryToVariableRow(name, entry, varRowCounter))
-      .filter((row): row is VariableRow => row != null);
-    inputNextFromDsl =
-      typeof rawInputs.Next === "string" ? rawInputs.Next : null;
-  } else if (isRecord(rawInputs)) {
-    inputVariableRows = Object.entries(rawInputs)
-      .filter(
-        ([name]) =>
-          typeof name === "string" &&
-          name.trim() !== "" &&
-          name !== "Type" &&
-          name !== "Skill" &&
-          name !== "Next" &&
-          name !== "Parameters"
-      )
-      .map(([name, entry]) => mapEntryToVariableRow(name, entry, varRowCounter))
-      .filter((row): row is VariableRow => row != null);
-  }
-
-  let nodeIndex = 1;
-  let inputNodeIdForSynthetic: string | null = null;
-  let edgeIndex = 1;
-  let conditionIndex = 1;
-  const nodes: EditorNode[] = [];
-  const edges: EditorEdge[] = [];
-
-  if (syntheticInputFromBlock) {
-    inputNodeIdForSynthetic = `node-${nodeIndex++}`;
-    nodes.push({
-      id: inputNodeIdForSynthetic,
-      name: "Inputs",
-      kind: "flow_control.input",
-      position: { x: 0, y: 0 },
-      isExpanded: false,
-      params: {},
-      variableRows: inputVariableRows,
-      containerId: null,
-      containerType: null,
-      branchIndex: null
-    });
-  }
-
-  const createNodeKind = (state: DslState, stateName: string): NodeKind => {
-    if (state.Type === "Condition") return "flow_control.condition";
-    if (state.Type === "Choice") return "flow_control.condition";
-    if (state.Type === "Succeed") return "flow_control.output";
-    if (state.Type === "Pass") {
-      const label = state.Label != null ? String(state.Label) : "";
-      if (
-        ENABLE_VLM_NODES &&
-        (stateName.startsWith("VLMPlanner") || /VLM\s*Planner/i.test(label))
-      ) {
-        return "flow_control.vlm";
-      }
-      return "flow_control.input";
-    }
-    if (state.Type === "Parallel") return "flow_control.parallel";
-    if (state.Type === "Repeat") return "flow_control.repeat";
-    if (state.Type === "Retry") return "flow_control.retry";
-    const skillName = typeof state.Skill === "string" ? state.Skill : stateName;
-    return `skill.${skillName}` as NodeKind;
-  };
-
-  const parseStateGroup = (
-    groupStates: Record<string, DslState>,
-    context?: {
-      containerId?: string;
-      containerType?: ContainerType;
-      branchIndex?: number;
-      retryOwnerId?: string;
-      retryScopeType?: "main" | "failure";
-    }
-  ): Map<string, string> => {
-    const idByState = new Map<string, string>();
-    Object.entries(groupStates).forEach(([stateName, state]) => {
-      const kind = createNodeKind(state, stateName);
-      if (kind === "flow_control.input" && syntheticInputFromBlock && inputNodeIdForSynthetic) {
-        idByState.set(stateName, inputNodeIdForSynthetic);
-        return;
-      }
-      const id = `node-${nodeIndex++}`;
-      idByState.set(stateName, id);
-      const params = isRecord(state.Parameters)
-        ? Object.entries(state.Parameters).reduce(
-            (acc, [key, value]) => ({
-              ...acc,
-              [key]: typeof value === "string" ? value : JSON.stringify(value)
-            }),
-            {} as Record<string, string>
-          )
-        : {};
-      if (kind === "flow_control.repeat") {
-        const repeatCount = typeof state.RepeatCount === "number" ? state.RepeatCount : typeof state.Count === "number" ? state.Count : undefined;
-        if (repeatCount !== undefined) {
-          params.count = `${repeatCount}`;
-        }
-      }
-      if (kind === "flow_control.retry") {
-        const ma = state.MaxAttempts;
-        const n =
-          typeof ma === "number" && Number.isFinite(ma)
-            ? Math.max(1, Math.floor(ma))
-            : 2;
-        params.maxAttempts = String(n);
-        const fail = state.BeforeRetryAfterFailure;
-        const hasFail = isRecord(fail) && Object.keys(fail).length > 0;
-        params.onFailureEnabled = hasFail ? "true" : "false";
-        params.mainScopeEndId = "";
-        params.failureScopeEndId = "";
-      }
-      let conditionExpressions: ConditionExpression[] | undefined;
-      if (kind === "flow_control.condition") {
-        const ifCond = isRecord(state.If) && isRecord(state.If.Condition) ? state.If.Condition : null;
-        if (ifCond) {
-          const rawVar = (ifCond as { Variable?: unknown }).Variable;
-          const variable =
-            typeof rawVar === "string"
-              ? rawVar
-              : typeof rawVar === "number" || typeof rawVar === "boolean"
-                ? String(rawVar)
-                : "";
-          const comparisonOperator = dslOperatorToEditor(typeof ifCond.Operator === "string" ? ifCond.Operator : "Equals");
-          const rawVal = ifCond.Value;
-          const value =
-            typeof rawVal === "string"
-              ? rawVal
-              : typeof rawVal === "number"
-                ? String(rawVal)
-                : typeof rawVal === "boolean"
-                  ? rawVal ? "true" : "false"
-                  : "";
-          conditionExpressions = [
-            {
-              id: `condition-${conditionIndex++}`,
-              operator: null,
-              variable,
-              comparisonOperator,
-              value
-            }
-          ];
-        } else if (Array.isArray(state.Expressions)) {
-          conditionExpressions = state.Expressions.map((expression) => {
-            const parsed = parseConditionExpressionString(
-              (expression as { expression?: string }).expression ?? ""
-            );
-            return {
-              id: `condition-${conditionIndex++}`,
-              operator:
-                (expression as { operator?: string }).operator === "AND" ||
-                (expression as { operator?: string }).operator === "OR"
-                  ? ((expression as { operator: ConditionOperator }).operator as ConditionOperator)
-                  : null,
-              variable: parsed.variable,
-              comparisonOperator: parsed.comparisonOperator,
-              value: parsed.value
-            };
-          });
-        }
-        if (!conditionExpressions || conditionExpressions.length === 0) {
-          conditionExpressions = [
-            {
-              id: `condition-${conditionIndex++}`,
-              operator: null,
-              variable: "",
-              comparisonOperator: "==",
-              value: ""
-            }
-          ];
-        }
-      }
-      const inRetryScope = Boolean(context?.retryOwnerId);
-      nodes.push({
-        id,
-        name:
-          kind === "flow_control.input"
-            ? syntheticInputFromBlock
-              ? "Inputs"
-              : (state.Label ?? stateName)
-            : state.Label ?? stateName,
-        kind,
-        position: { x: 0, y: 0 },
-        isExpanded: false,
-        params,
-        conditionExpressions,
-        variableRows:
-          kind === "flow_control.input"
-            ? inputVariableRows
-            : kind === "flow_control.output"
-              ? []
-              : undefined,
-        containerId: inRetryScope ? null : (context?.containerId ?? null),
-        containerType: inRetryScope ? null : (context?.containerType ?? null),
-        branchIndex: inRetryScope
-          ? null
-          : context?.containerType === "parallel"
-            ? context.branchIndex ?? 0
-            : null,
-        containerFrame:
-          kind === "flow_control.parallel"
-            ? {
-                ...getDefaultContainerFrameSize(
-                  "parallel",
-                  Array.isArray(state.Branches)
-                    ? Math.max(DEFAULT_PARALLEL_BRANCHES, state.Branches.length)
-                    : DEFAULT_PARALLEL_BRANCHES
-                ),
-                branchCount: Array.isArray(state.Branches)
-                  ? Math.max(DEFAULT_PARALLEL_BRANCHES, state.Branches.length)
-                  : DEFAULT_PARALLEL_BRANCHES
-              }
-            : kind === "flow_control.repeat"
-              ? getDefaultContainerFrameSize("repeat", 1)
-              : undefined,
-        retryOwnerId: context?.retryOwnerId ?? null,
-        retryScopeType: context?.retryScopeType ?? null,
-        isRetryScopeEnd: false,
-        ...(kind === "flow_control.retry" && !inRetryScope
-          ? {
-              retryThemeColor:
-                RETRY_THEME_COLORS[stateName.length % RETRY_THEME_COLORS.length]!.key
-            }
-          : {})
-      });
-    });
-
-    Object.entries(groupStates).forEach(([stateName, state]) => {
-      const fromId = idByState.get(stateName);
-      if (!fromId) return;
-      if (state.Type === "Condition" && isRecord(state.If)) {
-        const thenStateName = state.If.Then;
-        const elseStateName = state.Else;
-        const trueTarget = typeof thenStateName === "string" ? idByState.get(thenStateName) : undefined;
-        const falseTarget = typeof elseStateName === "string" ? idByState.get(elseStateName) : undefined;
-        if (trueTarget) {
-          edges.push({
-            id: `edge-${edgeIndex++}`,
-            from: fromId,
-            fromPort: "true",
-            to: trueTarget
-          });
-        }
-        if (falseTarget) {
-          edges.push({
-            id: `edge-${edgeIndex++}`,
-            from: fromId,
-            fromPort: "false",
-            to: falseTarget
-          });
-        }
-      } else if (state.Type === "Choice" && Array.isArray(state.Choices)) {
-        const trueChoice = state.Choices.find(
-          (choice) => isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === true
-        );
-        const falseChoice = state.Choices.find(
-          (choice) => isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === false
-        );
-        const remainingChoices = state.Choices.filter(
-          (choice) => choice !== trueChoice && choice !== falseChoice
-        );
-        const resolveNext = (choice: Record<string, unknown> | undefined) => {
-          const next = choice?.Next;
-          return typeof next === "string" ? idByState.get(next) : undefined;
-        };
-        const trueTarget =
-          resolveNext(trueChoice as Record<string, unknown> | undefined) ??
-          resolveNext(remainingChoices[0] as Record<string, unknown> | undefined);
-        const falseTarget =
-          resolveNext(falseChoice as Record<string, unknown> | undefined) ??
-          resolveNext(remainingChoices[1] as Record<string, unknown> | undefined);
-        if (trueTarget) {
-          edges.push({
-            id: `edge-${edgeIndex++}`,
-            from: fromId,
-            fromPort: "true",
-            to: trueTarget
-          });
-        }
-        if (falseTarget) {
-          edges.push({
-            id: `edge-${edgeIndex++}`,
-            from: fromId,
-            fromPort: "false",
-            to: falseTarget
-          });
-        }
-      } else if (
-        state.Type !== "Retry" &&
-        typeof state.Next === "string" &&
-        idByState.has(state.Next)
-      ) {
-        edges.push({
-          id: `edge-${edgeIndex++}`,
-          from: fromId,
-          fromPort: "next",
-          to: idByState.get(state.Next) as string
-        });
-      }
-    });
-
-    Object.entries(groupStates).forEach(([stateName, state]) => {
-      const containerId = idByState.get(stateName);
-      if (!containerId) return;
-      if (state.Type === "Repeat") {
-        let bodyStates: Record<string, DslState> | undefined;
-        if (Array.isArray(state.States)) {
-          bodyStates = {};
-          for (const item of state.States) {
-            if (isRecord(item)) {
-              Object.assign(bodyStates, item);
-            }
-          }
-        } else if (isRecord(state.States)) {
-          bodyStates = state.States as Record<string, DslState>;
-        } else if (state.Body?.States) {
-          bodyStates = state.Body.States;
-        }
-        if (bodyStates && Object.keys(bodyStates).length > 0) {
-          parseStateGroup(bodyStates as Record<string, DslState>, {
-            containerId,
-            containerType: "repeat",
-            branchIndex: 0
-          });
-        }
-      }
-      if (state.Type === "Parallel" && Array.isArray(state.Branches)) {
-        state.Branches.forEach((branch, index) => {
-          if (!branch.States) return;
-          parseStateGroup(branch.States, {
-            containerId,
-            containerType: "parallel",
-            branchIndex: index
-          });
-        });
-      }
-      if (state.Type === "Retry") {
-        const retryId = idByState.get(stateName);
-        if (!retryId) return;
-        const mainBody = getRetryNestedStatesMap(state);
-        const startAt =
-          typeof state.StartAt === "string" && mainBody && mainBody[state.StartAt]
-            ? state.StartAt
-            : mainBody
-              ? inferDslSubflowStartAt(mainBody)
-              : null;
-        if (mainBody && startAt) {
-          const innerMap = parseStateGroup(mainBody, {
-            retryOwnerId: retryId,
-            retryScopeType: "main"
-          });
-          const mainStartNodeId = innerMap.get(startAt);
-          if (mainStartNodeId) {
-            edges.push({
-              id: `edge-${edgeIndex++}`,
-              from: retryId,
-              fromPort: "main",
-              to: mainStartNodeId
-            });
-          }
-          const terminal = findRetryLinearTerminal(mainBody, startAt, innerMap);
-          if (terminal) {
-            const ti = nodes.findIndex((n) => n.id === terminal.nodeId);
-            if (ti >= 0) {
-              nodes[ti] = { ...nodes[ti]!, isRetryScopeEnd: true };
-            }
-            const ri = nodes.findIndex((n) => n.id === retryId);
-            if (ri >= 0) {
-              const rn = nodes[ri]!;
-              nodes[ri] = {
-                ...rn,
-                params: { ...rn.params, mainScopeEndId: terminal.nodeId }
-              };
-            }
-            if (typeof state.Next === "string" && idByState.has(state.Next)) {
-              edges.push({
-                id: `edge-${edgeIndex++}`,
-                from: terminal.nodeId,
-                fromPort: "next",
-                to: idByState.get(state.Next) as string
-              });
-            }
-          }
-        }
-        const failRaw = state.BeforeRetryAfterFailure;
-        if (isRecord(failRaw) && Object.keys(failRaw).length > 0) {
-          const failBody = failRaw as Record<string, DslState>;
-          const fStart = inferDslSubflowStartAt(failBody);
-          if (fStart) {
-            const innerFailMap = parseStateGroup(failBody, {
-              retryOwnerId: retryId,
-              retryScopeType: "failure"
-            });
-            const failStartId = innerFailMap.get(fStart);
-            if (failStartId) {
-              edges.push({
-                id: `edge-${edgeIndex++}`,
-                from: retryId,
-                fromPort: "failure",
-                to: failStartId
-              });
-            }
-            const fTerminal = findRetryLinearTerminal(failBody, fStart, innerFailMap);
-            if (fTerminal) {
-              const fi = nodes.findIndex((n) => n.id === fTerminal.nodeId);
-              if (fi >= 0) {
-                nodes[fi] = { ...nodes[fi]!, isRetryScopeEnd: true };
-              }
-              const ri = nodes.findIndex((n) => n.id === retryId);
-              if (ri >= 0) {
-                const rn = nodes[ri]!;
-                nodes[ri] = {
-                  ...rn,
-                  params: { ...rn.params, failureScopeEndId: fTerminal.nodeId }
-                };
-              }
-            }
-          }
-        }
-      }
-    });
-
-    return idByState;
-  };
-
-  const workflowRootIdByState = parseStateGroup(states);
-
-  if (
-    syntheticInputFromBlock &&
-    inputNodeIdForSynthetic &&
-    workflowRootIdByState
-  ) {
-    const nextName =
-      inputNextFromDsl ??
-      (typeof dslJson.StartAt === "string" ? dslJson.StartAt : null);
-    if (nextName) {
-      const targetId = workflowRootIdByState.get(nextName);
-      if (targetId && targetId !== inputNodeIdForSynthetic) {
-        const alreadyLinked = edges.some(
-          (e) =>
-            e.from === inputNodeIdForSynthetic &&
-            e.to === targetId &&
-            e.fromPort === "next"
-        );
-        if (!alreadyLinked) {
-          edges.push({
-            id: `edge-${edgeIndex++}`,
-            from: inputNodeIdForSynthetic,
-            fromPort: "next",
-            to: targetId
-          });
-        }
-      }
-    }
-  }
-
-  let nextNodes: EditorNode[];
-  if (options?.applyImportedLayout === false) {
-    nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nodes));
-  } else {
-    nextNodes = applyImportedLayout(nodes, edges, nodeTypeConfig);
-    nextNodes = normalizeContainerFrames(normalizeContainerAssignments(nextNodes));
-  }
-  const displayEdges = filterEdgesByContainerRules(nextNodes, edges);
-  const canvas = getCanvasSizeForNodes(nextNodes, nodeTypeConfig);
-  return {
-    nodes: nextNodes,
-    edges: displayEdges,
-    canvas: { ...canvas, zoom: 1 },
-    rootStateNameToNodeId: workflowRootIdByState ?? new Map<string, string>()
-  };
-}
-
-/** import·DSL 복원용: 엔트리에서 `Next` 체인 최장 거리로 레이어(행) 부여 */
-function assignFailureLayersFromEntry(
-  entryId: string,
-  nodeIds: Set<string>,
-  edges: EditorEdge[]
-): Map<string, number> {
-  const outgoing = new Map<string, string[]>();
-  nodeIds.forEach((id) => outgoing.set(id, []));
-  for (const e of edges) {
-    if (nodeIds.has(e.from) && nodeIds.has(e.to)) {
-      outgoing.get(e.from)!.push(e.to);
-    }
-  }
-  const layers = new Map<string, number>();
-  if (nodeIds.has(entryId)) {
-    layers.set(entryId, 0);
-  }
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [from, tos] of outgoing.entries()) {
-      const base = layers.get(from);
-      if (base === undefined) continue;
-      for (const to of tos) {
-        const nextL = base + 1;
-        const cur = layers.get(to) ?? -1;
-        if (nextL > cur) {
-          layers.set(to, nextL);
-          changed = true;
-        }
-      }
-    }
-  }
-  const reachable = new Set<string>();
-  const stack = [entryId];
-  while (stack.length > 0) {
-    const id = stack.pop()!;
-    if (!nodeIds.has(id) || reachable.has(id)) continue;
-    reachable.add(id);
-    for (const to of outgoing.get(id) ?? []) {
-      stack.push(to);
-    }
-  }
-  let maxL = 0;
-  layers.forEach((v) => {
-    maxL = Math.max(maxL, v);
-  });
-  for (const id of nodeIds) {
-    if (!reachable.has(id)) {
-      layers.set(id, maxL + 1);
-    } else if (!layers.has(id)) {
-      layers.set(id, 0);
-    }
-  }
-  return layers;
-}
-
-/** view.failure 없이 OnFailure DSL만 있을 때: 위→아래 중앙 정렬 기본 레이아웃 */
-function layoutFailureGraphImportedDefaultVertical(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  entryNodeId: string,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
-): EditorNode[] {
-  const nodeIds = new Set(nodes.map((n) => n.id));
-  if (!nodeIds.has(entryNodeId)) return nodes;
-  const layers = assignFailureLayersFromEntry(entryNodeId, nodeIds, edges);
-  const byLayer = new Map<number, EditorNode[]>();
-  for (const node of nodes) {
-    const L = layers.get(node.id) ?? 0;
-    const g = byLayer.get(L) ?? [];
-    g.push(node);
-    byLayer.set(L, g);
-  }
-  const sortedLayerKeys = [...byLayer.keys()].sort((a, b) => a - b);
-  const positions = new Map<string, { x: number; y: number }>();
-  const canvasCenterX = FAILURE_CANVAS_BASE.width / 2;
-  let yCursor = 40;
-  const colGap = 28;
-  const rowGap = 56;
-
-  for (const L of sortedLayerKeys) {
-    const group = (byLayer.get(L) ?? []).sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-    );
-    const maxH = Math.max(
-      ...group.map((n) => getNodeHeight(n, nodeTypeConfig)),
-      NODE_METRICS.collapsedHeight
-    );
-    const rowW =
-      group.length * NODE_METRICS.width + Math.max(0, group.length - 1) * colGap;
-    let x = canvasCenterX - rowW / 2;
-    for (const node of group) {
-      positions.set(node.id, { x, y: yCursor });
-      x += NODE_METRICS.width + colGap;
-    }
-    yCursor += maxH + rowGap;
-  }
-
-  return nodes.map((n) => {
-    const p = positions.get(n.id);
-    return p ? { ...n, position: p } : n;
-  });
-}
-
-/** `dsl_json.OnFailure`만 있고 view.failure가 없을 때 실패 핸들링 캔버스를 복구한다. */
-function failureGraphFromOnFailureDsl(
-  onFailureDsl: Record<string, unknown>,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
-): FailureHandlingGraph | null {
-  const parsed = parseDslToEditor(onFailureDsl, nodeTypeConfig, {
-    applyImportedLayout: false
-  });
-  const stateMap = parsed?.rootStateNameToNodeId;
-  if (!parsed || !stateMap || parsed.nodes.length === 0) return null;
-  const startAt =
-    typeof onFailureDsl.StartAt === "string" ? onFailureDsl.StartAt.trim() : "";
-  if (!startAt) return null;
-  const startNodeId = stateMap.get(startAt);
-  if (!startNodeId) return null;
-
-  const entryId = "failure-entry-1";
-  const entryNode: EditorNode = {
-    id: entryId,
-    name: "On Workflow Failure",
-    kind: "system.on_failure_entry",
-    position: {
-      x: FAILURE_CANVAS_BASE.width / 2 - NODE_METRICS.width / 2,
-      y: 40
-    },
-    isExpanded: true,
-    params: {}
-  };
-
-  const idMap = new Map<string, string>();
-  idMap.set(entryId, entryId);
-  parsed.nodes.forEach((node, index) => {
-    idMap.set(node.id, `failure-node-${index + 1}`);
-  });
-
-  const remapNodeId = (id: string | null | undefined): string | null => {
-    if (id == null) return null;
-    return idMap.get(id) ?? id;
-  };
-
-  const remappedNodes: EditorNode[] = parsed.nodes.map((node) => ({
-    ...node,
-    id: idMap.get(node.id)!,
-    containerId: remapNodeId(node.containerId),
-    retryOwnerId:
-      node.retryOwnerId != null
-        ? idMap.get(node.retryOwnerId) ?? node.retryOwnerId
-        : node.retryOwnerId
-  }));
-
-  const remappedEdges: EditorEdge[] = [];
-  let edgeIx = 1;
-  remappedEdges.push({
-    id: `failure-edge-${edgeIx++}`,
-    from: entryId,
-    fromPort: "next",
-    to: idMap.get(startNodeId)!
-  });
-  for (const edge of parsed.edges) {
-    const from = idMap.get(edge.from);
-    const to = idMap.get(edge.to);
-    if (!from || !to) continue;
-    remappedEdges.push({
-      ...edge,
-      id: `failure-edge-${edgeIx++}`,
-      from,
-      to
-    });
-  }
-
-  const nodesBeforeLayout = [entryNode, ...remappedNodes];
-  const laidOutNodes = layoutFailureGraphImportedDefaultVertical(
-    nodesBeforeLayout,
-    remappedEdges,
-    entryId,
-    nodeTypeConfig
-  );
-
-  return {
-    enabled: true,
-    drawerOpen: false,
-    entryNodeId: entryId,
-    nodes: laidOutNodes,
-    edges: remappedEdges
-  };
-}
-
-function validateImportedDslForEditor(
-  dslJson: Record<string, unknown>,
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>
-): { ok: true } | { ok: false; errors: string[] } {
-  let parsed: ParsedEditorGraph | null;
-  try {
-    parsed = parseDslToEditor(dslJson, nodeTypeConfig);
-  } catch (error) {
-    return {
-      ok: false,
-      errors: [
-        error instanceof Error
-          ? `Could not parse workflow DSL: ${error.message}`
-          : "Could not parse workflow DSL (unexpected error)."
-      ]
-    };
-  }
-  if (!parsed) {
-    return {
-      ok: false,
-      errors: [
-        "Invalid workflow DSL: expected a States map that the editor can read (check StartAt / States shape)."
-      ]
-    };
-  }
-  const unknownKinds = new Set<string>();
-  for (const node of parsed.nodes) {
-    if (!nodeTypeConfig[node.kind]) {
-      unknownKinds.add(node.kind);
-    }
-  }
-  if (unknownKinds.size > 0) {
-    return {
-      ok: false,
-      errors: [...unknownKinds].map((kind) =>
-        kind.startsWith("skill.")
-          ? `Unknown skill (not in catalog): ${kind}`
-          : `Unknown node type (not supported in this editor): ${kind}`
-      )
-    };
-  }
-  return { ok: true };
-}
-
-function NodeCard({
-  node,
-  config,
-  isSelected,
-  inputConnected,
-  outputs,
-  onSelect,
-  onToggleExpand,
-  onDragStart,
-  onStartConnect,
-  onCompleteConnect,
-  onParamChange,
-  onConditionExpressionFieldChange,
-  onAddConditionExpression,
-  onRemoveConditionExpression,
-  onVariableRowChange,
-  onAddVariableRow,
-  onRemoveVariableRow,
-  onNameChange,
-  isEditingName,
-  onStartEditName,
-  onFinishEditName,
-  onOutputDragStart,
-  onOutputDragEnd,
-  onInputDragOver,
-  onInputDrop,
-  onRetryScopeEndChange,
-  warningLabel,
-  startEndBadge,
-  effectiveHeight,
-  nodeTypeConfig,
-  skillset,
-  nodes,
-  edges,
-  stateNameMap,
-  skillsetMap,
-  portLayout = "horizontal"
-}: {
-  node: EditorNode;
-  config: NodeTypeConfig;
-  isSelected: boolean;
-  inputConnected: boolean;
-  outputs: Array<{
-    key: string;
-    label: string;
-    isConnected: boolean;
-    isActive: boolean;
-  }>;
-  onSelect: () => void;
-  onToggleExpand: () => void;
-  onDragStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onStartConnect: (portKey: string) => void;
-  onCompleteConnect: () => void;
-  onParamChange: (key: string, value: string) => void;
-  onConditionExpressionFieldChange: (
-    expressionId: string,
-    field: "variable" | "comparisonOperator" | "value",
-    value: string
-  ) => void;
-  onAddConditionExpression: (operator: ConditionOperator) => void;
-  onRemoveConditionExpression: (expressionId: string) => void;
-  onVariableRowChange?: (rowId: string, field: "name" | "value", value: string) => void;
-  onAddVariableRow?: (valueType: VariableValueType) => void;
-  onRemoveVariableRow?: (rowId: string) => void;
-  onNameChange: (value: string) => void;
-  isEditingName: boolean;
-  onStartEditName: () => void;
-  onFinishEditName: () => void;
-  onOutputDragStart: (event: DragEvent<HTMLButtonElement>, portKey: string) => void;
-  onOutputDragEnd: () => void;
-  onInputDragOver: (event: DragEvent<HTMLButtonElement>) => void;
-  onInputDrop: (event: DragEvent<HTMLButtonElement>) => void;
-  onRetryScopeEndChange?: (checked: boolean) => void;
-  warningLabel?: string | null;
-  startEndBadge?: {
-    showStart: boolean;
-    showEnd: boolean;
-    isRootScope: boolean;
-    startError?: string;
-  } | null;
-  /** 리본이 있을 때 포함한 전체 높이. 미전달 시 getNodeHeight만 사용(과거 동작) */
-  effectiveHeight?: number;
-  /** 실패 캔버스: 위(입력) / 아래(출력). 기본은 좌(입력) / 우(출력) */
-  portLayout?: "horizontal" | "vertical";
-  nodeTypeConfig: Record<NodeKind, NodeTypeConfig>;
-  skillset?: import("@/domain/types").Skillset;
-  nodes: EditorNode[];
-  edges: EditorEdge[];
-  stateNameMap: Map<string, string>;
-  skillsetMap: Map<string, import("@/domain/types").Skillset>;
-}) {
-  const nodeHeight = getNodeHeight(node, nodeTypeConfig);
-  const displayHeight = effectiveHeight ?? nodeHeight;
-  const isVertical = portLayout === "vertical";
-  const outputOffsetsVertical = getPortOffsets(NODE_METRICS.width, outputs.length);
-  const availableVariables = useMemo(
-    () =>
-      getAvailableVariables(
-        node.id,
-        nodes,
-        edges,
-        stateNameMap,
-        (kind) => skillsetMap.get(kind)?.outputs
-      ),
-    [node.id, nodes, edges, stateNameMap, skillsetMap]
-  );
-  const outputOffsets = getPortOffsets(displayHeight, outputs.length);
-  const conditionExpressions =
-    node.kind === "flow_control.condition" ? node.conditionExpressions ?? [] : [];
-
-  // 노드 타입별 색상 (Monitor와 동일)
-  const getNodeTypeColors = (category: NodeCategory, kind: NodeKind) => {
-    // Retry 노드는 개별 테마 색상을 사용하므로, 여기서는 기본값만 정의하고
-    // 실제 적용은 아래에서 retryThemeColor를 통해 덮어쓴다.
-    if (kind === "flow_control.condition") {
-      return {
-        border: "border-amber-200",
-        bg: "bg-amber-50",
-        text: "text-amber-700",
-        indicator: "bg-amber-500"
-      };
-    }
-    if (category === "skill") {
-      return {
-        border: "border-blue-200",
-        bg: "bg-blue-50",
-        text: "text-blue-700",
-        indicator: "bg-blue-500"
-      };
-    }
-    if (category === "event") {
-      return {
-        border: "border-purple-200",
-        bg: "bg-purple-50",
-        text: "text-purple-700",
-        indicator: "bg-purple-500"
-      };
-    }
-    // flow_control (기본)
-    return {
-      border: "border-cyan-200",
-      bg: "bg-cyan-50",
-      text: "text-cyan-700",
-      indicator: "bg-cyan-500"
-    };
-  };
-
-  let nodeTypeColors = getNodeTypeColors(config.category, node.kind);
-  if (node.kind === "flow_control.retry" && node.retryThemeColor) {
-    const theme =
-      RETRY_THEME_COLORS.find((t) => t.key === node.retryThemeColor) ??
-      RETRY_THEME_COLORS[0];
-    nodeTypeColors = {
-      border: theme.border,
-      bg: theme.bg,
-      text: theme.text,
-      indicator: theme.indicator
-    };
-  }
-  const nodeTypeLabel = NODE_CATEGORY_LABELS[config.category];
-
-  // 툴팁 내용 생성 (type은 namespace.name 형태로 표시)
-  const tooltipContent = skillset
-    ? `${skillset.name} (${skillset.version})\nType: ${getSkillDisplayType(skillset)}\n\n${skillset.description}`
-    : node.kind;
-
-  const showStartRibbon =
-    startEndBadge?.showStart && !startEndBadge?.showEnd && !startEndBadge?.startError;
-  const showEndRibbon =
-    Boolean(startEndBadge?.showEnd && !startEndBadge?.showStart);
-  const showStartEndRibbon =
-    Boolean(startEndBadge?.showStart && startEndBadge?.showEnd && !startEndBadge?.startError);
-  const hasRibbon = showStartRibbon || showEndRibbon || showStartEndRibbon;
-
-  const getRetryScopeCandidates = useCallback(
-    (scopeType: "main" | "failure"): EditorNode[] => {
-      if (node.kind !== "flow_control.retry") return [];
-      const startId = getRetryScopeStartNodeId(node.id, scopeType, edges);
-      if (!startId) return [];
-      const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-      const outEdges = new Map<string, EditorEdge>();
-      edges.forEach((e) => {
-        if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, e);
-      });
-      const result: EditorNode[] = [];
-      let current: string | null = startId;
-      while (current) {
-        const currentNode = nodeMap.get(current);
-        if (!currentNode) break;
-        // flow_control 노드를 만나면 그 전까지만 후보로 사용
-        if (currentNode.kind.startsWith("flow_control.")) break;
-        result.push(currentNode);
-        const next: string | null = outEdges.get(current)?.to ?? null;
-        if (!next) break;
-        current = next;
-      }
-      return result;
-    },
-    [node.id, node.kind, nodes, edges]
-  );
-
-  const mainScopeCandidates = useMemo(
-    () => getRetryScopeCandidates("main"),
-    [getRetryScopeCandidates]
-  );
-  const failureScopeCandidates = useMemo(
-    () => getRetryScopeCandidates("failure"),
-    [getRetryScopeCandidates]
-  );
-
-  return (
-    <div
-      className={cn(
-        "relative rounded-lg border-2 bg-white p-3 shadow-sm overflow-visible",
-        // 접힌 상태에서는 카드 전체(바깥 패딩 영역 포함)를 드래그 핸들처럼 보이도록 커서 표시
-        !node.isExpanded && "cursor-grab active:cursor-grabbing",
-        isSelected ? "border-slate-900 ring-4 ring-slate-400 ring-offset-2" : "border-slate-200"
-      )}
-      data-node-card
-      style={{
-        width: NODE_METRICS.width,
-        height: displayHeight
-      }}
-      onClick={onSelect}
-      onPointerDown={(event) => {
-        // 접힌 상태에서만 카드 바깥 패딩 영역도 드래그 시작점으로 사용
-        if (node.isExpanded) return;
-        const target = event.target as HTMLElement;
-        if (
-          target.closest("input") ||
-          target.closest("button") ||
-          target.closest("[data-no-drag]")
-        ) {
-          return;
-        }
-        event.stopPropagation();
-        event.preventDefault();
-        onDragStart(event);
-      }}
-      title={tooltipContent}
-    >
-      {/* Start/End 헤더 리본: 줌 아웃에서도 한눈에 구분. start+end 동시면 사선 구획 리본 */}
-      {hasRibbon && (
-        <>
-          {showStartEndRibbon ? (
-            <div
-              className="absolute left-0 right-0 top-0 z-10 h-6 overflow-hidden rounded-t-[6px] shadow-sm"
-              aria-hidden
-            >
-              {/* 사선으로 나눈 start(좌상) / end(우하) */}
-              {/* 윗변 4:3, 아랫변 3:4 비율로 나누는 사선 */}
-              <div
-                className="absolute inset-0 bg-emerald-600"
-                style={{ clipPath: "polygon(0 0, 57.14% 0, 42.86% 100%, 0 100%)" }}
-              />
-              <div
-                className="absolute inset-0 bg-slate-500"
-                style={{ clipPath: "polygon(57.14% 0, 100% 0, 100% 100%, 42.86% 100%)" }}
-              />
-              <span className="absolute left-1 top-0.5 text-[9px] font-bold text-white drop-shadow-sm">
-                ▶ START
-              </span>
-              <span className="absolute right-1 bottom-0.5 text-[9px] font-bold text-white drop-shadow-sm">
-                END ⏹
-              </span>
-            </div>
-          ) : (
-            <div
-              className={cn(
-                "absolute left-0 right-0 top-0 z-10 flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
-                showStartRibbon && "bg-emerald-600",
-                showEndRibbon && "bg-slate-500"
-              )}
-              aria-hidden
-            >
-              {showStartRibbon ? "▶ START" : "⏹ END"}
-            </div>
-          )}
-        </>
-      )}
-      {/* 왼쪽 타입 인디케이터 바 */}
-      <div
-        className={cn(
-          "absolute left-0 top-0 bottom-0 w-1",
-          nodeTypeColors.indicator
-        )}
-      />
-      {config.inputEnabled !== false && (
-        <button
-          type="button"
-          className={cn(
-            "cursor-pointer absolute flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white shadow-sm z-10",
-            inputConnected ? "border-slate-400" : "border-slate-200",
-            isVertical ? "left-1/2" : "left-0"
-          )}
-          style={
-            isVertical
-              ? { top: 0 }
-              : { top: displayHeight / 2 }
-          }
-          title={inputConnected ? "Input connected" : "Input"}
-          onDragOver={(event) => {
-            event.stopPropagation();
-            onInputDragOver(event);
-          }}
-          onDrop={(event) => {
-            event.stopPropagation();
-            onInputDrop(event);
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            onCompleteConnect();
-          }}
-        >
-          <span
-            className={cn(
-              "h-2 w-2 rounded-full",
-              inputConnected ? "bg-slate-600" : "bg-slate-400"
-            )}
-          />
-        </button>
-      )}
-
-      {outputs.map((output, index) => {
-        let outputTooltip = `Output: ${output.label}`;
-        if (skillset) {
-          if (output.key === "next" && Object.keys(skillset.outputs).length > 0) {
-            const outputEntries = Object.entries(skillset.outputs);
-            outputTooltip = outputEntries
-              .map(([key, outputInfo]) => {
-                return `${key}\nType: ${outputInfo.type}${outputInfo.description ? `\n${outputInfo.description}` : ""}`;
-              })
-              .join("\n\n");
-          } else if (skillset.outputs[output.key]) {
-            const outputInfo = skillset.outputs[output.key];
-            outputTooltip = `${output.key}\nType: ${outputInfo.type}${outputInfo.description ? `\n${outputInfo.description}` : ""}`;
-          }
-        }
-        const style = isVertical
-          ? {
-              left: outputOffsetsVertical[index],
-              top: displayHeight,
-              // 경계선에 걸치도록 중앙을 경계선에 맞춤
-              transform: "translate(-50%, -50%)"
-            }
-          : {
-              top: outputOffsets[index],
-              transform: "translate(50%, -50%)"
-            };
-        return (
-          <div
-            key={output.key}
-            className={cn(
-              "absolute flex items-center gap-1.5 z-20",
-              isVertical ? "justify-center" : "right-0"
-            )}
-            style={style}
-          >
-            <button
-              type="button"
-              draggable
-              data-no-drag
-              className={cn(
-                "cursor-pointer flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border bg-white shadow-sm",
-                output.isActive
-                  ? "border-slate-900"
-                  : output.isConnected
-                    ? "border-slate-400"
-                    : "border-slate-200"
-              )}
-              title={outputTooltip}
-              onDragStart={(event) => {
-                event.stopPropagation();
-                onOutputDragStart(event, output.key);
-              }}
-              onDragEnd={(event) => {
-                event.stopPropagation();
-                onOutputDragEnd();
-              }}
-              onClick={(event) => {
-                event.stopPropagation();
-                onStartConnect(output.key);
-              }}
-            >
-              <span
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  node.kind === "flow_control.retry" && output.key === "failure"
-                    ? output.isActive
-                      ? "bg-rose-700"
-                      : output.isConnected
-                        ? "bg-rose-500"
-                        : "bg-rose-400"
-                    : output.isActive
-                      ? "bg-slate-900"
-                      : output.isConnected
-                        ? "bg-slate-600"
-                        : "bg-slate-400"
-                )}
-              />
-            </button>
-          </div>
-        );
-      })}
-
-      <div
-        className={cn(
-          // 기존 디자인 유지 (얇은 패딩)
-          "flex items-start justify-between gap-2 cursor-grab active:cursor-grabbing pl-1",
-          hasRibbon && "pt-6"
-        )}
-        onPointerDown={(event) => {
-          const target = event.target as HTMLElement;
-
-          // 펼쳐진 상태에서는 기존처럼 input / button / data-no-drag 영역은 드래그 제외
-          if (node.isExpanded) {
-            if (
-              target.closest("input") ||
-              target.closest("button") ||
-              target.closest("[data-no-drag]")
-            ) {
-              return;
-            }
-          } else {
-            // 접힌 상태에서는 unfold 버튼/포트 등 data-no-drag 만 제외하고
-            // 이름/패딩 포함 헤더 전체를 드래그 영역으로 사용
-            if (target.closest("[data-no-drag]")) {
-              return;
-            }
-          }
-
-          event.stopPropagation();
-          event.preventDefault();
-          onDragStart(event);
-        }}
-      >
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-1 min-w-0 group">
-            {isEditingName ? (
-              <input
-                value={node.name}
-                onChange={(event) => onNameChange(event.target.value)}
-                onBlur={onFinishEditName}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === "Escape") {
-                    event.currentTarget.blur();
-                    onFinishEditName();
-                  }
-                }}
-                autoFocus
-                className="flex-1 min-w-0 rounded border border-slate-200 bg-white text-sm font-semibold text-slate-800 focus:border-slate-300 focus:outline-none"
-              />
-            ) : (
-              <>
-                <button
-                  type="button"
-                  // 펼쳐진 상태에서만 이름 더블클릭으로 리네임 가능 + 드래그 제외
-                  // 접힌 상태에서는 data-no-drag / cursor-pointer 를 제거해서
-                  // 헤더 전체(이름 영역 포함)가 드래그 핸들이 되도록 함
-                  {...(node.isExpanded
-                    ? {
-                        "data-no-drag": true,
-                        className:
-                          "cursor-pointer truncate text-left text-sm font-semibold text-slate-800 hover:text-slate-700 flex-1 min-w-0"
-                      }
-                    : {
-                        className:
-                          "cursor-grab active:cursor-grabbing truncate text-left text-sm font-semibold text-slate-800 flex-1 min-w-0"
-                      })}
-                  onDoubleClick={(event) => {
-                    event.stopPropagation();
-                    if (!node.isExpanded) return;
-                    onStartEditName();
-                  }}
-                  title="Double click to rename"
-                >
-                  {node.name}
-                </button>
-                <button
-                  type="button"
-                  data-no-drag
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onStartEditName();
-                  }}
-                  className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-slate-600 hover:bg-slate-100"
-                  title="이름 변경"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                    className="w-3 h-3"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
-                    />
-                  </svg>
-                </button>
-              </>
-            )}
-          </div>
-          
-          {/* 노드 타입 배지 + Retry 스코프 배지 */}
-          <div className="flex items-center gap-2 mb-1">
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                nodeTypeColors.bg,
-                nodeTypeColors.text,
-                "border border-current"
-              )}
-            >
-              {nodeTypeLabel}
-            </span>
-            {node.retryScopeType && node.retryOwnerId && (() => {
-              const ownerNode = nodes.find((n) => n.id === node.retryOwnerId);
-              const mainTheme =
-                node.retryScopeType === "main" && ownerNode?.retryThemeColor
-                  ? RETRY_THEME_COLORS.find((t) => t.key === ownerNode.retryThemeColor) ??
-                    RETRY_THEME_COLORS[0]
-                  : null;
-              const badgeClass =
-                node.retryScopeType === "main"
-                  ? mainTheme
-                    ? `${mainTheme.border} ${mainTheme.bg} ${mainTheme.text}`
-                    : "border-emerald-500 bg-emerald-50 text-emerald-700"
-                  : "border-rose-500 bg-rose-50 text-rose-700";
-              return (
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold border",
-                    badgeClass
-                  )}
-                  title={
-                    node.retryScopeType === "main"
-                      ? "Retry main scope member"
-                      : "Retry failure scope member"
-                  }
-                >
-                  {node.retryScopeType === "main" ? (
-                    <span className="text-[10px]">↻</span>
-                  ) : (
-                    <span className="text-[10px]">!</span>
-                  )}
-                </span>
-              );
-            })()}
-          </div>
-
-          {/* Skill 노드: 펼쳤을 때 타입을 namespace.name 형태로 노출 */}
-          {skillset && node.isExpanded && (
-            <div className="mb-1 text-[10px] text-slate-500 truncate" title={getSkillDisplayType(skillset)}>
-              {getSkillDisplayType(skillset)}
-            </div>
-          )}
-
-        </div>
-        {warningLabel && (
-          <span className="mt-1 inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-700">
-            {warningLabel}
-          </span>
-        )}
-        <button
-          type="button"
-          data-no-drag
-          className="cursor-pointer flex-shrink-0 text-slate-500 hover:text-slate-900"
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleExpand();
-          }}
-        >
-          {node.isExpanded ? (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={2}
-              stroke="currentColor"
-              className="w-4 h-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4.5 15.75l7.5-7.5 7.5 7.5"
-              />
-            </svg>
-          ) : (
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={2}
-              stroke="currentColor"
-              className="w-4 h-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19.5 8.25l-7.5 7.5-7.5-7.5"
-              />
-            </svg>
-          )}
-        </button>
-      </div>
-
-
-      {node.isExpanded && node.kind === "flow_control.condition" && (
-        <div className="mt-3 space-y-2 text-xs text-slate-600 pr-12">
-          {conditionExpressions.map((expression, index) => (
-            <div key={expression.id} className="space-y-1">
-              <span className="text-[10px] text-slate-500">Expression</span>
-
-              <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                {index > 0 && (
-                  <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-600">
-                    {expression.operator}
-                  </span>
-                )}
-                <div className="flex-1 min-w-[80px]" data-no-drag>
-                  <VariableInput
-                    value={expression.variable}
-                    onChange={(value) =>
-                      onConditionExpressionFieldChange(
-                        expression.id,
-                        "variable",
-                        value
-                      )
-                    }
-                    placeholder="$.var or $"
-                    suggestions={availableVariables}
-                  />
-                </div>
-                <select
-                  value={expression.comparisonOperator}
-                  onChange={(e) =>
-                    onConditionExpressionFieldChange(
-                      expression.id,
-                      "comparisonOperator",
-                      e.target.value
-                    )
-                  }
-                  className="flex-shrink-0 w-16 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                  data-no-drag
-                >
-                  {CONDITION_COMPARISON_OPERATORS.map((op) => (
-                    <option key={op} value={op}>
-                      {op}
-                    </option>
-                  ))}
-                </select>
-                <div className="flex-1 min-w-[80px]" data-no-drag>
-                  <VariableInput
-                    value={expression.value}
-                    onChange={(value) =>
-                      onConditionExpressionFieldChange(
-                        expression.id,
-                        "value",
-                        value
-                      )
-                    }
-                    placeholder="value or $"
-                    suggestions={availableVariables}
-                  />
-                </div>
-                {index > 0 && (
-                  <button
-                    type="button"
-                    data-no-drag
-                    className="cursor-pointer flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveConditionExpression(expression.id);
-                    }}
-                    title="Remove expression"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={2.5}
-                      stroke="currentColor"
-                      className="h-3.5 w-3.5"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19.5 12h-15"
-                      />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              data-no-drag
-              className="cursor-pointer rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddConditionExpression("AND");
-              }}
-            >
-              AND
-            </button>
-            <button
-              type="button"
-              data-no-drag
-              className="cursor-pointer rounded-full border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddConditionExpression("OR");
-              }}
-            >
-              OR
-            </button>
-          </div>
-        </div>
-      )}
-      {node.isExpanded &&
-        node.kind !== "flow_control.condition" &&
-        (node.kind === "flow_control.input" || node.kind === "flow_control.output") &&
-        node.variableRows && (
-          <div className="mt-3 space-y-2 text-xs text-slate-600">
-            {node.variableRows.map((row) => (
-              <div key={row.id} className="flex items-center gap-2 min-w-0">
-                <input
-                  value={row.name}
-                  onChange={(event) =>
-                    onVariableRowChange?.(row.id, "name", event.target.value)
-                  }
-                  placeholder="variable"
-                  className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                />
-                <input
-                  value={row.value}
-                  onChange={(event) =>
-                    onVariableRowChange?.(row.id, "value", event.target.value)
-                  }
-                  placeholder={row.valueType}
-                  className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                />
-                {node.variableRows && node.variableRows.length > 0 && (
-                  <button
-                    type="button"
-                    data-no-drag
-                    className="cursor-pointer flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-600 hover:border-slate-400 hover:bg-slate-50"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveVariableRow?.(row.id);
-                    }}
-                    title="Remove row"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={2.5}
-                      stroke="currentColor"
-                      className="h-3.5 w-3.5"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19.5 12h-15"
-                      />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            ))}
-            <div className="flex flex-wrap gap-1">
-              {(["int", "bool", "double", "string"] as VariableValueType[]).map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  data-no-drag
-                  className="cursor-pointer rounded-full border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-400 hover:bg-slate-50"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAddVariableRow?.(type);
-                  }}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      {node.isExpanded &&
-        node.kind !== "flow_control.condition" &&
-        (node.kind === "flow_control.input" || node.kind === "flow_control.output") &&
-        !node.variableRows && (
-          <div className="mt-3 space-y-2 text-xs text-slate-600">
-            <div className="flex flex-wrap gap-1">
-              {(["int", "bool", "double", "string"] as VariableValueType[]).map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  data-no-drag
-                  className="cursor-pointer rounded-full border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:border-slate-400 hover:bg-slate-50"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAddVariableRow?.(type);
-                  }}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      {node.isExpanded &&
-        node.kind !== "flow_control.condition" &&
-        node.kind !== "flow_control.input" &&
-        node.kind !== "flow_control.output" &&
-        config.paramFields.length > 0 && (
-          <div className="mt-3 space-y-2 text-xs text-slate-600">
-            {config.paramFields.map((field) => (
-              <label key={field.key} className="block">
-                <span className="text-[10px] text-slate-500">{field.label}</span>
-                <div className="mt-1" data-no-drag>
-                  <VariableInput
-                    value={node.params[field.key] ?? ""}
-                    onChange={(value) => onParamChange(field.key, value)}
-                    placeholder={
-                      field.placeholder ? `${field.placeholder} or $` : undefined
-                    }
-                    suggestions={availableVariables}
-                    className="mt-1"
-                  />
-                </div>
-              </label>
-            ))}
-          </div>
-        )}
-      {node.isExpanded && node.kind === "flow_control.retry" && (
-        <div className="mt-3 space-y-2 text-xs text-slate-600">
-          <label className="block" data-no-drag>
-            <span className="text-[10px] text-slate-500">On Failure</span>
-            <div className="mt-1 flex items-center gap-2">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 rounded border-slate-300 text-slate-700 focus:ring-slate-400"
-                checked={node.params.onFailureEnabled !== "false"}
-                onChange={(event) => {
-                  onParamChange("onFailureEnabled", event.target.checked ? "true" : "false");
-                }}
-              />
-              <span className="text-xs text-slate-600">Run on-failure flow before retry</span>
-            </div>
-          </label>
-          {/* Main retry scope end 선택 */}
-          <div className="mt-2 space-y-1" data-no-drag>
-            <span className="text-[10px] text-slate-500">Main scope end</span>
-            <SearchableNodeDropdown
-              nodes={mainScopeCandidates}
-              selectedId={node.params.mainScopeEndId ?? ""}
-              placeholder="Select main scope end"
-              onChange={(id) => onParamChange("mainScopeEndId", id)}
-            />
-          </div>
-
-          {/* Failure scope end 선택 (onFailureEnabled = true 일 때만) */}
-          {node.params.onFailureEnabled !== "false" && (
-            <div className="mt-2 space-y-1" data-no-drag>
-              <span className="text-[10px] text-slate-500">Failure scope end</span>
-              <SearchableNodeDropdown
-                nodes={failureScopeCandidates}
-                selectedId={node.params.failureScopeEndId ?? ""}
-                placeholder="Select failure scope end"
-                onChange={(id) => onParamChange("failureScopeEndId", id)}
-              />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -4171,8 +268,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
   // Skillset 정보를 노드 kind로 매핑 (key: skill.namespace.name). 레거시 kind "skill.name"도 name으로 조회 가능하도록 보조 맵 사용
   const skillsetMap = useMemo(() => {
-    if (!skillsetsResponse) return new Map<string, import("@/domain/types").Skillset>();
-    const map = new Map<string, import("@/domain/types").Skillset>();
+    if (!skillsetsResponse) return new Map<string, Skillset>();
+    const map = new Map<string, Skillset>();
     skillsetsResponse.skill_sets.forEach((skillset) => {
       const key = getSkillNodeKind(skillset);
       map.set(key, skillset);
@@ -4338,28 +435,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setCanvasBase(getSize());
       setZoom(1);
     }
-    nextNodeIndex.current = getNextIndexFromIds(
-      loadedNodes.map((node) => node.id),
-      "node"
-    );
-    nextEdgeIndex.current = getNextIndexFromIds(
-      loadedEdges.map((edge) => edge.id),
-      "edge"
-    );
-    const conditionIds = loadedNodes.flatMap(
-      (node) => node.conditionExpressions ?? []
-    );
-    nextConditionIndex.current = getNextIndexFromIds(
-      conditionIds.map((expression) => expression.id),
-      "condition"
-    );
-    const variableRowIds = loadedNodes.flatMap(
-      (node) => node.variableRows ?? []
-    );
-    nextVariableRowIndex.current = getNextIndexFromIds(
-      variableRowIds.map((row) => row.id),
-      "var"
-    );
+    assignEditorCountersAfterDraftLoad(loadedNodes, loadedEdges, {
+      nextNodeIndex,
+      nextEdgeIndex,
+      nextConditionIndex,
+      nextVariableRowIndex
+    });
     setSelectedNode(null);
     setSelectedEdgeId(null);
     setConnectingFrom(null);
@@ -4451,10 +532,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const hasFailureStartEdge = failureGraph.edges.some(
       (e) => e.from === failureGraph.entryNodeId
     );
-    if (!dslHasOnFailure && !hasFailureStartEdge && preservedOnFailureDslRef.current) {
-      dsl_json = { ...dsl_json, OnFailure: preservedOnFailureDslRef.current };
-      dslHasOnFailure = true;
-    }
+    const mergedOnFailure = mergePreservedOnFailureIntoDraftDsl(
+      dsl_json,
+      dslHasOnFailure,
+      hasFailureStartEdge,
+      preservedOnFailureDslRef.current
+    );
+    dsl_json = mergedOnFailure.dsl_json;
+    dslHasOnFailure = mergedOnFailure.dslHasOnFailure;
     const view_json = buildViewJson(
       nodes,
       validEdges,
@@ -4840,10 +925,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     (clientX: number, clientY: number) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return null;
-      return {
-        x: (clientX - rect.left) / zoom,
-        y: (clientY - rect.top) / zoom
-      };
+      return clientToUnscaledCanvasSpace(rect, clientX, clientY, zoom);
     },
     [zoom]
   );
@@ -4856,12 +938,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         y: canvasBase.height / 2 - NODE_METRICS.collapsedHeight / 2
       };
     }
-    return {
-      x: (container.scrollLeft + container.clientWidth / 2) / zoom - NODE_METRICS.width / 2,
-      y:
-        (container.scrollTop + container.clientHeight / 2) / zoom -
-        NODE_METRICS.collapsedHeight / 2
-    };
+    return scrollViewportCenterToUnscaledCanvasPosition(
+      container.scrollLeft,
+      container.scrollTop,
+      container.clientWidth,
+      container.clientHeight,
+      zoom,
+      NODE_METRICS.width,
+      NODE_METRICS.collapsedHeight
+    );
   }, [canvasBase, zoom]);
 
   const resolveContainerAssignment = useCallback(
@@ -5176,6 +1261,39 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     [createConditionExpression]
   );
 
+  const {
+    addFailureNode,
+    handleFailureToggleExpand,
+    handleFailureStartConnect,
+    handleFailureInputDrop,
+    handleFailureParamChange,
+    handleFailureConditionExpressionFieldChange,
+    handleFailureAddConditionExpression,
+    handleFailureRemoveConditionExpression,
+    handleFailureVariableRowChange,
+    handleFailureAddVariableRow,
+    handleFailureRemoveVariableRow,
+    handleFailureNameChange,
+    handleFailureRetryScopeEndChange
+  } = useFailureGraphCanvasHandlers({
+    failureGraph,
+    failureConnectingFrom,
+    setFailureGraph,
+    setFailureConnectingFrom,
+    setFailureFlowToastMessage,
+    setHasUnsavedChanges,
+    nodeTypeConfig,
+    buildDefaultParams,
+    createConditionExpression,
+    normalizeConditionExpressions,
+    nextFailureNodeIndex,
+    nextVariableRowIndex,
+    getCanvasBounds,
+    clamp,
+    recomputeRetryScopeMembership,
+    isForbiddenInRetryScope
+  });
+
   const createNode = useCallback(
     (kind: NodeKind, position?: { x: number; y: number }) => {
       if (kind === "flow_control.input") {
@@ -5192,11 +1310,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
 
       const basePosition = position ?? getViewportCenter();
       const nodeHeight = NODE_METRICS.collapsedHeight;
-      const { minX, minY, maxX, maxY } = getCanvasBounds(canvasBase, nodeHeight);
-      const clampedPosition = {
-        x: clamp(basePosition.x, minX, maxX),
-        y: clamp(basePosition.y, minY, maxY)
-      };
+      const clampedPosition = clampEditorNodePositionToCanvas(
+        canvasBase,
+        basePosition,
+        nodeHeight,
+        getCanvasBounds,
+        clamp
+      );
 
       const index = nextNodeIndex.current++;
       const id = `node-${index}`;
@@ -5433,18 +1553,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setImportValidationFailOpen(true);
       return;
     }
-    const snapshot = {
-      nodes: structuredClone(nodes),
-      edges: structuredClone(edges),
-      failureGraph: structuredClone(failureGraph),
-      canvasBase: { ...canvasBase },
+    const snapshot = buildEditorImportRollbackSnapshot({
+      nodes,
+      edges,
+      failureGraph,
+      canvasBase,
       zoom,
       workflowName,
       originalWorkflowName,
-      draftOverride: draftOverride ? structuredClone(draftOverride) : null,
-      preservedOnFailureDsl: preservedOnFailureDslRef.current
-        ? structuredClone(preservedOnFailureDslRef.current)
-        : null,
+      draftOverride,
+      preservedOnFailureDsl: preservedOnFailureDslRef.current,
       nextNodeIndex: nextNodeIndex.current,
       nextEdgeIndex: nextEdgeIndex.current,
       nextConditionIndex: nextConditionIndex.current,
@@ -5453,7 +1571,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       hasUnsavedChanges,
       selectedNode,
       selectedEdgeId
-    };
+    });
     try {
       const nextDraft: WorkflowDraft = {
         workflowId,
@@ -5466,23 +1584,25 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setWorkflowName(pending.fileBaseName);
       setOriginalWorkflowName(pending.fileBaseName);
     } catch (error) {
-      setNodes(snapshot.nodes);
-      setEdges(snapshot.edges);
-      setFailureGraph(snapshot.failureGraph);
-      setCanvasBase(snapshot.canvasBase);
-      setZoom(snapshot.zoom);
-      setWorkflowName(snapshot.workflowName);
-      setOriginalWorkflowName(snapshot.originalWorkflowName);
-      setDraftOverride(snapshot.draftOverride);
-      preservedOnFailureDslRef.current = snapshot.preservedOnFailureDsl;
-      nextNodeIndex.current = snapshot.nextNodeIndex;
-      nextEdgeIndex.current = snapshot.nextEdgeIndex;
-      nextConditionIndex.current = snapshot.nextConditionIndex;
-      nextVariableRowIndex.current = snapshot.nextVariableRowIndex;
-      nextFailureNodeIndex.current = snapshot.nextFailureNodeIndex;
-      setHasUnsavedChanges(snapshot.hasUnsavedChanges);
-      setSelectedNode(snapshot.selectedNode);
-      setSelectedEdgeId(snapshot.selectedEdgeId);
+      restoreEditorFromImportRollbackSnapshot(snapshot, {
+        setNodes,
+        setEdges,
+        setFailureGraph,
+        setCanvasBase,
+        setZoom,
+        setWorkflowName,
+        setOriginalWorkflowName,
+        setDraftOverride,
+        preservedOnFailureDslRef,
+        nextNodeIndex,
+        nextEdgeIndex,
+        nextConditionIndex,
+        nextVariableRowIndex,
+        nextFailureNodeIndex,
+        setHasUnsavedChanges,
+        setSelectedNode,
+        setSelectedEdgeId
+      });
       const message =
         error instanceof Error ? error.message : "An unexpected error occurred while importing.";
       setImportFailMessages([message]);
@@ -5513,392 +1633,29 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     downloadJsonFile(`${base}.json`, dsl_json);
   };
 
-  /** 실패 캔버스에 팔레트에서 드롭한 노드 추가 */
-  const addFailureNode = useCallback(
-    (kind: NodeKind, position: { x: number; y: number }) => {
-      if (kind === "system.on_failure_entry") return;
-      if (kind.startsWith("flow_control.") && kind !== "flow_control.condition") {
-        setFailureFlowToastMessage(
-          "Failure Handling Flow에서는 Condition 노드만 추가할 수 있습니다."
-        );
-        return;
-      }
-      const config = nodeTypeConfig[kind];
-      const index = nextFailureNodeIndex.current++;
-      const id = `failure-node-${index}`;
-      const name = config ? `${config.label} ${index}` : `${kind} ${index}`;
-      const params = buildDefaultParams(kind);
-      if (kind === "flow_control.repeat" && !params.count) params.count = "1";
-      const newNode: EditorNode = {
-        id,
-        name,
-        kind,
-        position: { x: position.x, y: position.y },
-        // Failure 캔버스에 새로 추가되는 노드는 기본 folded 상태
-        isExpanded: false,
-        params
-      };
-      setFailureGraph((prev) => ({
-        ...prev,
-        nodes: [...prev.nodes, newNode]
-      }));
-      setHasUnsavedChanges(true);
-    },
-    [nodeTypeConfig, buildDefaultParams]
-  );
-
-  const handleFailureToggleExpand = useCallback((nodeId: string) => {
-    setFailureGraph((prev) => ({
-      ...prev,
-      nodes: prev.nodes.map((n) =>
-        n.id === nodeId ? { ...n, isExpanded: !n.isExpanded } : n
-      )
-    }));
-    setHasUnsavedChanges(true);
-  }, []);
-
-  /** 실패 캔버스에서 아웃풋 포트 클릭 시 연결 시작 */
-  const handleFailureStartConnect = useCallback((nodeId: string, portKey: string) => {
-    setFailureConnectingFrom({ nodeId, portKey });
-  }, []);
-
-  /** 실패 캔버스에서 인풋에 드롭 시 엣지 추가 */
-  const handleFailureInputDrop = useCallback(
-    (toNodeId: string) => {
-      if (!failureConnectingFrom) return;
-      const edgeId = `failure-edge-${failureGraph.edges.length + 1}`;
-      setFailureGraph((prev) => ({
-        ...prev,
-        edges: [
-          ...prev.edges,
-          {
-            id: edgeId,
-            from: failureConnectingFrom.nodeId,
-            fromPort: failureConnectingFrom.portKey,
-            to: toNodeId
-          }
-        ]
-      }));
-      setFailureConnectingFrom(null);
-      setHasUnsavedChanges(true);
-    },
-    [failureConnectingFrom, failureGraph.edges.length]
-  );
-
-  const handleFailureParamChange = useCallback((nodeId: string, key: string, value: string) => {
-    setFailureGraph((prev) => {
-      const retryNode = prev.nodes.find((n) => n.id === nodeId);
-      const isRetryNode = retryNode?.kind === "flow_control.retry";
-      const isRetryTurningOffFailure =
-        isRetryNode && key === "onFailureEnabled" && value === "false";
-
-      let nextNodes = prev.nodes.map((node) => {
-        if (node.id === nodeId) {
-          return { ...node, params: { ...node.params, [key]: value } };
-        }
-        if (
-          isRetryTurningOffFailure &&
-          node.retryOwnerId === nodeId &&
-          node.retryScopeType === "failure"
-        ) {
-          return {
-            ...node,
-            retryOwnerId: null,
-            retryScopeType: null,
-            isRetryScopeEnd: false
-          };
-        }
-        return node;
-      });
-
-      if (isRetryNode && (key === "mainScopeEndId" || key === "failureScopeEndId")) {
-        const scopeType = key === "mainScopeEndId" ? "main" : "failure";
-        nextNodes = recomputeRetryScopeMembership(nextNodes, nodeId, scopeType, prev.edges);
-      }
-
-      let nextEdges = prev.edges;
-      if (key === "onFailureEnabled" && value === "false") {
-        const n = prev.nodes.find((nn) => nn.id === nodeId);
-        if (n?.kind === "flow_control.retry") {
-          nextEdges = prev.edges.filter((e) => !(e.from === nodeId && e.fromPort === "failure"));
-        }
-      }
-
-      return { ...prev, nodes: nextNodes, edges: nextEdges };
-    });
-    setHasUnsavedChanges(true);
-  }, []);
-
-  const handleFailureConditionExpressionFieldChange = useCallback(
-    (
-      nodeId: string,
-      expressionId: string,
-      field: "variable" | "comparisonOperator" | "value",
-      value: string
-    ) => {
-      setFailureGraph((prev) => ({
-        ...prev,
-        nodes: prev.nodes.map((node) => {
-          if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
-          const expressions = node.conditionExpressions ?? [createConditionExpression(null)];
-          const nextExpressions = expressions.map((expression) =>
-            expression.id === expressionId ? { ...expression, [field]: value } : expression
-          );
-          return { ...node, conditionExpressions: nextExpressions };
-        })
-      }));
-      setHasUnsavedChanges(true);
-    },
-    []
-  );
-
-  const handleFailureAddConditionExpression = useCallback(
-    (nodeId: string, operator: ConditionOperator) => {
-      setFailureGraph((prev) => ({
-        ...prev,
-        nodes: prev.nodes.map((node) => {
-          if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
-          const baseExpressions = normalizeConditionExpressions(node.conditionExpressions ?? []);
-          const nextExpressions = normalizeConditionExpressions([
-            ...baseExpressions,
-            createConditionExpression(operator)
-          ]);
-          const nextNode = { ...node, conditionExpressions: nextExpressions };
-          const { minX, minY, maxX, maxY } = getCanvasBounds(
-            FAILURE_CANVAS_BASE,
-            getNodeHeight(nextNode, nodeTypeConfig)
-          );
-          return {
-            ...nextNode,
-            position: {
-              x: clamp(node.position.x, minX, maxX),
-              y: clamp(node.position.y, minY, maxY)
-            }
-          };
-        })
-      }));
-      setHasUnsavedChanges(true);
-    },
-    [nodeTypeConfig]
-  );
-
-  const handleFailureRemoveConditionExpression = useCallback(
-    (nodeId: string, expressionId: string) => {
-      setFailureGraph((prev) => ({
-        ...prev,
-        nodes: prev.nodes.map((node) => {
-          if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
-          const remaining = (node.conditionExpressions ?? []).filter(
-            (expression) => expression.id !== expressionId
-          );
-          const nextExpressions = normalizeConditionExpressions(remaining);
-          const nextNode = { ...node, conditionExpressions: nextExpressions };
-          const { minX, minY, maxX, maxY } = getCanvasBounds(
-            FAILURE_CANVAS_BASE,
-            getNodeHeight(nextNode, nodeTypeConfig)
-          );
-          return {
-            ...nextNode,
-            position: {
-              x: clamp(node.position.x, minX, maxX),
-              y: clamp(node.position.y, minY, maxY)
-            }
-          };
-        })
-      }));
-      setHasUnsavedChanges(true);
-    },
-    [nodeTypeConfig]
-  );
-
-  const handleFailureVariableRowChange = useCallback(
-    (nodeId: string, rowId: string, field: "name" | "value", value: string) => {
-      setFailureGraph((prev) => ({
-        ...prev,
-        nodes: prev.nodes.map((node) => {
-          if (
-            node.id !== nodeId ||
-            (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
-          )
-            return node;
-          const rows = node.variableRows ?? [];
-          const nextRows = rows.map((row) =>
-            row.id === rowId ? { ...row, [field]: value } : row
-          );
-          return { ...node, variableRows: nextRows };
-        })
-      }));
-      setHasUnsavedChanges(true);
-    },
-    []
-  );
-
-  const handleFailureAddVariableRow = useCallback(
-    (nodeId: string, valueType: VariableValueType) => {
-      setFailureGraph((prev) => ({
-        ...prev,
-        nodes: prev.nodes.map((node) => {
-          if (
-            node.id !== nodeId ||
-            (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
-          )
-            return node;
-          const rows = node.variableRows ?? [];
-          const nextRows = [
-            ...rows,
-            {
-              id: `var-${nextVariableRowIndex.current++}`,
-              name: "",
-              value: "",
-              valueType
-            }
-          ];
-          const nextNode = { ...node, variableRows: nextRows };
-          const { minX, minY, maxX, maxY } = getCanvasBounds(
-            FAILURE_CANVAS_BASE,
-            getNodeHeight(nextNode, nodeTypeConfig)
-          );
-          return {
-            ...nextNode,
-            position: {
-              x: clamp(node.position.x, minX, maxX),
-              y: clamp(node.position.y, minY, maxY)
-            }
-          };
-        })
-      }));
-      setHasUnsavedChanges(true);
-    },
-    [nodeTypeConfig]
-  );
-
-  const handleFailureRemoveVariableRow = useCallback(
-    (nodeId: string, rowId: string) => {
-      setFailureGraph((prev) => ({
-        ...prev,
-        nodes: prev.nodes.map((node) => {
-          if (
-            node.id !== nodeId ||
-            (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
-          )
-            return node;
-          const rows = node.variableRows ?? [];
-          const nextRows = rows.filter((row) => row.id !== rowId);
-          const nextNode = { ...node, variableRows: nextRows };
-          const { minX, minY, maxX, maxY } = getCanvasBounds(
-            FAILURE_CANVAS_BASE,
-            getNodeHeight(nextNode, nodeTypeConfig)
-          );
-          return {
-            ...nextNode,
-            position: {
-              x: clamp(node.position.x, minX, maxX),
-              y: clamp(node.position.y, minY, maxY)
-            }
-          };
-        })
-      }));
-      setHasUnsavedChanges(true);
-    },
-    [nodeTypeConfig]
-  );
-
-  const handleFailureNameChange = useCallback((nodeId: string, value: string) => {
-    setFailureGraph((prev) => ({
-      ...prev,
-      nodes: prev.nodes.map((node) =>
-        node.id === nodeId ? { ...node, name: value } : node
-      )
-    }));
-    setHasUnsavedChanges(true);
-  }, []);
-
-  const handleFailureRetryScopeEndChange = useCallback((nodeId: string, checked: boolean) => {
-    setFailureGraph((prev) => {
-      const node = prev.nodes.find((n) => n.id === nodeId);
-      const ownerId = node?.retryOwnerId;
-      const scopeType = node?.retryScopeType;
-      if (!ownerId || !scopeType) return prev;
-      const edgesLocal = prev.edges;
-      const nodeMap = new Map(prev.nodes.map((n) => [n.id, n]));
-      const outEdges = new Map<string, { to: string }>();
-      edgesLocal.forEach((e) => {
-        if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, { to: e.to });
-      });
-      const downstreamIds = new Set<string>();
-      let current: string | null = nodeId;
-      while (current) {
-        const nextId: string | undefined = outEdges.get(current)?.to;
-        if (!nextId) break;
-        const nextNode = nodeMap.get(nextId);
-        if (!nextNode || nextNode.retryOwnerId !== ownerId || nextNode.retryScopeType !== scopeType)
-          break;
-        downstreamIds.add(nextId);
-        current = nextId;
-      }
-      let nextNodeIdToAdd: string | null = null;
-      if (!checked) {
-        const immediateNextId = outEdges.get(nodeId)?.to ?? null;
-        if (immediateNextId) {
-          const immediateNext = nodeMap.get(immediateNextId);
-          const alreadyInScope =
-            immediateNext?.retryOwnerId === ownerId && immediateNext?.retryScopeType === scopeType;
-          if (!alreadyInScope && immediateNext && !isForbiddenInRetryScope(immediateNext.kind))
-            nextNodeIdToAdd = immediateNextId;
-        }
-      }
-      const nextNodes = prev.nodes.map((n) => {
-        if (n.id === nodeId) return { ...n, isRetryScopeEnd: checked };
-        if (checked && downstreamIds.has(n.id))
-          return { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false };
-        if (
-          checked &&
-          n.retryOwnerId === ownerId &&
-          n.retryScopeType === scopeType &&
-          n.isRetryScopeEnd
-        )
-          return { ...n, isRetryScopeEnd: false };
-        if (!checked && nextNodeIdToAdd && n.id === nextNodeIdToAdd)
-          return {
-            ...n,
-            retryOwnerId: ownerId,
-            retryScopeType: scopeType,
-            isRetryScopeEnd: true
-          };
-        return n;
-      });
-      return { ...prev, nodes: nextNodes };
-    });
-    setHasUnsavedChanges(true);
-  }, []);
-
   const handleToggleExpand = (nodeId: string) => {
     const target = nodes.find((node) => node.id === nodeId);
     const isContainer = target ? isContainerNode(target) : false;
     const willCollapse = Boolean(target && target.isExpanded && isContainer);
     const childIds = willCollapse
-      ? new Set(nodes.filter((node) => node.containerId === nodeId).map((node) => node.id))
+      ? collectChildNodeIdsForContainer(nodes, nodeId)
       : null;
 
     setNodes((prev) =>
-      prev.map((node) => {
-        if (node.id !== nodeId) return node;
-        const nextExpanded = !node.isExpanded;
-        const nextNode = { ...node, isExpanded: nextExpanded };
-        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
-        const nodeHeight = getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon);
-        const { minX, minY, maxX, maxY } = getCanvasBounds(canvasBase, nodeHeight);
-        const updated = {
-          ...nextNode,
-          position: {
-            x: clamp(node.position.x, minX, maxX),
-            y: clamp(node.position.y, minY, maxY)
-          }
-        };
-        setHasUnsavedChanges(true);
-        return updated;
-      })
+      mapNodesForToggleExpand(
+        prev,
+        nodeId,
+        nodeTypeConfig,
+        canvasBase,
+        startEndBadges,
+        getCanvasBounds,
+        clamp,
+        getEffectiveNodeHeight
+      )
     );
+    if (target) {
+      setHasUnsavedChanges(true);
+    }
 
     if (willCollapse && childIds) {
       if (selectedNode && childIds.has(selectedNode)) {
@@ -5924,98 +1681,21 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   const handleRetryScopeEndChange = (nodeId: string, checked: boolean) => {
-    setNodes((prev) => {
-      const node = prev.find((n) => n.id === nodeId);
-      const ownerId = node?.retryOwnerId;
-      const scopeType = node?.retryScopeType;
-      if (!ownerId || !scopeType) return prev;
-      const edgesLocal = edges;
-      const nodeMap = new Map(prev.map((n) => [n.id, n]));
-      const outEdges = new Map<string, { to: string }>();
-      edgesLocal.forEach((e) => {
-        if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, { to: e.to });
-      });
-      const downstreamIds = new Set<string>();
-      let current: string | null = nodeId;
-      while (current) {
-        const nextId: string | undefined = outEdges.get(current)?.to;
-        if (!nextId) break;
-        const nextNode = nodeMap.get(nextId);
-        if (!nextNode || nextNode.retryOwnerId !== ownerId || nextNode.retryScopeType !== scopeType) break;
-        downstreamIds.add(nextId);
-        current = nextId;
-      }
-      // End retry scope 해제(checked=false) 시: 이미 연결된 다음 노드가 스코프 밖이면 스코프에 넣고 새 end로 설정
-      let nextNodeIdToAdd: string | null = null;
-      if (!checked) {
-        const immediateNextId = outEdges.get(nodeId)?.to ?? null;
-        if (immediateNextId) {
-          const immediateNext = nodeMap.get(immediateNextId);
-          const alreadyInScope =
-            immediateNext?.retryOwnerId === ownerId && immediateNext?.retryScopeType === scopeType;
-          if (!alreadyInScope && immediateNext && !isForbiddenInRetryScope(immediateNext.kind))
-            nextNodeIdToAdd = immediateNextId;
-        }
-      }
-      return prev.map((n) => {
-        if (n.id === nodeId) return { ...n, isRetryScopeEnd: checked };
-        if (checked && downstreamIds.has(n.id))
-          return { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false };
-        if (
-          checked &&
-          n.retryOwnerId === ownerId &&
-          n.retryScopeType === scopeType &&
-          n.isRetryScopeEnd
-        )
-          return { ...n, isRetryScopeEnd: false };
-        if (!checked && nextNodeIdToAdd && n.id === nextNodeIdToAdd)
-          return {
-            ...n,
-            retryOwnerId: ownerId,
-            retryScopeType: scopeType,
-            isRetryScopeEnd: true
-          };
-        return n;
-      });
-    });
+    setNodes((prev) =>
+      applyRetryScopeEndChangeToNodes(prev, nodeId, checked, edges, isForbiddenInRetryScope)
+    );
     setHasUnsavedChanges(true);
   };
 
   const handleParamChange = (nodeId: string, key: string, value: string) => {
+    let shouldMarkUnsaved = false;
     setNodes((prev) => {
-      const retryNode = prev.find((n) => n.id === nodeId);
-      const isRetryNode = retryNode?.kind === "flow_control.retry";
-      const isRetryTurningOffFailure =
-        isRetryNode && key === "onFailureEnabled" && value === "false";
-
-      let nextNodes = prev.map((node) => {
-        if (node.id === nodeId) {
-          setHasUnsavedChanges(true);
-          return { ...node, params: { ...node.params, [key]: value } };
-        }
-        if (
-          isRetryTurningOffFailure &&
-          node.retryOwnerId === nodeId &&
-          node.retryScopeType === "failure"
-        ) {
-          return {
-            ...node,
-            retryOwnerId: null,
-            retryScopeType: null,
-            isRetryScopeEnd: false
-          };
-        }
-        return node;
-      });
-
-      // main / failure scope end 변경 시 멤버십 재계산
-      if (isRetryNode && (key === "mainScopeEndId" || key === "failureScopeEndId")) {
-        const scopeType = key === "mainScopeEndId" ? "main" : "failure";
-        nextNodes = recomputeRetryScopeMembership(nextNodes, nodeId, scopeType, edges);
-      }
-
-      return nextNodes;
+      shouldMarkUnsaved = prev.some((n) => n.id === nodeId);
+      return applyParamChangeToNodes(prev, nodeId, key, value, edges, recomputeRetryScopeMembership);
     });
+    if (shouldMarkUnsaved) {
+      setHasUnsavedChanges(true);
+    }
     if (key === "onFailureEnabled" && value === "false") {
       const node = nodes.find((n) => n.id === nodeId);
       if (node?.kind === "flow_control.retry") {
@@ -6032,81 +1712,69 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     field: "variable" | "comparisonOperator" | "value",
     value: string
   ) => {
-    setNodes((prev) =>
-      prev.map((node) => {
-        if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
-        const expressions = node.conditionExpressions ?? [
-          createConditionExpression(null)
-        ];
-        const nextExpressions = expressions.map((expression) =>
-          expression.id === expressionId
-            ? { ...expression, [field]: value }
-            : expression
-        );
-        setHasUnsavedChanges(true);
-        return { ...node, conditionExpressions: nextExpressions };
-      })
-    );
+    let shouldMarkUnsaved = false;
+    setNodes((prev) => {
+      shouldMarkUnsaved = prev.some(
+        (n) => n.id === nodeId && n.kind === "flow_control.condition"
+      );
+      return applyConditionExpressionFieldChange(
+        prev,
+        nodeId,
+        expressionId,
+        field,
+        value,
+        createConditionExpression
+      );
+    });
+    if (shouldMarkUnsaved) setHasUnsavedChanges(true);
   };
 
   const handleAddConditionExpression = (
     nodeId: string,
     operator: ConditionOperator
   ) => {
-    setNodes((prev) =>
-      prev.map((node) => {
-        if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
-        const baseExpressions = normalizeConditionExpressions(
-          node.conditionExpressions ?? []
-        );
-        const nextExpressions = normalizeConditionExpressions([
-          ...baseExpressions,
-          createConditionExpression(operator)
-        ]);
-        const nextNode = { ...node, conditionExpressions: nextExpressions };
-        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
-        const { minX, minY, maxX, maxY } = getCanvasBounds(
-          canvasBase,
-          getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon)
-        );
-        const updated = {
-          ...nextNode,
-          position: {
-            x: clamp(node.position.x, minX, maxX),
-            y: clamp(node.position.y, minY, maxY)
-          }
-        };
-        setHasUnsavedChanges(true);
-        return updated;
-      })
-    );
+    let shouldMarkUnsaved = false;
+    setNodes((prev) => {
+      shouldMarkUnsaved = prev.some(
+        (n) => n.id === nodeId && n.kind === "flow_control.condition"
+      );
+      return applyAddConditionExpression(
+        prev,
+        nodeId,
+        operator,
+        normalizeConditionExpressions,
+        createConditionExpression,
+        nodeTypeConfig,
+        canvasBase,
+        startEndBadges,
+        getCanvasBounds,
+        clamp,
+        getEffectiveNodeHeight
+      );
+    });
+    if (shouldMarkUnsaved) setHasUnsavedChanges(true);
   };
 
   const handleRemoveConditionExpression = (nodeId: string, expressionId: string) => {
-    setNodes((prev) =>
-      prev.map((node) => {
-        if (node.id !== nodeId || node.kind !== "flow_control.condition") return node;
-        const remaining = (node.conditionExpressions ?? []).filter(
-          (expression) => expression.id !== expressionId
-        );
-        const nextExpressions = normalizeConditionExpressions(remaining);
-        const nextNode = { ...node, conditionExpressions: nextExpressions };
-        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
-        const { minX, minY, maxX, maxY } = getCanvasBounds(
-          canvasBase,
-          getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon)
-        );
-        const updated = {
-          ...nextNode,
-          position: {
-            x: clamp(node.position.x, minX, maxX),
-            y: clamp(node.position.y, minY, maxY)
-          }
-        };
-        setHasUnsavedChanges(true);
-        return updated;
-      })
-    );
+    let shouldMarkUnsaved = false;
+    setNodes((prev) => {
+      shouldMarkUnsaved = prev.some(
+        (n) => n.id === nodeId && n.kind === "flow_control.condition"
+      );
+      return applyRemoveConditionExpression(
+        prev,
+        nodeId,
+        expressionId,
+        normalizeConditionExpressions,
+        nodeTypeConfig,
+        canvasBase,
+        startEndBadges,
+        getCanvasBounds,
+        clamp,
+        getEffectiveNodeHeight
+      );
+    });
+    if (shouldMarkUnsaved) setHasUnsavedChanges(true);
   };
 
   const handleVariableRowChange = (
@@ -6115,100 +1783,72 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     field: "name" | "value",
     value: string
   ) => {
-    setNodes((prev) =>
-      prev.map((node) => {
-        if (
-          node.id !== nodeId ||
-          (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
-        )
-          return node;
-        const rows = node.variableRows ?? [];
-        const nextRows = rows.map((row) =>
-          row.id === rowId ? { ...row, [field]: value } : row
-        );
-        setHasUnsavedChanges(true);
-        return { ...node, variableRows: nextRows };
-      })
-    );
+    let shouldMarkUnsaved = false;
+    setNodes((prev) => {
+      shouldMarkUnsaved = prev.some(
+        (n) =>
+          n.id === nodeId &&
+          (n.kind === "flow_control.input" || n.kind === "flow_control.output")
+      );
+      return applyVariableRowChange(prev, nodeId, rowId, field, value);
+    });
+    if (shouldMarkUnsaved) setHasUnsavedChanges(true);
   };
 
   const handleAddVariableRow = (nodeId: string, valueType: VariableValueType) => {
-    setNodes((prev) =>
-      prev.map((node) => {
-        if (
-          node.id !== nodeId ||
-          (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
-        )
-          return node;
-        const rows = node.variableRows ?? [];
-        const nextRows = [
-          ...rows,
-          {
-            id: `var-${nextVariableRowIndex.current++}`,
-            name: "",
-            value: "",
-            valueType
-          }
-        ];
-        const nextNode = { ...node, variableRows: nextRows };
-        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
-        const { minX, minY, maxX, maxY } = getCanvasBounds(
-          canvasBase,
-          getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon)
-        );
-        const updated = {
-          ...nextNode,
-          position: {
-            x: clamp(node.position.x, minX, maxX),
-            y: clamp(node.position.y, minY, maxY)
-          }
-        };
-        setHasUnsavedChanges(true);
-        return updated;
-      })
-    );
+    let shouldMarkUnsaved = false;
+    setNodes((prev) => {
+      shouldMarkUnsaved = prev.some(
+        (n) =>
+          n.id === nodeId &&
+          (n.kind === "flow_control.input" || n.kind === "flow_control.output")
+      );
+      return applyAddVariableRow(
+        prev,
+        nodeId,
+        valueType,
+        () => `var-${nextVariableRowIndex.current++}`,
+        nodeTypeConfig,
+        canvasBase,
+        startEndBadges,
+        getCanvasBounds,
+        clamp,
+        getEffectiveNodeHeight
+      );
+    });
+    if (shouldMarkUnsaved) setHasUnsavedChanges(true);
   };
 
   const handleRemoveVariableRow = (nodeId: string, rowId: string) => {
-    setNodes((prev) =>
-      prev.map((node) => {
-        if (
-          node.id !== nodeId ||
-          (node.kind !== "flow_control.input" && node.kind !== "flow_control.output")
-        )
-          return node;
-        const rows = node.variableRows ?? [];
-        const nextRows = rows.filter((row) => row.id !== rowId);
-        const nextNode = { ...node, variableRows: nextRows };
-        const hasRibbon = Boolean(startEndBadges.get(node.id)?.showStart || startEndBadges.get(node.id)?.showEnd);
-        const { minX, minY, maxX, maxY } = getCanvasBounds(
-          canvasBase,
-          getEffectiveNodeHeight(nextNode, nodeTypeConfig, hasRibbon)
-        );
-        const updated = {
-          ...nextNode,
-          position: {
-            x: clamp(node.position.x, minX, maxX),
-            y: clamp(node.position.y, minY, maxY)
-          }
-        };
-        setHasUnsavedChanges(true);
-        return updated;
-      })
-    );
+    let shouldMarkUnsaved = false;
+    setNodes((prev) => {
+      shouldMarkUnsaved = prev.some(
+        (n) =>
+          n.id === nodeId &&
+          (n.kind === "flow_control.input" || n.kind === "flow_control.output")
+      );
+      return applyRemoveVariableRow(
+        prev,
+        nodeId,
+        rowId,
+        nodeTypeConfig,
+        canvasBase,
+        startEndBadges,
+        getCanvasBounds,
+        clamp,
+        getEffectiveNodeHeight
+      );
+    });
+    if (shouldMarkUnsaved) setHasUnsavedChanges(true);
   };
 
   const handleNameChange = (nodeId: string, value: string) => {
-    setNodes((prev) =>
-      prev.map((node) =>
-        node.id === nodeId
-          ? (() => {
-              setHasUnsavedChanges(true);
-              return { ...node, name: value };
-            })()
-          : node
-      )
-    );
+    let shouldMarkUnsaved = false;
+    setNodes((prev) => {
+      shouldMarkUnsaved = prev.some((n) => n.id === nodeId);
+      return applyNameChangeToNodes(prev, nodeId, value);
+    });
+    if (shouldMarkUnsaved) setHasUnsavedChanges(true);
   };
 
   const handleStartEditName = (nodeId: string) => {
@@ -6242,85 +1882,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const connectedEdgeIds = edges
       .filter((edge) => edge.from === nodeId || edge.to === nodeId)
       .map((edge) => edge.id);
-    const trimmedEdgesForDelete = edges.filter(
-      (e) => e.from !== nodeId && e.to !== nodeId
-    );
     setNodes((prev) => {
-      const isContainer = prev.some(
-        (node) => node.id === nodeId && isContainerNode(node)
-      );
-      const isRetryNode = prev.some(
-        (node) => node.id === nodeId && node.kind === "flow_control.retry"
-      );
-      const deletedNode = prev.find((n) => n.id === nodeId);
-      const deletedInScopeOwnerId = deletedNode?.retryOwnerId ?? null;
-      const deletedInScopeType = deletedNode?.retryScopeType ?? null;
-
-      let nextNodes = prev
-        .filter((node) => node.id !== nodeId)
-        .map((node) => {
-          if (isRetryNode && node.retryOwnerId === nodeId) {
-            return {
-              ...node,
-              retryOwnerId: null,
-              retryScopeType: null,
-              isRetryScopeEnd: false
-            };
-          }
-          if (!isContainer) return node;
-          if (node.containerId !== nodeId) return node;
-          return {
-            ...node,
-            containerId: null,
-            containerType: null,
-            branchIndex: null
-          };
-        });
-
-      if (deletedInScopeOwnerId && deletedInScopeType) {
-        const startId = getRetryScopeStartNodeId(
-          deletedInScopeOwnerId,
-          deletedInScopeType,
-          trimmedEdgesForDelete
-        );
-        const reachable = new Set<string>();
-        if (startId) {
-          const nodeMap = new Map(nextNodes.map((n) => [n.id, n]));
-          const outEdges = new Map<string, string>();
-          trimmedEdgesForDelete.forEach((e) => {
-            if (nodeMap.has(e.from) && nodeMap.has(e.to))
-              outEdges.set(e.from, e.to);
-          });
-          let current: string | null = startId;
-          while (current) {
-            const node = nodeMap.get(current);
-            if (
-              !node ||
-              node.retryOwnerId !== deletedInScopeOwnerId ||
-              node.retryScopeType !== deletedInScopeType
-            )
-              break;
-            reachable.add(current);
-            if (node.isRetryScopeEnd) break;
-            current = outEdges.get(current) ?? null;
-          }
-        }
-        nextNodes = nextNodes.map((n) => {
-          if (
-            n.retryOwnerId === deletedInScopeOwnerId &&
-            n.retryScopeType === deletedInScopeType &&
-            !reachable.has(n.id)
-          )
-            return {
-              ...n,
-              retryOwnerId: null,
-              retryScopeType: null,
-              isRetryScopeEnd: false
-            };
-          return n;
-        });
-      }
-
+      const nextNodes = reduceMainGraphNodesAfterDelete(prev, nodeId, edges);
       setEdges((prevEdges) => {
         const trimmed = prevEdges.filter(
           (edge) => edge.from !== nodeId && edge.to !== nodeId
@@ -6368,66 +1931,58 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   };
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const isTypingTarget = isEditableKeyboardTarget(event);
+    const runModKeyCopy = (event: KeyboardEvent) => {
+      if (!selectedNode) return;
+      const node = nodes.find((n) => n.id === selectedNode);
+      if (!node) return;
+      event.preventDefault();
+      void navigator.clipboard.writeText(serializeEditorNodeClipboard(node));
+    };
 
-      const mod = event.metaKey || event.ctrlKey;
-      if (mod) {
-        const key = event.key.toLowerCase();
-        if (key === "c" || key === "x" || key === "v") {
-          if (isTypingTarget) return;
-          if (key === "c") {
-            if (!selectedNode) return;
-            const node = nodes.find((n) => n.id === selectedNode);
-            if (!node) return;
-            event.preventDefault();
-            void navigator.clipboard.writeText(serializeEditorNodeClipboard(node));
-            return;
-          }
-          if (key === "x") {
-            if (!selectedNode) return;
-            const node = nodes.find((n) => n.id === selectedNode);
-            if (!node) return;
-            event.preventDefault();
-            void navigator.clipboard.writeText(serializeEditorNodeClipboard(node));
-            handleDeleteNode(selectedNode);
-            return;
-          }
-          event.preventDefault();
-          void (async () => {
-            let text: string;
-            try {
-              text = await navigator.clipboard.readText();
-            } catch {
-              return;
-            }
-            const source = parseEditorNodeClipboard(text);
-            if (!source) return;
-            if (!nodeTypeConfig[source.kind]) return;
-            if (source.kind === "flow_control.vlm" && !ENABLE_VLM_NODES) return;
-            if (source.kind === "flow_control.input") {
-              const existingInput = nodes.find(
-                (n) => n.kind === "flow_control.input"
-              );
-              if (existingInput) {
-                setSelectedNode(existingInput.id);
-                setSelectedEdgeId(null);
-                return;
-              }
-            }
-            const newNode = buildPastedEditorNode(source);
-            setNodes((prev) => [...prev, newNode]);
-            setSelectedNode(newNode.id);
-            setSelectedEdgeId(null);
-            setEditingNodeId(null);
-            setHasUnsavedChanges(true);
-          })();
+    const runModKeyCut = (event: KeyboardEvent) => {
+      if (!selectedNode) return;
+      const node = nodes.find((n) => n.id === selectedNode);
+      if (!node) return;
+      event.preventDefault();
+      void navigator.clipboard.writeText(serializeEditorNodeClipboard(node));
+      handleDeleteNode(selectedNode);
+    };
+
+    const runModKeyPaste = (event: KeyboardEvent) => {
+      event.preventDefault();
+      void (async () => {
+        let text: string;
+        try {
+          text = await navigator.clipboard.readText();
+        } catch {
           return;
         }
-      }
+        const source = parseEditorNodeClipboard(text);
+        if (!source) return;
+        if (!nodeTypeConfig[source.kind]) return;
+        if (source.kind === "flow_control.vlm" && !ENABLE_VLM_NODES) return;
+        if (source.kind === "flow_control.input") {
+          const existingInput = nodes.find(
+            (n) => n.kind === "flow_control.input"
+          );
+          if (existingInput) {
+            setSelectedNode(existingInput.id);
+            setSelectedEdgeId(null);
+            return;
+          }
+        }
+        const newNode = buildPastedEditorNode(source);
+        setNodes((prev) => [...prev, newNode]);
+        setSelectedNode(newNode.id);
+        setSelectedEdgeId(null);
+        setEditingNodeId(null);
+        setHasUnsavedChanges(true);
+      })();
+    };
 
+    const runDeleteOrBackspace = (event: KeyboardEvent) => {
       if (event.key !== "Delete" && event.key !== "Backspace") return;
-      if (isTypingTarget) return;
+      if (isEditableKeyboardTarget(event)) return;
       if (selectedNode) {
         event.preventDefault();
         handleDeleteNode(selectedNode);
@@ -6437,6 +1992,30 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         event.preventDefault();
         handleDeleteEdge(selectedEdgeId);
       }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isTypingTarget = isEditableKeyboardTarget(event);
+
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod) {
+        const key = event.key.toLowerCase();
+        if (key === "c" || key === "x" || key === "v") {
+          if (isTypingTarget) return;
+          if (key === "c") {
+            runModKeyCopy(event);
+            return;
+          }
+          if (key === "x") {
+            runModKeyCut(event);
+            return;
+          }
+          runModKeyPaste(event);
+          return;
+        }
+      }
+
+      runDeleteOrBackspace(event);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -6611,7 +2190,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setSelectedEdgeId(null);
       setHasUnsavedChanges(true);
     },
-    [isEdgeAllowed, nodeMap, nodeTypeConfig, outgoingEdges, showEdgeError]
+    [edges, isEdgeAllowed, nodeMap, nodeTypeConfig, outgoingEdges, showEdgeError]
   );
 
   const handleStartConnect = (nodeId: string, portKey: string) => {
@@ -6689,8 +2268,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const point = getCanvasPoint(event.clientX, event.clientY);
     if (!point) return;
 
-    const dropX = point.x - NODE_METRICS.width / 2;
-    const dropY = point.y - NODE_METRICS.collapsedHeight / 2;
+    const { x: dropX, y: dropY } = canvasPointToNewNodeTopLeft(
+      point,
+      NODE_METRICS.width,
+      NODE_METRICS.collapsedHeight
+    );
     createNode(rawKind as NodeKind, { x: dropX, y: dropY });
     setHasUnsavedChanges(true);
   };
@@ -6809,115 +2391,32 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         onChange={handleImportFileSelected}
       />
       {importOverwriteConfirmOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="import-overwrite-title"
-          onClick={cancelImportOverwrite}
-        >
-          <div onClick={(e) => e.stopPropagation()}>
-            <Card className="w-full max-w-sm p-4 shadow-xl">
-              <h2
-                id="import-overwrite-title"
-                className="text-lg font-semibold text-slate-800"
-              >
-                Replace editor contents?
-              </h2>
-              <p className="mt-2 text-sm text-slate-600">
-                The current workflow on the canvas will be discarded and replaced by the imported
-                file. Unsaved changes will be lost. Nothing is saved to the server until you choose
-                Save.
-              </p>
-              <div className="mt-4 flex justify-end gap-2">
-                <Button variant="secondary" onClick={cancelImportOverwrite}>
-                  Cancel
-                </Button>
-                <Button onClick={confirmImportOverwrite}>OK</Button>
-              </div>
-            </Card>
-          </div>
-        </div>
+        <ImportOverwriteDialog
+          onBackdropClick={cancelImportOverwrite}
+          onCancelClick={cancelImportOverwrite}
+          onConfirmClick={confirmImportOverwrite}
+        />
       )}
       {importValidationFailOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="import-fail-title"
-          onClick={() => setImportValidationFailOpen(false)}
-        >
-          <div onClick={(e) => e.stopPropagation()}>
-            <Card className="w-full max-w-md p-4 shadow-xl">
-              <h2
-                id="import-fail-title"
-                className="text-lg font-semibold text-slate-800"
-              >
-                Import failed
-              </h2>
-              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
-                {importFailMessages.map((msg, index) => (
-                  <li key={`${index}-${msg}`}>{msg}</li>
-                ))}
-              </ul>
-              <div className="mt-4 flex justify-end">
-                <Button onClick={() => setImportValidationFailOpen(false)}>OK</Button>
-              </div>
-            </Card>
-          </div>
-        </div>
+        <ImportValidationFailDialog
+          messages={importFailMessages}
+          onBackdropClick={() => setImportValidationFailOpen(false)}
+          onOkClick={() => setImportValidationFailOpen(false)}
+        />
       )}
       {showPublishConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="publish-dialog-title"
-          onClick={() => setShowPublishConfirm(false)}
-        >
-          <div onClick={(e) => e.stopPropagation()}>
-            <Card className="w-full max-w-sm p-4 shadow-xl">
-            <h2 id="publish-dialog-title" className="text-lg font-semibold text-slate-800">
-              Publish workflow?
-            </h2>
-            <p className="mt-2 text-sm text-slate-600">
-              This will create an immutable published version. You can continue editing the draft afterward.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => setShowPublishConfirm(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleConfirmPublish}
-                disabled={publishMutation.isPending}
-              >
-                {publishMutation.isPending ? "Publishing…" : "Publish"}
-              </Button>
-            </div>
-          </Card>
-          </div>
-        </div>
+        <PublishConfirmDialog
+          onBackdropClick={() => setShowPublishConfirm(false)}
+          onCancelClick={() => setShowPublishConfirm(false)}
+          onPublishClick={handleConfirmPublish}
+          isPublishPending={publishMutation.isPending}
+        />
       )}
 
-      {publishToast && (
-        <div
-          className="fixed bottom-6 right-6 z-50 rounded-lg bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-lg"
-          role="status"
-        >
-          Workflow published successfully.
-        </div>
-      )}
-      {failureFlowToastMessage && (
-        <div
-          className="fixed bottom-20 right-6 z-50 rounded-lg bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-lg"
-          role="status"
-        >
-          {failureFlowToastMessage}
-        </div>
-      )}
+      <EditorNoticeToasts
+        publishToastVisible={publishToast}
+        failureFlowToastMessage={failureFlowToastMessage}
+      />
 
       <div className="flex shrink-0 items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
@@ -7167,70 +2666,17 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           +
         </button>
         {showPalette && (
-          <div className="absolute left-16 top-4 z-10 flex rounded-lg border border-slate-200 bg-white shadow-lg">
-            <div className="w-32 border-r border-slate-200 p-3">
-              <p className="text-[10px] font-semibold text-slate-500">Category</p>
-              <div className="mt-2 space-y-1">
-                {NODE_CATEGORIES.map((category) => (
-                  <button
-                    key={category.id}
-                    type="button"
-                    onClick={() => setSelectedCategory(category.id)}
-                    className={cn(
-                      "cursor-pointer w-full rounded-md px-2 py-1 text-left text-xs",
-                      selectedCategory === category.id
-                        ? "bg-slate-900 text-white"
-                        : "text-slate-600 hover:bg-slate-100"
-                    )}
-                  >
-                    {category.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="w-72 p-3">
-              <p className="text-xs font-semibold text-slate-700">
-                {NODE_CATEGORY_LABELS[selectedCategory]}
-              </p>
-              <div className="mt-3 max-h-[23rem] space-y-2 overflow-y-auto overscroll-y-contain pr-1">
-                {nodeTypesByCategory[selectedCategory].map((kind) => {
-                  const config = nodeTypeConfig[kind];
-                  return (
-                    <button
-                      key={kind}
-                      type="button"
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData("application/x-node-kind", kind);
-                        event.dataTransfer.effectAllowed = "copy";
-                      }}
-                      onClick={() => createNode(kind)}
-                      className="cursor-pointer flex w-full items-center gap-3 rounded-md border border-slate-200 px-2 py-2 text-left text-xs text-slate-700 hover:border-slate-300"
-                    >
-                      <div
-                        className={cn(
-                          "flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold",
-                          config.colorClass
-                        )}
-                      >
-                        {config.iconText}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-xs font-semibold">{config.label}</p>
-                        <p className="text-[10px] text-slate-500">
-                          {kind.startsWith("skill.") ? kind.replace("skill.", "") : kind}
-                        </p>
-                      </div>
-                      <span className="text-[10px] text-slate-400">Drag</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="mt-3 text-[10px] text-slate-400">
-                Drag onto the canvas or click to add at center.
-              </p>
-            </div>
-          </div>
+          <EditorPalette
+            selectedCategory={selectedCategory}
+            onSelectCategory={setSelectedCategory}
+            nodeTypesByCategory={nodeTypesByCategory}
+            nodeTypeConfig={nodeTypeConfig}
+            onNodeKindDragStart={(event, kind) => {
+              event.dataTransfer.setData("application/x-node-kind", kind);
+              event.dataTransfer.effectAllowed = "copy";
+            }}
+            onNodeKindClick={(kind) => createNode(kind)}
+          />
         )}
 
         <Card className="flex min-h-0 min-w-0 flex-1 flex-col border-dashed">
@@ -7651,8 +3097,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       const rect = (
                         e.currentTarget as HTMLDivElement
                       ).getBoundingClientRect();
-                      const x = e.clientX - rect.left - NODE_METRICS.width / 2;
-                      const y = e.clientY - rect.top - 24;
+                      const { x, y } = failureCanvasLocalDropPosition(
+                        rect,
+                        e.clientX,
+                        e.clientY,
+                        NODE_METRICS.width,
+                        24
+                      );
                       addFailureNode(kind, {
                         x: Math.max(0, x),
                         y: Math.max(0, y)
@@ -7725,10 +3176,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                               const offsetX = ev.clientX - targetRect.left;
                               const offsetY = ev.clientY - targetRect.top;
                               const onMove = (e: PointerEvent) => {
-                                const nx =
-                                  e.clientX - parentRect.left - offsetX;
-                                const ny =
-                                  e.clientY - parentRect.top - offsetY;
+                                const { x: nx, y: ny } =
+                                  parentLocalPositionFromPointer(
+                                    parentRect,
+                                    e.clientX,
+                                    e.clientY,
+                                    offsetX,
+                                    offsetY
+                                  );
                                 setFailureGraph((prev) => ({
                                   ...prev,
                                   nodes: prev.nodes.map((n) =>
