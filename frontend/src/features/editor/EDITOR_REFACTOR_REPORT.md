@@ -8,13 +8,18 @@
 
 ```
 editor/
-├── EditorPage.tsx                 # 페이지 단 orchestration, 메인/실패 캔버스 공통 상태
+├── EditorPage.tsx                 # 페이지 단 orchestration, 훅/JSX (순수 도메인 로직은 아래 모듈로 이동)
 ├── editorTypes.ts                 # 공용 타입 (외부: @/components/ContainerFrame)
 ├── editorConstants.ts             # 상수·정적 노드 설정
+├── editorPureUtils.ts             # 연산자·가드·클립보드·ID 카운터·clamp 등 순수 유틸
+├── editorViewJson.ts              # view_json 파싱 (`parseEditorView`)
+├── editorContainerLayout.ts       # 컨테이너 기하·그래프 정규화·자동 레이아웃·캔버스 크기
+├── editorDslBuild.ts              # DSL 생성 (`buildDslJson`, `buildViewJson`, `buildStateRecords` 등)
+├── editorDslParse.ts              # DSL → 에디터 그래프, OnFailure 복원, import 검증
 ├── editorCanvasCoordinates.ts     # 순수 좌표 변환 ( 클라이언트 → 캔버스 / Failure 로컬 등 )
 ├── editorPageOrchestration.ts     # import 롤백 스냅샷, DSL OnFailure 병합, 자식 노드 id 수집 등
-├── editorNodeLayout.ts            # 노드 높이·컨테이너 레이아웃·포트 오프셋
-├── editorRetryScope.ts            # Retry 스코프 헬퍼
+├── editorNodeLayout.ts            # 노드 높이·포트 오프셋 (에디터 카드용)
+├── editorRetryScope.ts            # Retry 스코프 시작점·멤버십·스코프 내 노드 id / end id
 ├── editorSkillset.ts              # Skillset → NodeTypeConfig
 ├── editorFailureGraphInit.ts      # 실패 그래프 초기 상태
 ├── useFailureGraphCanvasHandlers.ts
@@ -34,7 +39,13 @@ editor/
 ### 의존성 방향 (순환 없음)
 
 - `editorConstants` → `editorTypes` (단방향). `editorTypes`는 에디터 내부 모듈을 import하지 않음.
-- `EditorPage`는 위 모듈·`state/`·`components/`만 참조하며, 역방향 import는 없음.
+- `editorPureUtils` → `editorConstants`, `editorTypes` 만 참조.
+- `editorViewJson` → `editorPureUtils`, `editorConstants`, `editorTypes`.
+- `editorContainerLayout` → `editorConstants`, `editorNodeLayout`, `editorTypes`, `@/components/ContainerFrame` (region 타입).
+- `editorRetryScope` → `editorConstants` (`RETRY_SCOPE_FORBIDDEN_KINDS`), `editorTypes`.
+- `editorDslBuild` → `editorRetryScope`, `editorPureUtils`, `editorContainerLayout`, `editorSkillset`, `@/domain/types`, `editorTypes`.
+- `editorDslParse` → `editorContainerLayout`, `editorPureUtils`, `editorNodeLayout`, `editorConstants`, `@/lib/featureFlags`, `editorTypes`. **`editorDslBuild`를 import하지 않음** (`parse` ↔ `build` 분리).
+- `EditorPage`는 위 모듈·`state/`·`components/`를 참조하며, 순수 로직 모듈에서 `EditorPage`를 import하지 않음.
 
 ---
 
@@ -53,9 +64,20 @@ editor/
 - `collectChildNodeIdsForContainer`
 - `clampEditorNodePositionToCanvas`
 
-### 2.3 `EditorPage.tsx` 모듈 레벨
+### 2.3 순수 도메인 로직 분리 (완만한 6모듈 절)
 
-- `assignEditorCountersAfterDraftLoad` (드래프트 로드 후 `nextNodeIndex` 등 ref 갱신)
+**목표**: `EditorPage.tsx` 모듈 스코프에 있던 **React·DOM과 무관한 함수**만 잘라서 전용 파일로 이동. 시그니처·동작은 그대로 유지.
+
+| 모듈 | 주요 심볼 |
+|------|-----------|
+| `editorPureUtils.ts` | `comparisonOperatorToDsl`, `dslOperatorToEditor`, `clamp`, `isRecord`, view/노드 검증·정규화, 클립보드 직렬화, `getNextIndexFromIds`, `assignEditorCountersAfterDraftLoad` |
+| `editorViewJson.ts` | `parseEditorView` |
+| `editorContainerLayout.ts` | 컨테이너 타입·프레임·`getCanvasBounds`, 엣지 필터·정규화, topological / auto-layout, `applyImportedLayout`, `getCanvasSizeForNodes` |
+| `editorRetryScope.ts` (확장) | 기존 `getRetryScopeStartNodeId` + `isForbiddenInRetryScope`, `recomputeRetryScopeMembership`, `getRetryScopeNodeIds`, `getRetryScopeEndNodeId` |
+| `editorDslBuild.ts` | `buildStateNameMap`, `ContainerDslPayload`, 조건값·state 레코드, `buildDslJson`, `buildOnFailureDsl`, `buildViewJson`, `buildRetryScopeSubflow` (`buildStateRecords`와 동일 파일에 두어 순환 방지) |
+| `editorDslParse.ts` | `DslState` 등 내부 타입, `parseDslToEditor`, 실패 캔버스 기본 레이아웃, `failureGraphFromOnFailureDsl`, `validateImportedDslForEditor` |
+
+**`EditorPage.tsx`에 남긴 것**: `isEditableKeyboardTarget` — `document` / `composedPath` 등 **DOM 의존**으로 순수 모듈로 옮기지 않음.
 
 ### 2.4 정리 패스
 
@@ -82,7 +104,7 @@ editor/
 
 1. **`NodeCard` `onRetryScopeEndChange`**: `EditorPage`에서 전달하지만 카드 UI에서 아직 호출하지 않음 — JSDoc TODO 참고.
 2. **`RecomputeRetryScopeMembershipFn`**: `state/nodeMutations.ts`와 `useFailureGraphCanvasHandlers.ts`에 타입 정의 중복.
-3. **`EditorPage.tsx` 규모**: 여전히 대형 단일 파일; 도메인 블록별 분리는 별도 계획 필요.
+3. **`EditorPage.tsx` 규모**: 순수 로직 대부분이 `editorPureUtils`·`editorContainerLayout`·`editorDsl*` 등으로 이전되어 **라인 수는 크게 감소**. 남은 덩어리는 훅·핸들러·JSX; 추가 분리는 훅/서브컴포넌트 단위로 검토 가능.
 4. **`handleFailureInputDrop`**: `useCallback` deps가 `failureGraph.edges.length` 중심 (기존 패턴 유지).
 
 ---
@@ -113,4 +135,4 @@ editor/
 
 ---
 
-*문서 버전: 리팩터링 안정화 패스 기준. 내용이 코드와 어긋나면 코드를 우선하고, 이 파일을 갱신하세요.*
+*문서 버전: DSL/레이아웃 순수 로직 모듈 분리 반영. 내용이 코드와 어긋나면 코드를 우선하고, 이 파일을 갱신하세요.*
