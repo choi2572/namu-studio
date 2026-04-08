@@ -1,8 +1,6 @@
 """Database schema and migrations."""
-import sqlite3
-import json
-from typing import Optional
 
+import sqlite3
 
 SCHEMA_VERSION = 2
 
@@ -11,7 +9,7 @@ def migrate_schema(conn: sqlite3.Connection) -> None:
     """Apply schema migrations."""
     _create_version_table(conn)
     current_version = _get_schema_version(conn)
-    
+
     if current_version < 1:
         _migrate_to_v1(conn)
         _set_schema_version(conn, 1)
@@ -57,7 +55,7 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL
         )
     """)
-    
+
     # Workflow versions table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS workflow_versions (
@@ -71,7 +69,7 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id)
         )
     """)
-    
+
     # Workflow views table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS workflow_views (
@@ -82,7 +80,7 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (version_id) REFERENCES workflow_versions(version_id)
         )
     """)
-    
+
     # Runs table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS runs (
@@ -104,7 +102,7 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (version_id) REFERENCES workflow_versions(version_id)
         )
     """)
-    
+
     # Node runs table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS node_runs (
@@ -125,7 +123,7 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (run_id) REFERENCES runs(run_id)
         )
     """)
-    
+
     # Run events table
     conn.execute("""
         CREATE TABLE IF NOT EXISTS run_events (
@@ -140,14 +138,16 @@ def _migrate_to_v1(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (run_id) REFERENCES runs(run_id)
         )
     """)
-    
+
     # Create indexes
     conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_status_started ON runs(status, started_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_workflow_started ON runs(workflow_id, started_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_node_runs_run_state ON node_runs(run_id, state_name)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_events_run_seq ON run_events(run_id, seq)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_versions_workflow ON workflow_versions(workflow_id, version_number)")
-    
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_versions_workflow ON workflow_versions(workflow_id, version_number)"
+    )
+
     conn.commit()
 
 

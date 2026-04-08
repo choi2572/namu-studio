@@ -1,7 +1,6 @@
 """Test workflow validation (DSL v1)."""
-import pytest
 
-from app.services.validation import validate_workflow_dsl, ValidationError
+from app.services.validation import validate_workflow_dsl
 
 
 def test_missing_start_node():
@@ -12,7 +11,7 @@ def test_missing_start_node():
             "State2": {"Type": "Skill", "Skill": "Place", "End": True},
         }
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any(e.id == "missing_start" for e in errors)
@@ -24,9 +23,9 @@ def test_invalid_start_node():
         "StartAt": "NonExistent",
         "States": {
             "State1": {"Type": "Skill", "Skill": "Pick", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any(e.id == "invalid_start" for e in errors)
@@ -49,9 +48,9 @@ def test_condition_missing_else():
                 },
             },
             "StateA": {"Type": "Skill", "Skill": "Pick", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("condition_missing_else" in e.id for e in errors)
@@ -75,9 +74,9 @@ def test_condition_invalid_then():
                 "Else": "StateB",
             },
             "StateB": {"Type": "Skill", "Skill": "Place", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("condition_invalid_then" in e.id for e in errors)
@@ -93,16 +92,20 @@ def test_parallel_missing_startat():
                 "Branches": [
                     {
                         "States": {
-                            "Branch1Start": {"Type": "Skill", "Skill": "Pick", "End": True},
+                            "Branch1Start": {
+                                "Type": "Skill",
+                                "Skill": "Pick",
+                                "End": True,
+                            },
                         }
                     }
                 ],
                 "Next": "JoinNode",
             },
             "JoinNode": {"Type": "Skill", "Skill": "Process", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("parallel_missing_startat" in e.id for e in errors)
@@ -125,20 +128,23 @@ def test_parallel_nested():
                                     {
                                         "StartAt": "NestedStart",
                                         "States": {
-                                            "NestedStart": {"Type": "Pass", "End": True},
-                                        }
+                                            "NestedStart": {
+                                                "Type": "Pass",
+                                                "End": True,
+                                            },
+                                        },
                                     }
                                 ],
                                 "End": True,
                             },
-                        }
+                        },
                     }
                 ],
                 "End": True,
             },
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("parallel_nested" in e.id for e in errors)
@@ -151,9 +157,9 @@ def test_cycle_detection():
         "States": {
             "State1": {"Type": "Skill", "Skill": "Pick", "Next": "State2"},
             "State2": {"Type": "Skill", "Skill": "Place", "Next": "State1"},  # Cycle!
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any(e.id == "cycle_detected" for e in errors)
@@ -171,9 +177,9 @@ def test_mutually_exclusive_next_and_end():
                 "End": True,  # Error!
             },
             "State2": {"Type": "Skill", "Skill": "Place", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("mutually_exclusive" in e.id for e in errors)
@@ -189,9 +195,9 @@ def test_missing_terminal():
                 "Skill": "Pick",
                 # Missing both Next and End
             },
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("missing_terminal" in e.id for e in errors)
@@ -207,9 +213,9 @@ def test_invalid_next_reference():
                 "Skill": "Pick",
                 "Next": "NonExistent",
             },
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("invalid_next" in e.id for e in errors)
@@ -226,9 +232,9 @@ def test_wait_missing_event():
                 "Next": "ContinueNode",
             },
             "ContinueNode": {"Type": "Skill", "Skill": "Place", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("wait_missing_event" in e.id for e in errors)
@@ -248,9 +254,9 @@ def test_wait_missing_timeout():
                 "Next": "ContinueNode",
             },
             "ContinueNode": {"Type": "Skill", "Skill": "Place", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) > 0
     assert any("wait_missing_timeout" in e.id for e in errors)
@@ -273,9 +279,9 @@ def test_valid_linear_workflow():
                 "Parameters": {"destination": "slot-1"},
                 "End": True,
             },
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) == 0
 
@@ -299,9 +305,9 @@ def test_valid_condition_workflow():
             },
             "StateA": {"Type": "Skill", "Skill": "Pick", "End": True},
             "StateB": {"Type": "Skill", "Skill": "Place", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) == 0
 
@@ -317,22 +323,30 @@ def test_valid_parallel_workflow():
                     {
                         "StartAt": "Branch1Start",
                         "States": {
-                            "Branch1Start": {"Type": "Skill", "Skill": "Pick", "End": True},
-                        }
+                            "Branch1Start": {
+                                "Type": "Skill",
+                                "Skill": "Pick",
+                                "End": True,
+                            },
+                        },
                     },
                     {
                         "StartAt": "Branch2Start",
                         "States": {
-                            "Branch2Start": {"Type": "Skill", "Skill": "Place", "End": True},
-                        }
+                            "Branch2Start": {
+                                "Type": "Skill",
+                                "Skill": "Place",
+                                "End": True,
+                            },
+                        },
                     },
                 ],
                 "Next": "JoinNode",
             },
             "JoinNode": {"Type": "Skill", "Skill": "Process", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) == 0
 
@@ -357,8 +371,8 @@ def test_valid_wait_workflow():
                 "Next": "ContinueNode",
             },
             "ContinueNode": {"Type": "Skill", "Skill": "Place", "End": True},
-        }
+        },
     }
-    
+
     errors = validate_workflow_dsl(dsl)
     assert len(errors) == 0

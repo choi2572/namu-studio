@@ -1,33 +1,34 @@
 """Deterministic seed data for in-memory repositories."""
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
 
 from app.domain.models import (
-    Workflow,
-    WorkflowVersion,
-    WorkflowView,
-    WorkflowState,
-    VersionState,
-    Run,
     NodeRun,
+    NodeStatus,
+    Run,
     RunEvent,
     RunStatus,
-    NodeStatus,
+    VersionState,
+    Workflow,
+    WorkflowState,
+    WorkflowVersion,
+    WorkflowView,
 )
 from app.repos.interfaces import (
+    NodeRunRepository,
+    RunEventRepository,
+    RunRepository,
     WorkflowRepository,
     WorkflowVersionRepository,
     WorkflowViewRepository,
-    RunRepository,
-    NodeRunRepository,
-    RunEventRepository,
 )
 
 
 @dataclass(frozen=True)
 class SeedIds:
     """Stable IDs used across seeded data."""
+
     workflow_draft_id: str = "wf-seed-draft"
     workflow_published_id: str = "wf-seed-published"
     workflow_condition_parallel_id: str = "wf-seed-condition-parallel"
@@ -235,10 +236,10 @@ DRAFT_VIEW = {
 def seed_data(
     workflow_repo: WorkflowRepository,
     version_repo: WorkflowVersionRepository,
-    view_repo: Optional[WorkflowViewRepository] = None,
-    run_repo: Optional[RunRepository] = None,
-    node_run_repo: Optional[NodeRunRepository] = None,
-    run_event_repo: Optional[RunEventRepository] = None,
+    view_repo: WorkflowViewRepository | None = None,
+    run_repo: RunRepository | None = None,
+    node_run_repo: NodeRunRepository | None = None,
+    run_event_repo: RunEventRepository | None = None,
     reset: bool = False,
 ) -> SeedIds:
     """Seed deterministic data into repositories."""
@@ -269,10 +270,10 @@ def seed_data(
 def _reset_repositories(
     workflow_repo: WorkflowRepository,
     version_repo: WorkflowVersionRepository,
-    view_repo: Optional[WorkflowViewRepository],
-    run_repo: Optional[RunRepository],
-    node_run_repo: Optional[NodeRunRepository],
-    run_event_repo: Optional[RunEventRepository],
+    view_repo: WorkflowViewRepository | None,
+    run_repo: RunRepository | None,
+    node_run_repo: NodeRunRepository | None,
+    run_event_repo: RunEventRepository | None,
 ) -> None:
     for repo in (
         workflow_repo,
@@ -292,7 +293,7 @@ def _reset_repositories(
 def _seed_workflows(
     workflow_repo: WorkflowRepository,
     version_repo: WorkflowVersionRepository,
-    view_repo: Optional[WorkflowViewRepository],
+    view_repo: WorkflowViewRepository | None,
 ) -> None:
     draft_created = SEED_BASE_TIME + timedelta(minutes=5)
     draft_updated = SEED_BASE_TIME + timedelta(minutes=8)
@@ -300,57 +301,67 @@ def _seed_workflows(
     published_updated = SEED_BASE_TIME + timedelta(minutes=18)
 
     if not workflow_repo.get(SEED_IDS.workflow_draft_id):
-        workflow_repo.create(Workflow(
-            workflow_id=SEED_IDS.workflow_draft_id,
-            name="Seeded Draft Workflow",
-            description="Draft workflow for local development.",
-            state=WorkflowState.DRAFT,
-            current_published_version_id=None,
-            created_at=draft_created,
-            updated_at=draft_updated,
-        ))
+        workflow_repo.create(
+            Workflow(
+                workflow_id=SEED_IDS.workflow_draft_id,
+                name="Seeded Draft Workflow",
+                description="Draft workflow for local development.",
+                state=WorkflowState.DRAFT,
+                current_published_version_id=None,
+                created_at=draft_created,
+                updated_at=draft_updated,
+            )
+        )
 
     if not version_repo.get(SEED_IDS.draft_version_id):
-        version_repo.create(WorkflowVersion(
-            version_id=SEED_IDS.draft_version_id,
-            workflow_id=SEED_IDS.workflow_draft_id,
-            version_number="v1",
-            state=VersionState.DRAFT,
-            dsl_json=DRAFT_DSL,
-            created_at=draft_created + timedelta(minutes=2),
-            published_at=None,
-        ))
+        version_repo.create(
+            WorkflowVersion(
+                version_id=SEED_IDS.draft_version_id,
+                workflow_id=SEED_IDS.workflow_draft_id,
+                version_number="v1",
+                state=VersionState.DRAFT,
+                dsl_json=DRAFT_DSL,
+                created_at=draft_created + timedelta(minutes=2),
+                published_at=None,
+            )
+        )
 
     if view_repo and not view_repo.get(SEED_IDS.draft_version_id):
-        view_repo.save(WorkflowView(
-            version_id=SEED_IDS.draft_version_id,
-            view_json=DRAFT_VIEW,
-            created_at=draft_created + timedelta(minutes=3),
-            updated_at=draft_updated,
-        ))
+        view_repo.save(
+            WorkflowView(
+                version_id=SEED_IDS.draft_version_id,
+                view_json=DRAFT_VIEW,
+                created_at=draft_created + timedelta(minutes=3),
+                updated_at=draft_updated,
+            )
+        )
 
     # Create published workflow BEFORE creating its version (for foreign key constraint)
     if not workflow_repo.get(SEED_IDS.workflow_published_id):
-        workflow_repo.create(Workflow(
-            workflow_id=SEED_IDS.workflow_published_id,
-            name="Seeded Published Workflow",
-            description="Published workflow with sample runs.",
-            state=WorkflowState.PUBLISHED,
-            current_published_version_id=None,  # Will be set after version is created
-            created_at=published_created,
-            updated_at=published_updated,
-        ))
+        workflow_repo.create(
+            Workflow(
+                workflow_id=SEED_IDS.workflow_published_id,
+                name="Seeded Published Workflow",
+                description="Published workflow with sample runs.",
+                state=WorkflowState.PUBLISHED,
+                current_published_version_id=None,  # Will be set after version is created
+                created_at=published_created,
+                updated_at=published_updated,
+            )
+        )
 
     if not version_repo.get(SEED_IDS.published_version_id):
-        version_repo.create(WorkflowVersion(
-            version_id=SEED_IDS.published_version_id,
-            workflow_id=SEED_IDS.workflow_published_id,
-            version_number="v1",
-            state=VersionState.PUBLISHED,
-            dsl_json=PUBLISHED_DSL,
-            created_at=published_created + timedelta(minutes=2),
-            published_at=published_created + timedelta(minutes=4),
-        ))
+        version_repo.create(
+            WorkflowVersion(
+                version_id=SEED_IDS.published_version_id,
+                workflow_id=SEED_IDS.workflow_published_id,
+                version_number="v1",
+                state=VersionState.PUBLISHED,
+                dsl_json=PUBLISHED_DSL,
+                created_at=published_created + timedelta(minutes=2),
+                published_at=published_created + timedelta(minutes=4),
+            )
+        )
         # Update workflow with published version ID
         workflow = workflow_repo.get(SEED_IDS.workflow_published_id)
         if workflow:
@@ -358,86 +369,100 @@ def _seed_workflows(
             workflow_repo.update(workflow)
 
     if view_repo and not view_repo.get(SEED_IDS.published_version_id):
-        view_repo.save(WorkflowView(
-            version_id=SEED_IDS.published_version_id,
-            view_json=PUBLISHED_VIEW,
-            created_at=published_created + timedelta(minutes=3),
-            updated_at=published_updated,
-        ))
-    
+        view_repo.save(
+            WorkflowView(
+                version_id=SEED_IDS.published_version_id,
+                view_json=PUBLISHED_VIEW,
+                created_at=published_created + timedelta(minutes=3),
+                updated_at=published_updated,
+            )
+        )
+
     # Seed Condition + Parallel workflow
     # Create workflow BEFORE creating its version (for foreign key constraint)
     if not workflow_repo.get(SEED_IDS.workflow_condition_parallel_id):
-        workflow_repo.create(Workflow(
-            workflow_id=SEED_IDS.workflow_condition_parallel_id,
-            name="Seeded Condition + Parallel Workflow",
-            description="Published workflow with Condition and Parallel states.",
-            state=WorkflowState.PUBLISHED,
-            current_published_version_id=None,  # Will be set after version is created
-            created_at=published_created + timedelta(hours=1),
-            updated_at=published_updated + timedelta(hours=1),
-        ))
-    
+        workflow_repo.create(
+            Workflow(
+                workflow_id=SEED_IDS.workflow_condition_parallel_id,
+                name="Seeded Condition + Parallel Workflow",
+                description="Published workflow with Condition and Parallel states.",
+                state=WorkflowState.PUBLISHED,
+                current_published_version_id=None,  # Will be set after version is created
+                created_at=published_created + timedelta(hours=1),
+                updated_at=published_updated + timedelta(hours=1),
+            )
+        )
+
     if not version_repo.get(SEED_IDS.condition_parallel_version_id):
-        version_repo.create(WorkflowVersion(
-            version_id=SEED_IDS.condition_parallel_version_id,
-            workflow_id=SEED_IDS.workflow_condition_parallel_id,
-            version_number="v1",
-            state=VersionState.PUBLISHED,
-            dsl_json=CONDITION_PARALLEL_DSL,
-            created_at=published_created + timedelta(hours=1, minutes=2),
-            published_at=published_created + timedelta(hours=1, minutes=4),
-        ))
+        version_repo.create(
+            WorkflowVersion(
+                version_id=SEED_IDS.condition_parallel_version_id,
+                workflow_id=SEED_IDS.workflow_condition_parallel_id,
+                version_number="v1",
+                state=VersionState.PUBLISHED,
+                dsl_json=CONDITION_PARALLEL_DSL,
+                created_at=published_created + timedelta(hours=1, minutes=2),
+                published_at=published_created + timedelta(hours=1, minutes=4),
+            )
+        )
         # Update workflow with published version ID
         workflow = workflow_repo.get(SEED_IDS.workflow_condition_parallel_id)
         if workflow:
             workflow.current_published_version_id = SEED_IDS.condition_parallel_version_id
             workflow_repo.update(workflow)
-    
+
     if view_repo and not view_repo.get(SEED_IDS.condition_parallel_version_id):
-        view_repo.save(WorkflowView(
-            version_id=SEED_IDS.condition_parallel_version_id,
-            view_json={},  # Empty view for now
-            created_at=published_created + timedelta(hours=1, minutes=3),
-            updated_at=published_updated + timedelta(hours=1),
-        ))
-    
+        view_repo.save(
+            WorkflowView(
+                version_id=SEED_IDS.condition_parallel_version_id,
+                view_json={},  # Empty view for now
+                created_at=published_created + timedelta(hours=1, minutes=3),
+                updated_at=published_updated + timedelta(hours=1),
+            )
+        )
+
     # Seed Wait workflow
     # Create workflow BEFORE creating its version (for foreign key constraint)
     if not workflow_repo.get(SEED_IDS.workflow_wait_id):
-        workflow_repo.create(Workflow(
-            workflow_id=SEED_IDS.workflow_wait_id,
-            name="Seeded Wait Workflow",
-            description="Published workflow with Wait state.",
-            state=WorkflowState.PUBLISHED,
-            current_published_version_id=None,  # Will be set after version is created
-            created_at=published_created + timedelta(hours=2),
-            updated_at=published_updated + timedelta(hours=2),
-        ))
-    
+        workflow_repo.create(
+            Workflow(
+                workflow_id=SEED_IDS.workflow_wait_id,
+                name="Seeded Wait Workflow",
+                description="Published workflow with Wait state.",
+                state=WorkflowState.PUBLISHED,
+                current_published_version_id=None,  # Will be set after version is created
+                created_at=published_created + timedelta(hours=2),
+                updated_at=published_updated + timedelta(hours=2),
+            )
+        )
+
     if not version_repo.get(SEED_IDS.wait_version_id):
-        version_repo.create(WorkflowVersion(
-            version_id=SEED_IDS.wait_version_id,
-            workflow_id=SEED_IDS.workflow_wait_id,
-            version_number="v1",
-            state=VersionState.PUBLISHED,
-            dsl_json=WAIT_DSL,
-            created_at=published_created + timedelta(hours=2, minutes=2),
-            published_at=published_created + timedelta(hours=2, minutes=4),
-        ))
+        version_repo.create(
+            WorkflowVersion(
+                version_id=SEED_IDS.wait_version_id,
+                workflow_id=SEED_IDS.workflow_wait_id,
+                version_number="v1",
+                state=VersionState.PUBLISHED,
+                dsl_json=WAIT_DSL,
+                created_at=published_created + timedelta(hours=2, minutes=2),
+                published_at=published_created + timedelta(hours=2, minutes=4),
+            )
+        )
         # Update workflow with published version ID
         workflow = workflow_repo.get(SEED_IDS.workflow_wait_id)
         if workflow:
             workflow.current_published_version_id = SEED_IDS.wait_version_id
             workflow_repo.update(workflow)
-    
+
     if view_repo and not view_repo.get(SEED_IDS.wait_version_id):
-        view_repo.save(WorkflowView(
-            version_id=SEED_IDS.wait_version_id,
-            view_json={},  # Empty view for now
-            created_at=published_created + timedelta(hours=2, minutes=3),
-            updated_at=published_updated + timedelta(hours=2),
-        ))
+        view_repo.save(
+            WorkflowView(
+                version_id=SEED_IDS.wait_version_id,
+                view_json={},  # Empty view for now
+                created_at=published_created + timedelta(hours=2, minutes=3),
+                updated_at=published_updated + timedelta(hours=2),
+            )
+        )
 
 
 def _seed_runs(
@@ -456,37 +481,53 @@ def _seed_runs(
     failed_finished = failed_started + timedelta(minutes=1)
 
     if not run_repo.get(SEED_IDS.run_success_id):
-        run_repo.create(Run(
-            run_id=SEED_IDS.run_success_id,
-            workflow_id=SEED_IDS.workflow_published_id,
-            version_id=SEED_IDS.published_version_id,
-            trigger_type="MANUAL",
-            run_input_json={"source": "seed", "requestedBy": "local"},
-            status=RunStatus.SUCCESS,
-            started_at=success_started,
-            finished_at=success_finished,
-            created_at=success_created,
-            updated_at=success_finished,
-        ))
+        run_repo.create(
+            Run(
+                run_id=SEED_IDS.run_success_id,
+                workflow_id=SEED_IDS.workflow_published_id,
+                version_id=SEED_IDS.published_version_id,
+                trigger_type="MANUAL",
+                run_input_json={"source": "seed", "requestedBy": "local"},
+                status=RunStatus.SUCCESS,
+                started_at=success_started,
+                finished_at=success_finished,
+                created_at=success_created,
+                updated_at=success_finished,
+            )
+        )
 
     if not run_repo.get(SEED_IDS.run_failed_id):
-        run_repo.create(Run(
-            run_id=SEED_IDS.run_failed_id,
-            workflow_id=SEED_IDS.workflow_published_id,
-            version_id=SEED_IDS.published_version_id,
-            trigger_type="MANUAL",
-            run_input_json={"source": "seed", "requestedBy": "local"},
-            status=RunStatus.FAILED,
-            failure_code=SEED_FAILURE_CODE,
-            failure_message=SEED_FAILURE_MESSAGE,
-            started_at=failed_started,
-            finished_at=failed_finished,
-            created_at=failed_created,
-            updated_at=failed_finished,
-        ))
+        run_repo.create(
+            Run(
+                run_id=SEED_IDS.run_failed_id,
+                workflow_id=SEED_IDS.workflow_published_id,
+                version_id=SEED_IDS.published_version_id,
+                trigger_type="MANUAL",
+                run_input_json={"source": "seed", "requestedBy": "local"},
+                status=RunStatus.FAILED,
+                failure_code=SEED_FAILURE_CODE,
+                failure_message=SEED_FAILURE_MESSAGE,
+                started_at=failed_started,
+                finished_at=failed_finished,
+                created_at=failed_created,
+                updated_at=failed_finished,
+            )
+        )
 
-    _seed_node_runs(node_run_repo, success_started, success_finished, failed_started, failed_finished)
-    _seed_events(run_event_repo, success_started, success_finished, failed_started, failed_finished)
+    _seed_node_runs(
+        node_run_repo,
+        success_started,
+        success_finished,
+        failed_started,
+        failed_finished,
+    )
+    _seed_events(
+        run_event_repo,
+        success_started,
+        success_finished,
+        failed_started,
+        failed_finished,
+    )
 
 
 def _seed_node_runs(
@@ -502,66 +543,74 @@ def _seed_node_runs(
     failed_node_id = f"{SEED_IDS.run_failed_id}-{SEED_IDS.node_transform_state}"
 
     if not node_run_repo.get(fetch_id):
-        node_run_repo.create(NodeRun(
-            node_run_id=fetch_id,
-            run_id=SEED_IDS.run_success_id,
-            state_name=SEED_IDS.node_fetch_state,
-            node_type="Task",
-            status=NodeStatus.SUCCEEDED,
-            started_at=success_started,
-            finished_at=success_started + timedelta(seconds=30),
-            duration_ms=30000,
-            input_json={"source": "seed", "path": "/tmp/input.csv"},
-            output_json={"rows": 128, "checksum": "abc123"},
-            feedback_json={"warnings": []},
-            decision_json={"cached": False},
-        ))
+        node_run_repo.create(
+            NodeRun(
+                node_run_id=fetch_id,
+                run_id=SEED_IDS.run_success_id,
+                state_name=SEED_IDS.node_fetch_state,
+                node_type="Task",
+                status=NodeStatus.SUCCEEDED,
+                started_at=success_started,
+                finished_at=success_started + timedelta(seconds=30),
+                duration_ms=30000,
+                input_json={"source": "seed", "path": "/tmp/input.csv"},
+                output_json={"rows": 128, "checksum": "abc123"},
+                feedback_json={"warnings": []},
+                decision_json={"cached": False},
+            )
+        )
 
     if not node_run_repo.get(transform_id):
-        node_run_repo.create(NodeRun(
-            node_run_id=transform_id,
-            run_id=SEED_IDS.run_success_id,
-            state_name=SEED_IDS.node_transform_state,
-            node_type="Task",
-            status=NodeStatus.SUCCEEDED,
-            started_at=success_started + timedelta(seconds=35),
-            finished_at=success_started + timedelta(seconds=75),
-            duration_ms=40000,
-            input_json={"rows": 128},
-            output_json={"rows": 120, "quality": "ok"},
-            feedback_json={"notes": ["normalized values"]},
-            decision_json={"retry": False},
-        ))
+        node_run_repo.create(
+            NodeRun(
+                node_run_id=transform_id,
+                run_id=SEED_IDS.run_success_id,
+                state_name=SEED_IDS.node_transform_state,
+                node_type="Task",
+                status=NodeStatus.SUCCEEDED,
+                started_at=success_started + timedelta(seconds=35),
+                finished_at=success_started + timedelta(seconds=75),
+                duration_ms=40000,
+                input_json={"rows": 128},
+                output_json={"rows": 120, "quality": "ok"},
+                feedback_json={"notes": ["normalized values"]},
+                decision_json={"retry": False},
+            )
+        )
 
     if not node_run_repo.get(process_id):
-        node_run_repo.create(NodeRun(
-            node_run_id=process_id,
-            run_id=SEED_IDS.run_success_id,
-            state_name=SEED_IDS.node_process_state,
-            node_type="Task",
-            status=NodeStatus.SUCCEEDED,
-            started_at=success_started + timedelta(seconds=80),
-            finished_at=success_finished,
-            duration_ms=int((success_finished - (success_started + timedelta(seconds=80))).total_seconds() * 1000),
-            input_json={"rows": 120},
-            output_json={"processed": 120, "status": "complete"},
-            feedback_json={"summary": "seeded run complete"},
-        ))
+        node_run_repo.create(
+            NodeRun(
+                node_run_id=process_id,
+                run_id=SEED_IDS.run_success_id,
+                state_name=SEED_IDS.node_process_state,
+                node_type="Task",
+                status=NodeStatus.SUCCEEDED,
+                started_at=success_started + timedelta(seconds=80),
+                finished_at=success_finished,
+                duration_ms=int((success_finished - (success_started + timedelta(seconds=80))).total_seconds() * 1000),
+                input_json={"rows": 120},
+                output_json={"processed": 120, "status": "complete"},
+                feedback_json={"summary": "seeded run complete"},
+            )
+        )
 
     if not node_run_repo.get(failed_node_id):
-        node_run_repo.create(NodeRun(
-            node_run_id=failed_node_id,
-            run_id=SEED_IDS.run_failed_id,
-            state_name=SEED_IDS.node_transform_state,
-            node_type="Task",
-            status=NodeStatus.FAILED,
-            started_at=failed_started,
-            finished_at=failed_finished,
-            duration_ms=int((failed_finished - failed_started).total_seconds() * 1000),
-            input_json={"rows": 64},
-            output_json=None,
-            feedback_json={"error": "ValidationError", "field": "quality"},
-        ))
+        node_run_repo.create(
+            NodeRun(
+                node_run_id=failed_node_id,
+                run_id=SEED_IDS.run_failed_id,
+                state_name=SEED_IDS.node_transform_state,
+                node_type="Task",
+                status=NodeStatus.FAILED,
+                started_at=failed_started,
+                finished_at=failed_finished,
+                duration_ms=int((failed_finished - failed_started).total_seconds() * 1000),
+                input_json={"rows": 64},
+                output_json=None,
+                feedback_json={"error": "ValidationError", "field": "quality"},
+            )
+        )
 
 
 def _seed_events(
@@ -573,24 +622,79 @@ def _seed_events(
 ) -> None:
     if not run_event_repo.get_by_run(SEED_IDS.run_success_id):
         success_events = [
-            ("RUN_CREATED", None, {"runId": SEED_IDS.run_success_id}, success_started - timedelta(seconds=5)),
+            (
+                "RUN_CREATED",
+                None,
+                {"runId": SEED_IDS.run_success_id},
+                success_started - timedelta(seconds=5),
+            ),
             ("RUN_STARTED", None, {"runId": SEED_IDS.run_success_id}, success_started),
-            ("NODE_STARTED", SEED_IDS.node_fetch_state, {"node": SEED_IDS.node_fetch_state}, success_started + timedelta(seconds=5)),
-            ("NODE_SUCCEEDED", SEED_IDS.node_fetch_state, {"node": SEED_IDS.node_fetch_state}, success_started + timedelta(seconds=30)),
-            ("NODE_STARTED", SEED_IDS.node_transform_state, {"node": SEED_IDS.node_transform_state}, success_started + timedelta(seconds=35)),
-            ("NODE_SUCCEEDED", SEED_IDS.node_transform_state, {"node": SEED_IDS.node_transform_state}, success_started + timedelta(seconds=75)),
-            ("NODE_STARTED", SEED_IDS.node_process_state, {"node": SEED_IDS.node_process_state}, success_started + timedelta(seconds=80)),
-            ("NODE_SUCCEEDED", SEED_IDS.node_process_state, {"node": SEED_IDS.node_process_state}, success_started + timedelta(seconds=170)),
-            ("RUN_SUCCEEDED", None, {"runId": SEED_IDS.run_success_id}, success_finished),
+            (
+                "NODE_STARTED",
+                SEED_IDS.node_fetch_state,
+                {"node": SEED_IDS.node_fetch_state},
+                success_started + timedelta(seconds=5),
+            ),
+            (
+                "NODE_SUCCEEDED",
+                SEED_IDS.node_fetch_state,
+                {"node": SEED_IDS.node_fetch_state},
+                success_started + timedelta(seconds=30),
+            ),
+            (
+                "NODE_STARTED",
+                SEED_IDS.node_transform_state,
+                {"node": SEED_IDS.node_transform_state},
+                success_started + timedelta(seconds=35),
+            ),
+            (
+                "NODE_SUCCEEDED",
+                SEED_IDS.node_transform_state,
+                {"node": SEED_IDS.node_transform_state},
+                success_started + timedelta(seconds=75),
+            ),
+            (
+                "NODE_STARTED",
+                SEED_IDS.node_process_state,
+                {"node": SEED_IDS.node_process_state},
+                success_started + timedelta(seconds=80),
+            ),
+            (
+                "NODE_SUCCEEDED",
+                SEED_IDS.node_process_state,
+                {"node": SEED_IDS.node_process_state},
+                success_started + timedelta(seconds=170),
+            ),
+            (
+                "RUN_SUCCEEDED",
+                None,
+                {"runId": SEED_IDS.run_success_id},
+                success_finished,
+            ),
         ]
         _create_events(SEED_IDS.run_success_id, success_events, run_event_repo)
 
     if not run_event_repo.get_by_run(SEED_IDS.run_failed_id):
         failed_events = [
-            ("RUN_CREATED", None, {"runId": SEED_IDS.run_failed_id}, failed_started - timedelta(seconds=5)),
+            (
+                "RUN_CREATED",
+                None,
+                {"runId": SEED_IDS.run_failed_id},
+                failed_started - timedelta(seconds=5),
+            ),
             ("RUN_STARTED", None, {"runId": SEED_IDS.run_failed_id}, failed_started),
-            ("NODE_STARTED", SEED_IDS.node_transform_state, {"node": SEED_IDS.node_transform_state}, failed_started + timedelta(seconds=3)),
-            ("NODE_FAILED", SEED_IDS.node_transform_state, {"node": SEED_IDS.node_transform_state}, failed_started + timedelta(seconds=30)),
+            (
+                "NODE_STARTED",
+                SEED_IDS.node_transform_state,
+                {"node": SEED_IDS.node_transform_state},
+                failed_started + timedelta(seconds=3),
+            ),
+            (
+                "NODE_FAILED",
+                SEED_IDS.node_transform_state,
+                {"node": SEED_IDS.node_transform_state},
+                failed_started + timedelta(seconds=30),
+            ),
             ("RUN_FAILED", None, {"reason": SEED_FAILURE_MESSAGE}, failed_finished),
         ]
         _create_events(SEED_IDS.run_failed_id, failed_events, run_event_repo)
@@ -602,13 +706,15 @@ def _create_events(
     run_event_repo: RunEventRepository,
 ) -> None:
     for seq, (event_type, state_name, payload, timestamp) in enumerate(events, start=1):
-        run_event_repo.create(RunEvent(
-            event_id=f"{run_id}-event-{seq}",
-            run_id=run_id,
-            seq=seq,
-            timestamp=timestamp,
-            event_type=event_type,
-            state_name=state_name,
-            payload_json=payload,
-            created_at=timestamp,
-        ))
+        run_event_repo.create(
+            RunEvent(
+                event_id=f"{run_id}-event-{seq}",
+                run_id=run_id,
+                seq=seq,
+                timestamp=timestamp,
+                event_type=event_type,
+                state_name=state_name,
+                payload_json=payload,
+                created_at=timestamp,
+            )
+        )

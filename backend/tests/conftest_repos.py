@@ -1,25 +1,27 @@
 """Repository fixtures for parametrized tests."""
-import pytest
+
 import os
 from pathlib import Path
 
+import pytest
+
+from app.db import close_db, init_db
 from app.repos.memory import (
+    InMemoryNodeRunRepository,
+    InMemoryRunEventRepository,
+    InMemoryRunRepository,
     InMemoryWorkflowRepository,
     InMemoryWorkflowVersionRepository,
     InMemoryWorkflowViewRepository,
-    InMemoryRunRepository,
-    InMemoryNodeRunRepository,
-    InMemoryRunEventRepository,
 )
 from app.repos.sqlite import (
+    NodeRunRepositorySqlite,
+    RunEventRepositorySqlite,
+    RunRepositorySqlite,
     WorkflowRepositorySqlite,
     WorkflowVersionRepositorySqlite,
     WorkflowViewRepositorySqlite,
-    RunRepositorySqlite,
-    NodeRunRepositorySqlite,
-    RunEventRepositorySqlite,
 )
-from app.db import init_db, close_db
 
 
 @pytest.fixture(params=["inmemory", "sqlite"])
@@ -34,7 +36,7 @@ def db_path(repo_backend, tmp_path):
     if repo_backend == "sqlite":
         db_path = str(tmp_path / "test.db")
         os.environ["DB_PATH"] = db_path
-        from app.db.connection import get_db
+
         init_db()
         yield db_path
         close_db()

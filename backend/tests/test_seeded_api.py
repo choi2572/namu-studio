@@ -1,4 +1,5 @@
 """API tests for deterministic seed data."""
+
 from app.seed import SEED_FAILURE_CODE, SEED_FAILURE_MESSAGE
 
 
@@ -40,9 +41,7 @@ def test_seeded_events_pagination(seeded_client, seeded_data):
     assert len(events) > 1
 
     first_seq = events[0]["seq"]
-    response = seeded_client.get(
-        f"/api/runs/{seeded_data.run_success_id}/events?afterSeq={first_seq}"
-    )
+    response = seeded_client.get(f"/api/runs/{seeded_data.run_success_id}/events?afterSeq={first_seq}")
     assert response.status_code == 200
     later_events = response.get_json()
 
@@ -52,9 +51,7 @@ def test_seeded_events_pagination(seeded_client, seeded_data):
 
 def test_seeded_node_debug_bundle(seeded_client, seeded_data):
     """Node debug endpoint returns seeded debug bundle."""
-    response = seeded_client.get(
-        f"/api/runs/{seeded_data.run_success_id}/nodes/{seeded_data.node_fetch_state}/debug"
-    )
+    response = seeded_client.get(f"/api/runs/{seeded_data.run_success_id}/nodes/{seeded_data.node_fetch_state}/debug")
     assert response.status_code == 200
     payload = response.get_json()
 

@@ -2,6 +2,7 @@
 Mock middleware server: REST (workflow run, runner status, workflow info) + WebSocket (monitor).
 Run: python -m mock_middleware.app (from backend dir) or flask --app mock_middleware.app run -p 8000
 """
+
 import json
 import logging
 import os
@@ -9,12 +10,12 @@ import threading
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from .runner import get_execution_order, get_branch_order
+from .runner import get_branch_order, get_execution_order
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ _state = {
     "cancelled": False,
     "lock": threading.Lock(),
 }
-_ws_clients: Set[Any] = set()
+_ws_clients: set[Any] = set()
 _ws_clients_lock = threading.Lock()
 
 
@@ -43,8 +44,8 @@ def _patch_latest_running_history(
     *,
     status: str,
     completed_at: str,
-    duration_ms: Optional[int] = None,
-    output: Optional[Dict[str, Any]] = None,
+    duration_ms: int | None = None,
+    output: dict[str, Any] | None = None,
 ) -> None:
     """Repeat 등으로 동일 state_name이 연속 실행될 때, 가장 최근 RUNNING 행만 완료 처리한다."""
     for n in reversed(_state["node_history"]):
@@ -58,7 +59,7 @@ def _patch_latest_running_history(
             break
 
 
-def _broadcast(data: Dict[str, Any]) -> None:
+def _broadcast(data: dict[str, Any]) -> None:
     msg = json.dumps(data)
     with _ws_clients_lock:
         dead = []
@@ -76,7 +77,7 @@ def _vlm_dynamic_patch_enabled() -> bool:
     return os.environ.get("MOCK_VLM_DYNAMIC_PATCH", "").strip().lower() in ("true", "1")
 
 
-def _build_mock_graph_patch(workflow_id: str, after_node_name: str) -> Dict[str, Any]:
+def _build_mock_graph_patch(workflow_id: str, after_node_name: str) -> dict[str, Any]:
     """Legacy: single static graph_patch. Used when MOCK_VLM_DYNAMIC_PATCH is on but not using the full scenario."""
     ts = int(datetime.now(timezone.utc).timestamp())
     return {
@@ -114,7 +115,7 @@ def _build_mock_graph_patch(workflow_id: str, after_node_name: str) -> Dict[str,
 _CONTAINER_PATH = "root/VLMPlanner_1/generated"
 
 
-def _build_vlm_scenario_patch_1(workflow_id: str) -> Dict[str, Any]:
+def _build_vlm_scenario_patch_1(workflow_id: str) -> dict[str, Any]:
     """First DAG: Pick1 → Place1 → Pick2 → Place2."""
     return {
         "type": "graph_patch",
@@ -123,10 +124,34 @@ def _build_vlm_scenario_patch_1(workflow_id: str) -> Dict[str, Any]:
         "rev": 1,
         "target": {"container_path": _CONTAINER_PATH},
         "nodes_added": [
-            {"node_name": "Pick1", "node_type": "Skill", "skill": "Pick", "ui": {"x": 80, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
-            {"node_name": "Place1", "node_type": "Skill", "skill": "Place", "ui": {"x": 240, "y": 200}, "parameters": {"destination": "bin_a"}},
-            {"node_name": "Pick2", "node_type": "Skill", "skill": "Pick", "ui": {"x": 400, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
-            {"node_name": "Place2", "node_type": "Skill", "skill": "Place", "ui": {"x": 560, "y": 200}, "parameters": {"destination": "bin_b"}},
+            {
+                "node_name": "Pick1",
+                "node_type": "Skill",
+                "skill": "Pick",
+                "ui": {"x": 80, "y": 200},
+                "parameters": {"target": "$.Inputs.bolt"},
+            },
+            {
+                "node_name": "Place1",
+                "node_type": "Skill",
+                "skill": "Place",
+                "ui": {"x": 240, "y": 200},
+                "parameters": {"destination": "bin_a"},
+            },
+            {
+                "node_name": "Pick2",
+                "node_type": "Skill",
+                "skill": "Pick",
+                "ui": {"x": 400, "y": 200},
+                "parameters": {"target": "$.Inputs.bolt"},
+            },
+            {
+                "node_name": "Place2",
+                "node_type": "Skill",
+                "skill": "Place",
+                "ui": {"x": 560, "y": 200},
+                "parameters": {"destination": "bin_b"},
+            },
         ],
         "edges_added": [
             {"from": "Pick1", "to": "Place1", "label": ""},
@@ -137,7 +162,7 @@ def _build_vlm_scenario_patch_1(workflow_id: str) -> Dict[str, Any]:
     }
 
 
-def _build_vlm_scenario_patch_2(workflow_id: str) -> Dict[str, Any]:
+def _build_vlm_scenario_patch_2(workflow_id: str) -> dict[str, Any]:
     """Append: Pick3 → Pick4 after Place2 (second pick starting ~)."""
     return {
         "type": "graph_patch",
@@ -146,8 +171,20 @@ def _build_vlm_scenario_patch_2(workflow_id: str) -> Dict[str, Any]:
         "rev": 2,
         "target": {"container_path": _CONTAINER_PATH},
         "nodes_added": [
-            {"node_name": "Pick3", "node_type": "Skill", "skill": "Pick", "ui": {"x": 720, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
-            {"node_name": "Pick4", "node_type": "Skill", "skill": "Pick", "ui": {"x": 880, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
+            {
+                "node_name": "Pick3",
+                "node_type": "Skill",
+                "skill": "Pick",
+                "ui": {"x": 720, "y": 200},
+                "parameters": {"target": "$.Inputs.bolt"},
+            },
+            {
+                "node_name": "Pick4",
+                "node_type": "Skill",
+                "skill": "Pick",
+                "ui": {"x": 880, "y": 200},
+                "parameters": {"target": "$.Inputs.bolt"},
+            },
         ],
         "edges_added": [
             {"from": "Place2", "to": "Pick3", "label": ""},
@@ -156,7 +193,7 @@ def _build_vlm_scenario_patch_2(workflow_id: str) -> Dict[str, Any]:
     }
 
 
-def _build_vlm_scenario_patch_3(workflow_id: str) -> Dict[str, Any]:
+def _build_vlm_scenario_patch_3(workflow_id: str) -> dict[str, Any]:
     """After two picks: Place3 → Place4 → Place5."""
     return {
         "type": "graph_patch",
@@ -165,9 +202,27 @@ def _build_vlm_scenario_patch_3(workflow_id: str) -> Dict[str, Any]:
         "rev": 3,
         "target": {"container_path": _CONTAINER_PATH},
         "nodes_added": [
-            {"node_name": "Place3", "node_type": "Skill", "skill": "Place", "ui": {"x": 1040, "y": 200}, "parameters": {"destination": "bin_a"}},
-            {"node_name": "Place4", "node_type": "Skill", "skill": "Place", "ui": {"x": 1200, "y": 200}, "parameters": {"destination": "bin_b"}},
-            {"node_name": "Place5", "node_type": "Skill", "skill": "Place", "ui": {"x": 1360, "y": 200}, "parameters": {"destination": "bin_c"}},
+            {
+                "node_name": "Place3",
+                "node_type": "Skill",
+                "skill": "Place",
+                "ui": {"x": 1040, "y": 200},
+                "parameters": {"destination": "bin_a"},
+            },
+            {
+                "node_name": "Place4",
+                "node_type": "Skill",
+                "skill": "Place",
+                "ui": {"x": 1200, "y": 200},
+                "parameters": {"destination": "bin_b"},
+            },
+            {
+                "node_name": "Place5",
+                "node_type": "Skill",
+                "skill": "Place",
+                "ui": {"x": 1360, "y": 200},
+                "parameters": {"destination": "bin_c"},
+            },
         ],
         "edges_added": [
             {"from": "Pick4", "to": "Place3", "label": ""},
@@ -177,7 +232,7 @@ def _build_vlm_scenario_patch_3(workflow_id: str) -> Dict[str, Any]:
     }
 
 
-def _build_vlm_scenario_patch_4(workflow_id: str) -> Dict[str, Any]:
+def _build_vlm_scenario_patch_4(workflow_id: str) -> dict[str, Any]:
     """Replan: remove Place4, Place5; add Pick5 → Pick6 → Place6 after Place3."""
     return {
         "type": "graph_patch",
@@ -187,9 +242,27 @@ def _build_vlm_scenario_patch_4(workflow_id: str) -> Dict[str, Any]:
         "target": {"container_path": _CONTAINER_PATH},
         "nodes_removed": ["Place4", "Place5"],
         "nodes_added": [
-            {"node_name": "Pick5", "node_type": "Skill", "skill": "Pick", "ui": {"x": 1200, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
-            {"node_name": "Pick6", "node_type": "Skill", "skill": "Pick", "ui": {"x": 1360, "y": 200}, "parameters": {"target": "$.Inputs.bolt"}},
-            {"node_name": "Place6", "node_type": "Skill", "skill": "Place", "ui": {"x": 1520, "y": 200}, "parameters": {"destination": "bin_a"}},
+            {
+                "node_name": "Pick5",
+                "node_type": "Skill",
+                "skill": "Pick",
+                "ui": {"x": 1200, "y": 200},
+                "parameters": {"target": "$.Inputs.bolt"},
+            },
+            {
+                "node_name": "Pick6",
+                "node_type": "Skill",
+                "skill": "Pick",
+                "ui": {"x": 1360, "y": 200},
+                "parameters": {"target": "$.Inputs.bolt"},
+            },
+            {
+                "node_name": "Place6",
+                "node_type": "Skill",
+                "skill": "Place",
+                "ui": {"x": 1520, "y": 200},
+                "parameters": {"destination": "bin_a"},
+            },
         ],
         "edges_added": [
             {"from": "Place3", "to": "Pick5", "label": ""},
@@ -204,37 +277,41 @@ def _broadcast_dynamic_node_status(
     node_name: str,
     prev_status: str,
     status: str,
-    duration_ms: Optional[int] = None,
-    output: Optional[Dict[str, Any]] = None,
+    duration_ms: int | None = None,
+    output: dict[str, Any] | None = None,
 ) -> None:
     """Broadcast node_status_change for a dynamic (patched) node and update _state so runner status reflects it."""
     ts = _now_iso()
-    _broadcast({
-        "type": "node_status_change",
-        "workflow_id": workflow_id,
-        "timestamp": ts,
-        "node_name": node_name,
-        "prev_status": prev_status,
-        "status": status,
-        "input": {},
-        **({"duration_ms": duration_ms} if duration_ms is not None else {}),
-        **({"output": output} if output is not None else {}),
-    })
+    _broadcast(
+        {
+            "type": "node_status_change",
+            "workflow_id": workflow_id,
+            "timestamp": ts,
+            "node_name": node_name,
+            "prev_status": prev_status,
+            "status": status,
+            "input": {},
+            **({"duration_ms": duration_ms} if duration_ms is not None else {}),
+            **({"output": output} if output is not None else {}),
+        }
+    )
     with _state["lock"]:
         if _state["workflow_id"] != workflow_id or _state["cancelled"]:
             return
         _state["updated_at"] = ts
         if status == "RUNNING":
             _state["current_node"] = node_name
-            _state["node_history"].append({
-                "node_name": node_name,
-                "status": "RUNNING",
-                "started_at": ts,
-                "completed_at": None,
-                "duration_ms": None,
-                "input": {},
-                "output": None,
-            })
+            _state["node_history"].append(
+                {
+                    "node_name": node_name,
+                    "status": "RUNNING",
+                    "started_at": ts,
+                    "completed_at": None,
+                    "duration_ms": None,
+                    "input": {},
+                    "output": None,
+                }
+            )
         else:
             _state["current_node"] = None
             _patch_latest_running_history(
@@ -246,7 +323,7 @@ def _broadcast_dynamic_node_status(
             )
 
 
-def _run_dynamic_nodes_sequence(workflow_id: str, node_names: List[str]) -> None:
+def _run_dynamic_nodes_sequence(workflow_id: str, node_names: list[str]) -> None:
     """Run a sequence of dynamic (patched) nodes: RUNNING then 3s then SUCCESS for each."""
     node_duration_s = 3.0
     duration_ms = int(node_duration_s * 1000)
@@ -260,7 +337,10 @@ def _run_dynamic_nodes_sequence(workflow_id: str, node_names: List[str]) -> None
             if _state["cancelled"] or _state["workflow_id"] != workflow_id:
                 return
         _broadcast_dynamic_node_status(
-            workflow_id, node_name, "RUNNING", "SUCCESS",
+            workflow_id,
+            node_name,
+            "RUNNING",
+            "SUCCESS",
             duration_ms=duration_ms,
             output={"result": "ok", "state": node_name},
         )
@@ -276,8 +356,9 @@ def _run_vlm_dynamic_scenario_scheduler(workflow_id: str) -> None:
     - Patch3 → Place3
     - Patch4 → Pick5 → Pick6 → Place6
     """
+
     # Helper: broadcast patch and then run given dynamic nodes sequentially
-    def apply_patch_and_run_nodes(build_fn, node_names: List[str]) -> None:
+    def apply_patch_and_run_nodes(build_fn, node_names: list[str]) -> None:
         with _state["lock"]:
             if _state["cancelled"] or _state["workflow_id"] != workflow_id:
                 return
@@ -299,20 +380,22 @@ def _run_vlm_dynamic_scenario_scheduler(workflow_id: str) -> None:
 def _broadcast_feedback(
     workflow_id: str,
     node_name: str,
-    feedback: Dict[str, Any],
-    timestamp: Optional[str] = None,
+    feedback: dict[str, Any],
+    timestamp: str | None = None,
 ) -> None:
     """Feedback 이벤트 브로드캐스트. 백엔드는 마지막 수신값만 node_run.feedback_json에 저장."""
-    _broadcast({
-        "type": "feedback",
-        "workflow_id": workflow_id,
-        "timestamp": timestamp or _now_iso(),
-        "node_name": node_name,
-        "feedback": feedback,
-    })
+    _broadcast(
+        {
+            "type": "feedback",
+            "workflow_id": workflow_id,
+            "timestamp": timestamp or _now_iso(),
+            "node_name": node_name,
+            "feedback": feedback,
+        }
+    )
 
 
-def _build_initial_message() -> Dict[str, Any]:
+def _build_initial_message() -> dict[str, Any]:
     with _state["lock"]:
         nh = deepcopy(_state["node_history"])
         wf_id = _state["workflow_id"]
@@ -332,7 +415,7 @@ def _build_initial_message() -> Dict[str, Any]:
             elapsed = int((b - a).total_seconds() * 1000)
         except Exception:
             pass
-    wf_payload: Optional[Dict[str, Any]] = None
+    wf_payload: dict[str, Any] | None = None
     if wf_id and status == "running":
         wf_payload = {
             "workflow_id": wf_id,
@@ -341,7 +424,9 @@ def _build_initial_message() -> Dict[str, Any]:
                 "name": current,
                 "status": "RUNNING",
                 "started_at": updated or started,
-            } if current else None,
+            }
+            if current
+            else None,
             "node_history": nh,
             "execution_stats": {
                 "total_nodes": max(total, 1),
@@ -369,7 +454,7 @@ def _build_initial_message() -> Dict[str, Any]:
 def _run_one_node(
     workflow_id: str,
     state_name: str,
-    state_def: Dict[str, Any],
+    state_def: dict[str, Any],
     total_duration_ms_ref: list,
 ) -> None:
     """한 노드 실행: RUNNING 브로드캐스트 → 2초 대기 → SUCCESS 브로드캐스트."""
@@ -379,25 +464,29 @@ def _run_one_node(
         _state["current_node"] = state_name
         _state["updated_at"] = _now_iso()
     started_at = _now_iso()
-    _broadcast({
-        "type": "node_status_change",
-        "workflow_id": workflow_id,
-        "timestamp": started_at,
-        "node_name": state_name,
-        "prev_status": "IDLE",
-        "status": "RUNNING",
-        "input": state_def.get("Parameters") or state_def.get("If") or {},
-    })
-    with _state["lock"]:
-        _state["node_history"].append({
+    _broadcast(
+        {
+            "type": "node_status_change",
+            "workflow_id": workflow_id,
+            "timestamp": started_at,
             "node_name": state_name,
+            "prev_status": "IDLE",
             "status": "RUNNING",
-            "started_at": started_at,
-            "completed_at": None,
-            "duration_ms": None,
-            "input": state_def.get("Parameters") or {},
-            "output": None,
-        })
+            "input": state_def.get("Parameters") or state_def.get("If") or {},
+        }
+    )
+    with _state["lock"]:
+        _state["node_history"].append(
+            {
+                "node_name": state_name,
+                "status": "RUNNING",
+                "started_at": started_at,
+                "completed_at": None,
+                "duration_ms": None,
+                "input": state_def.get("Parameters") or {},
+                "output": None,
+            }
+        )
         _state["updated_at"] = started_at
 
     # 노드 실행 시간: VLM dynamic 시나리오 시 3초, 기본 2초
@@ -414,33 +503,44 @@ def _run_one_node(
             if _state["cancelled"]:
                 return
         step += 1
-        _broadcast_feedback(workflow_id, state_name, {
-            "message": "running",
-            "step": step,
-            "elapsed_ms": int(elapsed_s * 1000),
-        })
+        _broadcast_feedback(
+            workflow_id,
+            state_name,
+            {
+                "message": "running",
+                "step": step,
+                "elapsed_ms": int(elapsed_s * 1000),
+            },
+        )
     with _state["lock"]:
         if _state["cancelled"]:
             return
     completed_at = _now_iso()
     # 노드 끝날 때 마지막 feedback 한 번 더 전송 → DB에 최종 스냅샷 저장
-    _broadcast_feedback(workflow_id, state_name, {
-        "message": "completed",
-        "step": "final",
-        "elapsed_ms": duration_ms,
-    }, timestamp=completed_at)
+    _broadcast_feedback(
+        workflow_id,
+        state_name,
+        {
+            "message": "completed",
+            "step": "final",
+            "elapsed_ms": duration_ms,
+        },
+        timestamp=completed_at,
+    )
     total_duration_ms_ref[0] += duration_ms
     output = {"result": "ok", "state": state_name}
-    _broadcast({
-        "type": "node_status_change",
-        "workflow_id": workflow_id,
-        "timestamp": completed_at,
-        "node_name": state_name,
-        "prev_status": "RUNNING",
-        "status": "SUCCESS",
-        "output": output,
-        "duration_ms": duration_ms,
-    })
+    _broadcast(
+        {
+            "type": "node_status_change",
+            "workflow_id": workflow_id,
+            "timestamp": completed_at,
+            "node_name": state_name,
+            "prev_status": "RUNNING",
+            "status": "SUCCESS",
+            "output": output,
+            "duration_ms": duration_ms,
+        }
+    )
     with _state["lock"]:
         _patch_latest_running_history(
             state_name,
@@ -453,7 +553,7 @@ def _run_one_node(
         _state["updated_at"] = completed_at
 
 
-def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
+def _run_workflow(workflow_id: str, dsl: dict[str, Any]) -> None:
     """Background: simulate execution and broadcast events."""
     order = get_execution_order(dsl)
     if not order:
@@ -464,13 +564,15 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
             _state["node_history"] = []
             _state["current_node"] = None
             _state["updated_at"] = _now_iso()
-        _broadcast({
-            "type": "error",
-            "workflow_id": workflow_id,
-            "timestamp": _now_iso(),
-            "message": "No states to execute",
-            "error_code": "INVALID_DSL",
-        })
+        _broadcast(
+            {
+                "type": "error",
+                "workflow_id": workflow_id,
+                "timestamp": _now_iso(),
+                "message": "No states to execute",
+                "error_code": "INVALID_DSL",
+            }
+        )
         return
 
     # 워크플로 전체의 마지막 노드(End: true)만 여기서 break. 브랜치 내부 End는 break 안 함.
@@ -490,9 +592,12 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
 
         stype = (state_def.get("Type") or "").strip()
         branches_raw = state_def.get("Branches")
-        is_parallel = (stype or "").lower() == "parallel" or (isinstance(branches_raw, list) and len(branches_raw or []) > 0)
+        is_parallel = (stype or "").lower() == "parallel" or (
+            isinstance(branches_raw, list) and len(branches_raw or []) > 0
+        )
         if is_parallel:
-            # Expected: parallel_node_name NODE_STARTED → 브랜치들 동시 실행 → 둘 다 끝나면 parallel_node_name NODE_SUCCEEDED(duration) → Next
+            # Expected: parallel NODE_STARTED → 브랜치 동시 실행 →
+            # NODE_SUCCEEDED(duration) → Next
             branches = list(branches_raw) if isinstance(branches_raw, list) else []
             parallel_start = _now_iso()
             with _state["lock"]:
@@ -501,28 +606,32 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                     break
                 _state["current_node"] = state_name
                 _state["updated_at"] = parallel_start
-            _broadcast({
-                "type": "node_status_change",
-                "workflow_id": workflow_id,
-                "timestamp": parallel_start,
-                "node_name": state_name,
-                "prev_status": "IDLE",
-                "status": "RUNNING",
-                "input": {},
-            })
-            with _state["lock"]:
-                _state["node_history"].append({
+            _broadcast(
+                {
+                    "type": "node_status_change",
+                    "workflow_id": workflow_id,
+                    "timestamp": parallel_start,
                     "node_name": state_name,
+                    "prev_status": "IDLE",
                     "status": "RUNNING",
-                    "started_at": parallel_start,
-                    "completed_at": None,
-                    "duration_ms": None,
                     "input": {},
-                    "output": None,
-                })
+                }
+            )
+            with _state["lock"]:
+                _state["node_history"].append(
+                    {
+                        "node_name": state_name,
+                        "status": "RUNNING",
+                        "started_at": parallel_start,
+                        "completed_at": None,
+                        "duration_ms": None,
+                        "input": {},
+                        "output": None,
+                    }
+                )
                 _state["updated_at"] = parallel_start
 
-            def run_branch(branch: Dict[str, Any]) -> None:
+            def run_branch(branch: dict[str, Any]) -> None:
                 for name, def_ in get_branch_order(deepcopy(branch)):
                     with _state["lock"]:
                         if _state["cancelled"]:
@@ -531,18 +640,28 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
 
             stop_feedback = threading.Event()
 
-            def feedback_loop() -> None:
+            def feedback_loop(
+                *,
+                wf_id: str = workflow_id,
+                parallel_state: str = state_name,
+                branch_count: int = len(branches),
+                stop: threading.Event = stop_feedback,
+            ) -> None:
                 step = 0
-                while not stop_feedback.wait(0.5):
+                while not stop.wait(0.5):
                     with _state["lock"]:
                         if _state["cancelled"]:
                             return
                     step += 1
-                    _broadcast_feedback(workflow_id, state_name, {
-                        "message": "parallel_running",
-                        "step": step,
-                        "branches": len(branches),
-                    })
+                    _broadcast_feedback(
+                        wf_id,
+                        parallel_state,
+                        {
+                            "message": "parallel_running",
+                            "step": step,
+                            "branches": branch_count,
+                        },
+                    )
 
             feedback_thread = threading.Thread(target=feedback_loop, daemon=True)
             feedback_thread.start()
@@ -561,11 +680,16 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                     cancelled = True
                     break
             parallel_end = _now_iso()
-            _broadcast_feedback(workflow_id, state_name, {
-                "message": "completed",
-                "step": "final",
-                "branches": len(branches),
-            }, timestamp=parallel_end)
+            _broadcast_feedback(
+                workflow_id,
+                state_name,
+                {
+                    "message": "completed",
+                    "step": "final",
+                    "branches": len(branches),
+                },
+                timestamp=parallel_end,
+            )
             try:
                 a = datetime.fromisoformat(parallel_start.replace("Z", "+00:00"))
                 b = datetime.fromisoformat(parallel_end.replace("Z", "+00:00"))
@@ -573,16 +697,18 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
             except Exception:
                 duration_ms = 2000 * max(len(branches), 1)
             output = {"result": "ok", "branches": len(branches)}
-            _broadcast({
-                "type": "node_status_change",
-                "workflow_id": workflow_id,
-                "timestamp": parallel_end,
-                "node_name": state_name,
-                "prev_status": "RUNNING",
-                "status": "SUCCESS",
-                "output": output,
-                "duration_ms": duration_ms,
-            })
+            _broadcast(
+                {
+                    "type": "node_status_change",
+                    "workflow_id": workflow_id,
+                    "timestamp": parallel_end,
+                    "node_name": state_name,
+                    "prev_status": "RUNNING",
+                    "status": "SUCCESS",
+                    "output": output,
+                    "duration_ms": duration_ms,
+                }
+            )
             with _state["lock"]:
                 _patch_latest_running_history(
                     state_name,
@@ -603,9 +729,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                 repeat_count = 1
             inner_states = state_def.get("States") or {}
             inner_start = state_def.get("StartAt")
-            inner_order = get_branch_order(
-                deepcopy({"States": inner_states, "StartAt": inner_start})
-            )
+            inner_order = get_branch_order(deepcopy({"States": inner_states, "StartAt": inner_start}))
             repeat_start = _now_iso()
             with _state["lock"]:
                 if _state["cancelled"]:
@@ -613,25 +737,32 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                     break
                 _state["current_node"] = state_name
                 _state["updated_at"] = repeat_start
-            _broadcast({
-                "type": "node_status_change",
-                "workflow_id": workflow_id,
-                "timestamp": repeat_start,
-                "node_name": state_name,
-                "prev_status": "IDLE",
-                "status": "RUNNING",
-                "input": {"RepeatCount": repeat_count, "inner_states": len(inner_order)},
-            })
-            with _state["lock"]:
-                _state["node_history"].append({
+            _broadcast(
+                {
+                    "type": "node_status_change",
+                    "workflow_id": workflow_id,
+                    "timestamp": repeat_start,
                     "node_name": state_name,
+                    "prev_status": "IDLE",
                     "status": "RUNNING",
-                    "started_at": repeat_start,
-                    "completed_at": None,
-                    "duration_ms": None,
-                    "input": {"RepeatCount": repeat_count},
-                    "output": None,
-                })
+                    "input": {
+                        "RepeatCount": repeat_count,
+                        "inner_states": len(inner_order),
+                    },
+                }
+            )
+            with _state["lock"]:
+                _state["node_history"].append(
+                    {
+                        "node_name": state_name,
+                        "status": "RUNNING",
+                        "started_at": repeat_start,
+                        "completed_at": None,
+                        "duration_ms": None,
+                        "input": {"RepeatCount": repeat_count},
+                        "output": None,
+                    }
+                )
                 _state["updated_at"] = repeat_start
             repeat_broken = False
             for _ in range(repeat_count):
@@ -655,17 +786,23 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                 repeat_duration_ms = int((rb - ra).total_seconds() * 1000)
             except Exception:
                 repeat_duration_ms = 2000 * repeat_count * max(len(inner_order), 1)
-            repeat_output = {"result": "ok", "repeat_count": repeat_count, "inner_steps": len(inner_order)}
-            _broadcast({
-                "type": "node_status_change",
-                "workflow_id": workflow_id,
-                "timestamp": repeat_end,
-                "node_name": state_name,
-                "prev_status": "RUNNING",
-                "status": "SUCCESS",
-                "output": repeat_output,
-                "duration_ms": repeat_duration_ms,
-            })
+            repeat_output = {
+                "result": "ok",
+                "repeat_count": repeat_count,
+                "inner_steps": len(inner_order),
+            }
+            _broadcast(
+                {
+                    "type": "node_status_change",
+                    "workflow_id": workflow_id,
+                    "timestamp": repeat_end,
+                    "node_name": state_name,
+                    "prev_status": "RUNNING",
+                    "status": "SUCCESS",
+                    "output": repeat_output,
+                    "duration_ms": repeat_duration_ms,
+                }
+            )
             with _state["lock"]:
                 _patch_latest_running_history(
                     state_name,
@@ -684,9 +821,7 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         if stype == "Retry":
             inner_states = state_def.get("States") or {}
             inner_start = state_def.get("StartAt")
-            inner_order = get_branch_order(
-                deepcopy({"States": inner_states, "StartAt": inner_start})
-            )
+            inner_order = get_branch_order(deepcopy({"States": inner_states, "StartAt": inner_start}))
             retry_start = _now_iso()
             with _state["lock"]:
                 if _state["cancelled"]:
@@ -699,25 +834,29 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                 max_attempts_int = max(1, int(max_attempts))
             except (TypeError, ValueError):
                 max_attempts_int = 1
-            _broadcast({
-                "type": "node_status_change",
-                "workflow_id": workflow_id,
-                "timestamp": retry_start,
-                "node_name": state_name,
-                "prev_status": "IDLE",
-                "status": "RUNNING",
-                "input": {"MaxAttempts": max_attempts_int},
-            })
-            with _state["lock"]:
-                _state["node_history"].append({
+            _broadcast(
+                {
+                    "type": "node_status_change",
+                    "workflow_id": workflow_id,
+                    "timestamp": retry_start,
                     "node_name": state_name,
+                    "prev_status": "IDLE",
                     "status": "RUNNING",
-                    "started_at": retry_start,
-                    "completed_at": None,
-                    "duration_ms": None,
                     "input": {"MaxAttempts": max_attempts_int},
-                    "output": None,
-                })
+                }
+            )
+            with _state["lock"]:
+                _state["node_history"].append(
+                    {
+                        "node_name": state_name,
+                        "status": "RUNNING",
+                        "started_at": retry_start,
+                        "completed_at": None,
+                        "duration_ms": None,
+                        "input": {"MaxAttempts": max_attempts_int},
+                        "output": None,
+                    }
+                )
                 _state["updated_at"] = retry_start
             for inner_name, inner_def in inner_order:
                 with _state["lock"]:
@@ -729,7 +868,8 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                 _run_one_node(workflow_id, inner_name, inner_def, total_duration_ms_ref)
             if cancelled:
                 break
-            # 성공 경로: 첫 시도에서 메인 스코프 완료 (docs/dsl-example.json). BeforeRetryAfterFailure는 실패 재시도 시에만 의미 있음.
+            # 성공 경로: 첫 시도에서 메인 스코프 완료 (docs/dsl-example.json).
+            # BeforeRetryAfterFailure는 실패 재시도 시에만 의미 있음.
             retry_end = _now_iso()
             try:
                 ra = datetime.fromisoformat(retry_start.replace("Z", "+00:00"))
@@ -737,17 +877,23 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
                 retry_duration_ms = int((rb - ra).total_seconds() * 1000)
             except Exception:
                 retry_duration_ms = 2000 * max(len(inner_order), 1)
-            retry_output = {"result": "ok", "attempts_used": 1, "max_attempts": max_attempts_int}
-            _broadcast({
-                "type": "node_status_change",
-                "workflow_id": workflow_id,
-                "timestamp": retry_end,
-                "node_name": state_name,
-                "prev_status": "RUNNING",
-                "status": "SUCCESS",
-                "output": retry_output,
-                "duration_ms": retry_duration_ms,
-            })
+            retry_output = {
+                "result": "ok",
+                "attempts_used": 1,
+                "max_attempts": max_attempts_int,
+            }
+            _broadcast(
+                {
+                    "type": "node_status_change",
+                    "workflow_id": workflow_id,
+                    "timestamp": retry_end,
+                    "node_name": state_name,
+                    "prev_status": "RUNNING",
+                    "status": "SUCCESS",
+                    "output": retry_output,
+                    "duration_ms": retry_duration_ms,
+                }
+            )
             with _state["lock"]:
                 _patch_latest_running_history(
                     state_name,
@@ -781,36 +927,40 @@ def _run_workflow(workflow_id: str, dsl: Dict[str, Any]) -> None:
         _state["updated_at"] = _now_iso()
 
     if cancelled:
-        _broadcast({
-            "type": "workflow_cancelled",
-            "workflow_id": workflow_id,
-            "timestamp": _now_iso(),
-            "status": "cancelled",
-        })
+        _broadcast(
+            {
+                "type": "workflow_cancelled",
+                "workflow_id": workflow_id,
+                "timestamp": _now_iso(),
+                "status": "cancelled",
+            }
+        )
     else:
-        _broadcast({
-            "type": "workflow_completed",
-            "workflow_id": workflow_id,
-            "timestamp": _now_iso(),
-            "status": "succeeded",
-            "final_stats": {
-                "total_duration_ms": total_duration_ms_ref[0],
-                "total_nodes": max(history_count_at_finish, 1),
-                "successful_nodes": max(history_count_at_finish, 1),
-                "failed_nodes": 0,
-            },
-        })
+        _broadcast(
+            {
+                "type": "workflow_completed",
+                "workflow_id": workflow_id,
+                "timestamp": _now_iso(),
+                "status": "succeeded",
+                "final_stats": {
+                    "total_duration_ms": total_duration_ms_ref[0],
+                    "total_nodes": max(history_count_at_finish, 1),
+                    "successful_nodes": max(history_count_at_finish, 1),
+                    "failed_nodes": 0,
+                },
+            }
+        )
 
 
 def _mock_skill_entry(
     namespace: str,
     name: str,
     description: str,
-    parameters: Dict[str, Any],
-    outputs: Optional[Dict[str, Any]] = None,
+    parameters: dict[str, Any],
+    outputs: dict[str, Any] | None = None,
     *,
     allow_status_external_change: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return {
         "namespace": namespace,
         "name": name,
@@ -936,10 +1086,21 @@ MOCK_SKILL_SET = {
             "PickObject",
             "Pick an object from a target location",
             {
-                "target_object": {"type": "string", "description": "The target object identifier to pick"},
-                "location": {"type": "string", "description": "The location where the object is located"},
+                "target_object": {
+                    "type": "string",
+                    "description": "The target object identifier to pick",
+                },
+                "location": {
+                    "type": "string",
+                    "description": "The location where the object is located",
+                },
             },
-            {"object_weight": {"type": "int", "description": "The weight of the picked object in grams"}},
+            {
+                "object_weight": {
+                    "type": "int",
+                    "description": "The weight of the picked object in grams",
+                }
+            },
             allow_status_external_change=True,
         ),
         _mock_skill_entry(
@@ -947,11 +1108,25 @@ MOCK_SKILL_SET = {
             "PlaceObject",
             "Place an object at a destination location",
             {
-                "target_object": {"type": "string", "description": "The object identifier to place"},
-                "destination": {"type": "string", "description": "The destination location identifier"},
-                "orientation": {"type": "string", "description": "The orientation of the object (north, south, east, west)"},
+                "target_object": {
+                    "type": "string",
+                    "description": "The object identifier to place",
+                },
+                "destination": {
+                    "type": "string",
+                    "description": "The destination location identifier",
+                },
+                "orientation": {
+                    "type": "string",
+                    "description": "The orientation of the object (north, south, east, west)",
+                },
             },
-            {"placement_success": {"type": "bool", "description": "Whether the placement was successful"}},
+            {
+                "placement_success": {
+                    "type": "bool",
+                    "description": "Whether the placement was successful",
+                }
+            },
             allow_status_external_change=True,
         ),
         _mock_skill_entry(
@@ -959,13 +1134,28 @@ MOCK_SKILL_SET = {
             "MoveObject",
             "Move an object from one location to another",
             {
-                "target_object": {"type": "string", "description": "The object identifier to move"},
-                "source_location": {"type": "string", "description": "The source location identifier"},
-                "target_location": {"type": "string", "description": "The target location identifier"},
+                "target_object": {
+                    "type": "string",
+                    "description": "The object identifier to move",
+                },
+                "source_location": {
+                    "type": "string",
+                    "description": "The source location identifier",
+                },
+                "target_location": {
+                    "type": "string",
+                    "description": "The target location identifier",
+                },
             },
             {
-                "move_distance": {"type": "float", "description": "The distance moved in meters"},
-                "move_duration": {"type": "int", "description": "The time taken to move in milliseconds"},
+                "move_distance": {
+                    "type": "float",
+                    "description": "The distance moved in meters",
+                },
+                "move_duration": {
+                    "type": "int",
+                    "description": "The time taken to move in milliseconds",
+                },
             },
             allow_status_external_change=True,
         ),
@@ -980,7 +1170,12 @@ def create_app() -> Flask:
     @app.route("/api/capabilities/health", methods=["GET"])
     def health():
         """Health endpoint for container HEALTHCHECK (same path as main backend)."""
-        return jsonify({"status": "healthy", "runtime": {"middleware": "mock", "robot": "simulated"}})
+        return jsonify(
+            {
+                "status": "healthy",
+                "runtime": {"middleware": "mock", "robot": "simulated"},
+            }
+        )
 
     @app.route("/api/v1/skill-sets", methods=["GET"])
     def skill_set():
@@ -1001,20 +1196,22 @@ def create_app() -> Flask:
         completed = [n["node_name"] for n in nh if (n.get("status") or "").upper() == "SUCCESS"]
         all_names = list({n.get("node_name") for n in nh if n.get("node_name")} | ({current} if current else set()))
         pending = [x for x in all_names if x != current and x not in completed]
-        return jsonify({
-            "runner_status": status,
-            "workflow": {
-                "workflow_id": wf_id,
-                "current_node": current,
-                "progress": {
-                    "completed_states": completed,
-                    "current_state": current or "",
-                    "pending_states": pending,
+        return jsonify(
+            {
+                "runner_status": status,
+                "workflow": {
+                    "workflow_id": wf_id,
+                    "current_node": current,
+                    "progress": {
+                        "completed_states": completed,
+                        "current_state": current or "",
+                        "pending_states": pending,
+                    },
+                    "started_at": started,
+                    "updated_at": updated,
                 },
-                "started_at": started,
-                "updated_at": updated,
-            },
-        })
+            }
+        )
 
     @app.route("/api/v1/workflows/run", methods=["POST"])
     def workflow_run():
@@ -1023,17 +1220,30 @@ def create_app() -> Flask:
         if req_type == "cancel":
             with _state["lock"]:
                 _state["cancelled"] = True
-            return jsonify({
-                "workflow_id": _state.get("workflow_id") or "wf_0",
-                "status": "cancelled",
-            })
+            return jsonify(
+                {
+                    "workflow_id": _state.get("workflow_id") or "wf_0",
+                    "status": "cancelled",
+                }
+            )
         if req_type != "start":
-            return jsonify({"error": "validation error", "message": "request_type must be start or cancel"}), 400
+            return jsonify(
+                {
+                    "error": "validation error",
+                    "message": "request_type must be start or cancel",
+                }
+            ), 400
         workflow_json = data.get("workflow_json")
         if not workflow_json or not isinstance(workflow_json, dict):
             return jsonify({"error": "validation error", "message": "workflow_json required"}), 400
         if not workflow_json.get("States"):
-            return jsonify({"error": "validation error", "message": "Invalid workflow JSON", "details": {"reason": "No States"}}), 400
+            return jsonify(
+                {
+                    "error": "validation error",
+                    "message": "Invalid workflow JSON",
+                    "details": {"reason": "No States"},
+                }
+            ), 400
 
         with _state["lock"]:
             if _state["runner_status"] == "running":
@@ -1048,7 +1258,11 @@ def create_app() -> Flask:
             _state["started_at"] = _now_iso()
             _state["updated_at"] = _state["started_at"]
 
-        t = threading.Thread(target=_run_workflow, args=(workflow_id, deepcopy(workflow_json)), daemon=True)
+        t = threading.Thread(
+            target=_run_workflow,
+            args=(workflow_id, deepcopy(workflow_json)),
+            daemon=True,
+        )
         t.start()
         return jsonify({"workflow_id": workflow_id, "status": "running"})
 
@@ -1068,7 +1282,12 @@ def create_app() -> Flask:
     def workflow_info(workflow_id: str):
         with _state["lock"]:
             if _state["workflow_id"] != workflow_id:
-                return jsonify({"error": "Not found", "message": f"Workflow {workflow_id} not found"}), 404
+                return jsonify(
+                    {
+                        "error": "Not found",
+                        "message": f"Workflow {workflow_id} not found",
+                    }
+                ), 404
             status = _state["runner_status"]
             started = _state["started_at"]
             updated = _state["updated_at"]
@@ -1085,32 +1304,40 @@ def create_app() -> Flask:
                 elapsed = int((b - a).total_seconds() * 1000)
             except Exception:
                 pass
-        return jsonify({
-            "workflow_id": workflow_id,
-            "status": "running" if status == "running" else "succeeded",
-            "started_at": started,
-            "updated_at": updated,
-            "current_node": current,
-            "progress": {
-                "completed_states": [n["node_name"] for n in nh if (n.get("status") or "").upper() == "SUCCESS"],
-                "current_state": current or "",
-                "pending_states": [n["node_name"] for n in nh if (n.get("status") or "").upper() != "SUCCESS"] + ([current] if current else []),
-            },
-            "node_history": nh,
-            "execution_stats": {
-                "total_nodes": max(total, 1),
-                "completed_nodes": completed,
-                "running_nodes": running,
-                "failed_nodes": 0,
-                "elapsed_time_ms": elapsed,
-            },
-        })
+        return jsonify(
+            {
+                "workflow_id": workflow_id,
+                "status": "running" if status == "running" else "succeeded",
+                "started_at": started,
+                "updated_at": updated,
+                "current_node": current,
+                "progress": {
+                    "completed_states": [n["node_name"] for n in nh if (n.get("status") or "").upper() == "SUCCESS"],
+                    "current_state": current or "",
+                    "pending_states": [n["node_name"] for n in nh if (n.get("status") or "").upper() != "SUCCESS"]
+                    + ([current] if current else []),
+                },
+                "node_history": nh,
+                "execution_stats": {
+                    "total_nodes": max(total, 1),
+                    "completed_nodes": completed,
+                    "running_nodes": running,
+                    "failed_nodes": 0,
+                    "elapsed_time_ms": elapsed,
+                },
+            }
+        )
 
     @app.route("/api/v1/workflows/<workflow_id>/json", methods=["GET"])
     def workflow_dsl_json(workflow_id: str):
         with _state["lock"]:
             if _state["workflow_id"] != workflow_id:
-                return jsonify({"error": "Not found", "message": f"Workflow {workflow_id} not found"}), 404
+                return jsonify(
+                    {
+                        "error": "Not found",
+                        "message": f"Workflow {workflow_id} not found",
+                    }
+                ), 404
             dsl = _state.get("workflow_dsl")
         if not dsl or not isinstance(dsl, dict):
             return jsonify({"error": "Not found", "message": "No DSL available for this workflow"}), 404
@@ -1118,6 +1345,7 @@ def create_app() -> Flask:
 
     try:
         from flask_sock import Sock
+
         sock = Sock(app)
 
         @sock.route("/api/v1/workflows/monitor")

@@ -1,4 +1,5 @@
 """Run Flask application."""
+
 import os
 
 from app import create_app

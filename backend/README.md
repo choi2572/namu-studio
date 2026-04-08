@@ -4,14 +4,57 @@ Flask backend API for namu-studio: workflows, runs, capabilities, and optional m
 
 ## Prerequisites
 
-- Python 3.x
+- Python **3.10+** (see `pyproject.toml`: `requires-python`)
 - pip
 
 ## Install
 
+Runtime only:
+
 ```bash
 cd backend
 pip install -r requirements.txt
+```
+
+Editable install from `pyproject.toml` (same runtime deps as `requirements.txt`):
+
+```bash
+cd backend
+pip install -e .
+```
+
+On distributions with **PEP 668** (externally managed Python, e.g. Debian/Ubuntu), use a venv:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+# optional: formatter + pylint (also: pip install -e '.[dev]')
+pip install -e '.[dev]'
+```
+
+`.venv/` is listed in `.gitignore`; keep the venv local.
+
+## Formatting and linting
+
+Tooling is configured in **`pyproject.toml`**:
+
+- **Ruff** — `tool.ruff` / `tool.ruff.format` / `tool.ruff.lint` (line length 120, import sorting, common bugbear rules).
+- **Pylint** — `tool.pylint` (reads the same file when run from `backend/` so `app` imports resolve).
+
+Typical commands (from `backend/` with dev deps installed):
+
+```bash
+ruff format .
+ruff check . --fix
+pylint app mock_middleware scripts tests run.py run_mock_middleware.py
+```
+
+CI-style one-liner after `pip install -e '.[dev]'`:
+
+```bash
+ruff format --check . && ruff check . && pylint app mock_middleware scripts tests run.py run_mock_middleware.py
 ```
 
 ## Run
@@ -109,6 +152,7 @@ backend/
     db/               # SQLite connection and schema
     adapters/         # Execution (dummy, middleware)
   tests/
+  pyproject.toml    # Project metadata; Ruff + Pylint settings; optional [dev] extras
   requirements.txt
   run.py
   mock_middleware/    # Mock middleware server (see mock_middleware/README.md)

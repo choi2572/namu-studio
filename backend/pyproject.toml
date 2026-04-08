@@ -1,0 +1,103 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "namu-studio-backend"
+version = "0.1.0"
+description = "Flask UI backend for namu-studio"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "Flask==3.0.0",
+    "flask-cors==4.0.0",
+    "flask-sock==0.7.0",
+    "gunicorn==21.2.0",
+    "simple-websocket==1.0.0",
+    "websocket-client==1.7.0",
+    "pytest==7.4.3",
+    "pytest-cov==4.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8.0",
+    "pylint>=3.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "mock_middleware*"]
+
+# --- Ruff: formatter + linter (run: ruff format . && ruff check .) ---
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["app", "mock_middleware", "scripts", "tests"]
+exclude = [
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".git",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "mock_middleware"]
+
+# --- Pylint (run from backend/: pylint app mock_middleware scripts tests run.py run_mock_middleware.py) ---
+[tool.pylint.main]
+py-version = "3.10"
+jobs = 0
+init-hook = "import sys; sys.path.insert(0, '.')"
+ignore = ["CVS", ".venv", "venv"]
+
+[tool.pylint.messages_control]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "too-few-public-methods",
+    "too-many-arguments",
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-return-statements",
+    "too-many-instance-attributes",
+    "too-many-positional-arguments",
+    "too-many-statements",
+    "import-outside-toplevel",
+    "broad-exception-caught",
+    "duplicate-code",
+    "unnecessary-pass",
+    "unused-argument",
+    "no-else-return",
+    # DSL JSON shape uses PascalCase field names in dataclasses
+    "invalid-name",
+    "unexpected-keyword-arg",
+    # Pytest/parametrize patterns; constructor false positives
+    "no-value-for-parameter",
+    "redefined-outer-name",
+    "wrong-import-position",
+]
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.design]
+max-module-lines = 2500

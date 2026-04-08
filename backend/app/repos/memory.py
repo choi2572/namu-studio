@@ -1,46 +1,46 @@
 """In-memory repository implementations."""
-from typing import Dict, List, Optional
+
 from datetime import datetime
 
 from app.domain.models import (
+    NodeRun,
+    Run,
+    RunEvent,
+    RunStatus,
     Workflow,
     WorkflowVersion,
     WorkflowView,
-    Run,
-    NodeRun,
-    RunEvent,
-    RunStatus,
 )
 from app.repos.interfaces import (
+    NodeRunRepository,
+    RunEventRepository,
+    RunRepository,
     WorkflowRepository,
     WorkflowVersionRepository,
     WorkflowViewRepository,
-    RunRepository,
-    NodeRunRepository,
-    RunEventRepository,
 )
 
 
 class InMemoryWorkflowRepository(WorkflowRepository):
     """In-memory workflow repository."""
-    
+
     def __init__(self):
-        self._workflows: Dict[str, Workflow] = {}
+        self._workflows: dict[str, Workflow] = {}
 
     def clear(self) -> None:
         """Clear all workflows."""
         self._workflows.clear()
-    
+
     def create(self, workflow: Workflow) -> Workflow:
         self._workflows[workflow.workflow_id] = workflow
         return workflow
-    
-    def get(self, workflow_id: str) -> Optional[Workflow]:
+
+    def get(self, workflow_id: str) -> Workflow | None:
         return self._workflows.get(workflow_id)
-    
-    def list_all(self) -> List[Workflow]:
+
+    def list_all(self) -> list[Workflow]:
         return list(self._workflows.values())
-    
+
     def update(self, workflow: Workflow) -> Workflow:
         workflow.updated_at = datetime.utcnow()
         self._workflows[workflow.workflow_id] = workflow
@@ -52,33 +52,30 @@ class InMemoryWorkflowRepository(WorkflowRepository):
 
 class InMemoryWorkflowVersionRepository(WorkflowVersionRepository):
     """In-memory workflow version repository."""
-    
+
     def __init__(self):
-        self._versions: Dict[str, WorkflowVersion] = {}
+        self._versions: dict[str, WorkflowVersion] = {}
 
     def clear(self) -> None:
         """Clear all versions."""
         self._versions.clear()
-    
+
     def create(self, version: WorkflowVersion) -> WorkflowVersion:
         self._versions[version.version_id] = version
         return version
-    
-    def get(self, version_id: str) -> Optional[WorkflowVersion]:
+
+    def get(self, version_id: str) -> WorkflowVersion | None:
         return self._versions.get(version_id)
-    
-    def get_by_workflow(self, workflow_id: str) -> List[WorkflowVersion]:
+
+    def get_by_workflow(self, workflow_id: str) -> list[WorkflowVersion]:
         return [v for v in self._versions.values() if v.workflow_id == workflow_id]
-    
-    def get_latest_draft(self, workflow_id: str) -> Optional[WorkflowVersion]:
-        drafts = [
-            v for v in self._versions.values()
-            if v.workflow_id == workflow_id and v.state.value == "DRAFT"
-        ]
+
+    def get_latest_draft(self, workflow_id: str) -> WorkflowVersion | None:
+        drafts = [v for v in self._versions.values() if v.workflow_id == workflow_id and v.state.value == "DRAFT"]
         if not drafts:
             return None
         return max(drafts, key=lambda v: v.created_at)
-    
+
     def update(self, version: WorkflowVersion) -> WorkflowVersion:
         self._versions[version.version_id] = version
         return version
@@ -89,17 +86,17 @@ class InMemoryWorkflowVersionRepository(WorkflowVersionRepository):
 
 class InMemoryWorkflowViewRepository(WorkflowViewRepository):
     """In-memory workflow view repository."""
-    
+
     def __init__(self):
-        self._views: Dict[str, WorkflowView] = {}
+        self._views: dict[str, WorkflowView] = {}
 
     def clear(self) -> None:
         """Clear all views."""
         self._views.clear()
-    
-    def get(self, version_id: str) -> Optional[WorkflowView]:
+
+    def get(self, version_id: str) -> WorkflowView | None:
         return self._views.get(version_id)
-    
+
     def save(self, view: WorkflowView) -> WorkflowView:
         view.updated_at = datetime.utcnow()
         self._views[view.version_id] = view
@@ -111,22 +108,22 @@ class InMemoryWorkflowViewRepository(WorkflowViewRepository):
 
 class InMemoryRunRepository(RunRepository):
     """In-memory run repository."""
-    
+
     def __init__(self):
-        self._runs: Dict[str, Run] = {}
+        self._runs: dict[str, Run] = {}
 
     def clear(self) -> None:
         """Clear all runs."""
         self._runs.clear()
-    
+
     def create(self, run: Run) -> Run:
         self._runs[run.run_id] = run
         return run
-    
-    def get(self, run_id: str) -> Optional[Run]:
+
+    def get(self, run_id: str) -> Run | None:
         return self._runs.get(run_id)
-    
-    def list_all(self, filters: Optional[dict] = None) -> List[Run]:
+
+    def list_all(self, filters: dict | None = None) -> list[Run]:
         runs = list(self._runs.values())
         if filters:
             if "status" in filters:
@@ -134,13 +131,13 @@ class InMemoryRunRepository(RunRepository):
             if "workflow_id" in filters:
                 runs = [r for r in runs if r.workflow_id == filters["workflow_id"]]
         return sorted(runs, key=lambda r: r.created_at, reverse=True)
-    
-    def get_active_run(self) -> Optional[Run]:
+
+    def get_active_run(self) -> Run | None:
         for run in self._runs.values():
             if run.status in (RunStatus.RUNNING, RunStatus.WAITING):
                 return run
         return None
-    
+
     def update(self, run: Run) -> Run:
         run.updated_at = datetime.utcnow()
         self._runs[run.run_id] = run
@@ -152,30 +149,30 @@ class InMemoryRunRepository(RunRepository):
 
 class InMemoryNodeRunRepository(NodeRunRepository):
     """In-memory node run repository."""
-    
+
     def __init__(self):
-        self._node_runs: Dict[str, NodeRun] = {}
+        self._node_runs: dict[str, NodeRun] = {}
 
     def clear(self) -> None:
         """Clear all node runs."""
         self._node_runs.clear()
-    
+
     def create(self, node_run: NodeRun) -> NodeRun:
         self._node_runs[node_run.node_run_id] = node_run
         return node_run
-    
-    def get(self, node_run_id: str) -> Optional[NodeRun]:
+
+    def get(self, node_run_id: str) -> NodeRun | None:
         return self._node_runs.get(node_run_id)
-    
-    def get_by_run(self, run_id: str) -> List[NodeRun]:
+
+    def get_by_run(self, run_id: str) -> list[NodeRun]:
         return [nr for nr in self._node_runs.values() if nr.run_id == run_id]
-    
-    def get_by_run_and_state(self, run_id: str, state_name: str) -> Optional[NodeRun]:
+
+    def get_by_run_and_state(self, run_id: str, state_name: str) -> NodeRun | None:
         for nr in self._node_runs.values():
             if nr.run_id == run_id and nr.state_name == state_name:
                 return nr
         return None
-    
+
     def update(self, node_run: NodeRun) -> NodeRun:
         self._node_runs[node_run.node_run_id] = node_run
         return node_run
@@ -183,21 +180,21 @@ class InMemoryNodeRunRepository(NodeRunRepository):
     def delete_by_run(self, run_id: str) -> None:
         to_delete = [nr_id for nr_id, nr in self._node_runs.items() if nr.run_id == run_id]
         for nr_id in to_delete:
-          self._node_runs.pop(nr_id, None)
+            self._node_runs.pop(nr_id, None)
 
 
 class InMemoryRunEventRepository(RunEventRepository):
     """In-memory run event repository."""
-    
+
     def __init__(self):
-        self._events: Dict[str, RunEvent] = {}
-        self._run_events: Dict[str, List[RunEvent]] = {}  # run_id -> events
+        self._events: dict[str, RunEvent] = {}
+        self._run_events: dict[str, list[RunEvent]] = {}  # run_id -> events
 
     def clear(self) -> None:
         """Clear all events."""
         self._events.clear()
         self._run_events.clear()
-    
+
     def create(self, event: RunEvent) -> RunEvent:
         self._events[event.event_id] = event
         if event.run_id not in self._run_events:
@@ -206,13 +203,13 @@ class InMemoryRunEventRepository(RunEventRepository):
         # Keep events sorted by seq
         self._run_events[event.run_id].sort(key=lambda e: e.seq)
         return event
-    
-    def get_by_run(self, run_id: str, after_seq: Optional[int] = None) -> List[RunEvent]:
+
+    def get_by_run(self, run_id: str, after_seq: int | None = None) -> list[RunEvent]:
         events = self._run_events.get(run_id, [])
         if after_seq is not None:
             events = [e for e in events if e.seq > after_seq]
         return sorted(events, key=lambda e: e.seq)
-    
+
     def get_max_seq(self, run_id: str) -> int:
         events = self._run_events.get(run_id, [])
         if not events:

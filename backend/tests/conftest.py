@@ -1,20 +1,21 @@
 """Pytest configuration and fixtures."""
+
 import pytest
 
 from app import create_app
+from app.adapters.execution_engine import DummyExecutionEngineAdapter
+from app.repos import registry
 from app.repos.memory import (
+    InMemoryNodeRunRepository,
+    InMemoryRunEventRepository,
+    InMemoryRunRepository,
     InMemoryWorkflowRepository,
     InMemoryWorkflowVersionRepository,
     InMemoryWorkflowViewRepository,
-    InMemoryRunRepository,
-    InMemoryNodeRunRepository,
-    InMemoryRunEventRepository,
 )
-from app.services.workflow_service import WorkflowService
+from app.seed import SEED_IDS, seed_data
 from app.services.run_service import RunService
-from app.adapters.execution_engine import DummyExecutionEngineAdapter
-from app.seed import seed_data, SEED_IDS
-from app.repos import registry
+from app.services.workflow_service import WorkflowService
 
 # Import parametrized fixtures (only if not already defined)
 # Note: conftest_repos fixtures will override the non-parametrized ones below
@@ -80,17 +81,18 @@ def workflow_service(workflow_repo, version_repo, view_repo):
 @pytest.fixture
 def execution_adapter(run_repo, node_run_repo, run_event_repo, workflow_repo, version_repo):
     """Create execution adapter."""
-    return DummyExecutionEngineAdapter(
-        run_repo,
-        node_run_repo,
-        run_event_repo,
-        workflow_repo,
-        version_repo
-    )
+    return DummyExecutionEngineAdapter(run_repo, node_run_repo, run_event_repo, workflow_repo, version_repo)
 
 
 @pytest.fixture
-def run_service(run_repo, node_run_repo, run_event_repo, workflow_repo, version_repo, execution_adapter):
+def run_service(
+    run_repo,
+    node_run_repo,
+    run_event_repo,
+    workflow_repo,
+    version_repo,
+    execution_adapter,
+):
     """Create run service."""
     return RunService(
         run_repo,

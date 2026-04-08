@@ -1,9 +1,9 @@
 """SQLite connection management."""
+
+import os
 import sqlite3
 import threading
-import os
 from pathlib import Path
-from typing import Optional
 
 from app.db.schema import migrate_schema
 
@@ -24,11 +24,7 @@ def get_db() -> sqlite3.Connection:
     """Get thread-local database connection."""
     if not hasattr(_local, "connection") or _local.connection is None:
         db_path = get_db_path()
-        _local.connection = sqlite3.connect(
-            db_path,
-            check_same_thread=False,
-            timeout=10.0
-        )
+        _local.connection = sqlite3.connect(db_path, check_same_thread=False, timeout=10.0)
         _local.connection.row_factory = sqlite3.Row
         _apply_pragmas(_local.connection)
     return _local.connection

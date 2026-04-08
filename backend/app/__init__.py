@@ -1,5 +1,4 @@
 """Flask application factory."""
-import os
 
 from flask import Flask
 from flask_cors import CORS
@@ -12,29 +11,32 @@ def create_app(config_class=Config):
     """Create and configure Flask application."""
     app = Flask(__name__)
     app.config.from_object(config_class)
-    
+
     # Initialize database if using SQLite
     repo_backend = app.config.get("REPO_BACKEND", "inmemory")
     if repo_backend == "sqlite":
         from app.db import init_db
+
         init_db()
-    
+
     # Enable CORS for frontend dev
     CORS(app)
-    
+
     # Register error handlers
     register_error_handlers(app)
-    
+
     # Register blueprints
-    from app.api import workflows, runs, capabilities, middleware_proxy
+    from app.api import capabilities, middleware_proxy, runs, workflows
+
     app.register_blueprint(workflows.bp, url_prefix="/api/workflows")
     app.register_blueprint(runs.bp, url_prefix="/api/runs")
     app.register_blueprint(capabilities.bp, url_prefix="/api/capabilities")
     app.register_blueprint(middleware_proxy.bp, url_prefix="/api/v1")
 
     if _should_seed(app):
-        from app.seed import seed_data
         from app.repos import registry
+        from app.seed import seed_data
+
         seed_data(
             workflow_repo=registry.workflow_repo,
             version_repo=registry.version_repo,
@@ -44,7 +46,7 @@ def create_app(config_class=Config):
             run_event_repo=registry.run_event_repo,
             reset=False,
         )
-    
+
     return app
 
 

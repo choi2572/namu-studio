@@ -1,12 +1,12 @@
 """Datetime helpers to avoid mixing offset-naive and offset-aware datetimes."""
+
 from datetime import datetime
-from typing import Optional
 
 
 def run_duration_ms(
-    started_at: Optional[datetime],
-    finished_at: Optional[datetime],
-) -> Optional[int]:
+    started_at: datetime | None,
+    finished_at: datetime | None,
+) -> int | None:
     """Return duration in milliseconds. Normalizes to naive UTC so aware/naive can be subtracted."""
     if not started_at or not finished_at:
         return None

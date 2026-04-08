@@ -1,11 +1,13 @@
 """DSL v1 domain models."""
+
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
 from enum import Enum
+from typing import Any
 
 
 class StateType(str, Enum):
     """State type enum."""
+
     SKILL = "Skill"
     CONDITION = "Condition"
     PARALLEL = "Parallel"
@@ -15,6 +17,7 @@ class StateType(str, Enum):
 
 class Operator(str, Enum):
     """Comparison operator."""
+
     EQ = "=="
     NE = "!="
     GT = ">"
@@ -25,6 +28,7 @@ class Operator(str, Enum):
 
 class EventType(str, Enum):
     """Wait event type."""
+
     WEBHOOK = "webhook"
     ROS_TOPIC = "ros_topic"
 
@@ -32,14 +36,16 @@ class EventType(str, Enum):
 @dataclass
 class InputDefinition:
     """Input definition."""
+
     Type: str
     Value: Any
-    Desc: Optional[str] = None
+    Desc: str | None = None
 
 
 @dataclass
 class ConditionExpression:
     """Condition expression."""
+
     Variable: str
     Operator: Operator
     Value: Any
@@ -48,6 +54,7 @@ class ConditionExpression:
 @dataclass
 class ConditionBranch:
     """Condition branch (If)."""
+
     Condition: ConditionExpression
     Then: str
 
@@ -55,6 +62,7 @@ class ConditionBranch:
 @dataclass
 class WaitEvent:
     """Wait event definition."""
+
     Type: EventType
     Topic: str
 
@@ -62,18 +70,20 @@ class WaitEvent:
 @dataclass
 class ParallelBranch:
     """Parallel branch definition."""
+
     StartAt: str
-    States: Dict[str, 'State']
+    States: dict[str, "State"]
 
 
 @dataclass
 class State:
     """Base state class."""
+
     Type: StateType
-    Timeout: Optional[int] = None
-    Next: Optional[str] = None
-    End: Optional[bool] = None
-    
+    Timeout: int | None = None
+    Next: str | None = None
+    End: bool | None = None
+
     def __post_init__(self):
         """Validate state."""
         if self.Next is not None and self.End is True:
@@ -85,9 +95,10 @@ class State:
 @dataclass
 class SkillState(State):
     """Skill state."""
+
     Skill: str
-    Parameters: Dict[str, Any] = field(default_factory=dict)
-    
+    Parameters: dict[str, Any] = field(default_factory=dict)
+
     def __post_init__(self):
         """Validate skill state."""
         super().__post_init__()
@@ -98,9 +109,10 @@ class SkillState(State):
 @dataclass
 class ConditionState(State):
     """Condition state."""
+
     If: ConditionBranch
     Else: str
-    
+
     def __post_init__(self):
         """Validate condition state."""
         super().__post_init__()
@@ -113,8 +125,9 @@ class ConditionState(State):
 @dataclass
 class ParallelState(State):
     """Parallel state."""
-    Branches: List[ParallelBranch]
-    
+
+    Branches: list[ParallelBranch]
+
     def __post_init__(self):
         """Validate parallel state."""
         super().__post_init__()
@@ -130,9 +143,10 @@ class ParallelState(State):
 @dataclass
 class WaitState(State):
     """Wait state."""
+
     Event: WaitEvent
     Timeout: int  # Required for Wait
-    
+
     def __post_init__(self):
         """Validate wait state."""
         super().__post_init__()
@@ -145,37 +159,36 @@ class WaitState(State):
 @dataclass
 class PassState(State):
     """Pass state."""
+
     pass
 
 
 @dataclass
 class WorkflowDSL:
     """Workflow DSL v1."""
-    Inputs: Optional[Dict[str, InputDefinition]] = None
+
+    Inputs: dict[str, InputDefinition] | None = None
     StartAt: str = ""
-    States: Dict[str, State] = field(default_factory=dict)
-    
+    States: dict[str, State] = field(default_factory=dict)
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'WorkflowDSL':
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowDSL":
         """Parse DSL from dictionary."""
         inputs = None
         if "Inputs" in data:
-            inputs = {
-                k: InputDefinition(**v) if isinstance(v, dict) else v
-                for k, v in data["Inputs"].items()
-            }
-        
+            inputs = {k: InputDefinition(**v) if isinstance(v, dict) else v for k, v in data["Inputs"].items()}
+
         start_at = data.get("StartAt", "")
         states_dict = data.get("States", {})
-        
+
         states = {}
         for state_name, state_data in states_dict.items():
             if not isinstance(state_data, dict):
                 continue
-            
+
             state_type_str = state_data.get("Type", "")
             state_type = StateType(state_type_str)
-            
+
             if state_type == StateType.SKILL:
                 state = SkillState(
                     Type=state_type,
@@ -210,10 +223,12 @@ class WorkflowDSL:
                     branch_states = {}
                     for branch_state_name, branch_state_data in branch_data.get("States", {}).items():
                         branch_states[branch_state_name] = cls._parse_state(branch_state_data)
-                    branches.append(ParallelBranch(
-                        StartAt=branch_data.get("StartAt", ""),
-                        States=branch_states,
-                    ))
+                    branches.append(
+                        ParallelBranch(
+                            StartAt=branch_data.get("StartAt", ""),
+                            States=branch_states,
+                        )
+                    )
                 state = ParallelState(
                     Type=state_type,
                     Branches=branches,
@@ -242,21 +257,21 @@ class WorkflowDSL:
                 )
             else:
                 continue
-            
+
             states[state_name] = state
-        
+
         return cls(
             Inputs=inputs,
             StartAt=start_at,
             States=states,
         )
-    
+
     @staticmethod
-    def _parse_state(state_data: Dict[str, Any]) -> State:
+    def _parse_state(state_data: dict[str, Any]) -> State:
         """Parse a single state from dict (helper for nested states)."""
         state_type_str = state_data.get("Type", "")
         state_type = StateType(state_type_str)
-        
+
         if state_type == StateType.SKILL:
             return SkillState(
                 Type=state_type,
@@ -276,36 +291,36 @@ class WorkflowDSL:
         else:
             # For nested states in Parallel, only Skill and Pass are allowed in M1
             raise ValueError(f"Unsupported state type in Parallel branch: {state_type}")
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert DSL to dictionary."""
         result = {
             "StartAt": self.StartAt,
             "States": {},
         }
-        
+
         if self.Inputs:
             result["Inputs"] = {
                 k: {
                     "Type": v.Type,
                     "Value": v.Value,
-                    **({"Desc": v.Desc} if v.Desc else {})
+                    **({"Desc": v.Desc} if v.Desc else {}),
                 }
                 for k, v in self.Inputs.items()
             }
-        
+
         for state_name, state in self.States.items():
             state_dict = {
                 "Type": state.Type.value,
             }
-            
+
             if state.Timeout is not None:
                 state_dict["Timeout"] = state.Timeout
             if state.Next is not None:
                 state_dict["Next"] = state.Next
             if state.End is not None:
                 state_dict["End"] = state.End
-            
+
             if isinstance(state, SkillState):
                 state_dict["Skill"] = state.Skill
                 if state.Parameters:
@@ -324,10 +339,7 @@ class WorkflowDSL:
                 state_dict["Branches"] = [
                     {
                         "StartAt": branch.StartAt,
-                        "States": {
-                            name: self._state_to_dict(s)
-                            for name, s in branch.States.items()
-                        }
+                        "States": {name: self._state_to_dict(s) for name, s in branch.States.items()},
                     }
                     for branch in state.Branches
                 ]
@@ -337,28 +349,28 @@ class WorkflowDSL:
                     "Topic": state.Event.Topic,
                 }
                 state_dict["Timeout"] = state.Timeout
-            
+
             result["States"][state_name] = state_dict
-        
+
         return result
-    
+
     @staticmethod
-    def _state_to_dict(state: State) -> Dict[str, Any]:
+    def _state_to_dict(state: State) -> dict[str, Any]:
         """Convert a state to dictionary (helper for nested states)."""
         state_dict = {
             "Type": state.Type.value,
         }
-        
+
         if state.Timeout is not None:
             state_dict["Timeout"] = state.Timeout
         if state.Next is not None:
             state_dict["Next"] = state.Next
         if state.End is not None:
             state_dict["End"] = state.End
-        
+
         if isinstance(state, SkillState):
             state_dict["Skill"] = state.Skill
             if state.Parameters:
                 state_dict["Parameters"] = state.Parameters
-        
+
         return state_dict

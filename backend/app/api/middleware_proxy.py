@@ -2,19 +2,19 @@
 Frontend calls Backend at /api/v1/*; Backend forwards to Middleware.
 See docs/middleware-api-spec.md.
 """
+
 import os
-from flask import Blueprint, current_app, request, jsonify
+
+from flask import Blueprint, current_app, jsonify, request
 
 from app.adapters.middleware_client import MiddlewareClient
-
 
 bp = Blueprint("middleware_proxy", __name__)
 
 
 def _middleware_client() -> MiddlewareClient:
-    base_url = (
-        current_app.config.get("MIDDLEWARE_BASE_URL")
-        or os.environ.get("MIDDLEWARE_BASE_URL", "http://localhost:8000")
+    base_url = current_app.config.get("MIDDLEWARE_BASE_URL") or os.environ.get(
+        "MIDDLEWARE_BASE_URL", "http://localhost:8000"
     )
     return MiddlewareClient(base_url)
 

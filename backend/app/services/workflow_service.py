@@ -1,29 +1,29 @@
 """Workflow service (use cases)."""
-from typing import List, Optional
-from datetime import datetime
+
 import uuid
+from datetime import datetime
 
 from app.domain.models import (
+    VersionState,
     Workflow,
+    WorkflowState,
     WorkflowVersion,
     WorkflowView,
-    WorkflowState,
-    VersionState,
 )
 from app.repos.interfaces import (
+    NodeRunRepository,
+    RunEventRepository,
+    RunRepository,
     WorkflowRepository,
     WorkflowVersionRepository,
     WorkflowViewRepository,
-    RunRepository,
-    NodeRunRepository,
-    RunEventRepository,
 )
-from app.services.validation import validate_workflow_dsl, ValidationError
+from app.services.validation import ValidationError, validate_workflow_dsl
 
 
 class WorkflowService:
     """Workflow service."""
-    
+
     def __init__(
         self,
         workflow_repo: WorkflowRepository,
@@ -39,8 +39,8 @@ class WorkflowService:
         self.run_repo = run_repo
         self.node_run_repo = node_run_repo
         self.run_event_repo = run_event_repo
-    
-    def create_workflow(self, name: str, description: Optional[str] = None) -> Workflow:
+
+    def create_workflow(self, name: str, description: str | None = None) -> Workflow:
         """Create a new workflow."""
         workflow = Workflow(
             workflow_id=str(uuid.uuid4()),
@@ -62,44 +62,39 @@ class WorkflowService:
         self.view_repo.save(WorkflowView(version_id=draft.version_id, view_json={}))
 
         return workflow
-    
-    def list_workflows(self) -> List[Workflow]:
+
+    def list_workflows(self) -> list[Workflow]:
         """List all workflows."""
         return self.workflow_repo.list_all()
-    
-    def get_workflow(self, workflow_id: str) -> Optional[Workflow]:
+
+    def get_workflow(self, workflow_id: str) -> Workflow | None:
         """Get workflow by ID."""
         return self.workflow_repo.get(workflow_id)
-    
+
     def update_workflow_metadata(
         self,
         workflow_id: str,
-        name: Optional[str] = None,
-        description: Optional[str] = None
-    ) -> Optional[Workflow]:
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Workflow | None:
         """Update workflow metadata."""
         workflow = self.workflow_repo.get(workflow_id)
         if not workflow:
             return None
-        
+
         if name is not None:
             workflow.name = name
         if description is not None:
             workflow.description = description
-        
+
         return self.workflow_repo.update(workflow)
-    
-    def save_draft(
-        self,
-        workflow_id: str,
-        dsl_json: dict,
-        view_json: dict
-    ) -> Optional[WorkflowVersion]:
+
+    def save_draft(self, workflow_id: str, dsl_json: dict, view_json: dict) -> WorkflowVersion | None:
         """Save draft version."""
         workflow = self.workflow_repo.get(workflow_id)
         if not workflow:
             return None
-        
+
         # Get or create draft version
         draft = self.version_repo.get_latest_draft(workflow_id)
         if draft:
@@ -115,17 +110,17 @@ class WorkflowService:
                 dsl_json=dsl_json,
             )
             draft = self.version_repo.create(draft)
-        
+
         # Save view
         view = WorkflowView(
             version_id=draft.version_id,
             view_json=view_json,
         )
         self.view_repo.save(view)
-        
+
         return draft
-    
-    def validate_draft(self, workflow_id: str) -> List[ValidationError]:
+
+    def validate_draft(self, workflow_id: str) -> list[ValidationError]:
         """Validate draft workflow."""
         draft = self.version_repo.get_latest_draft(workflow_id)
         if draft:
@@ -140,36 +135,36 @@ class WorkflowService:
             return [ValidationError(id="no_published", message="Published version not found")]
 
         return validate_workflow_dsl(published.dsl_json)
-    
-    def publish_workflow(self, workflow_id: str) -> Optional[WorkflowVersion]:
+
+    def publish_workflow(self, workflow_id: str) -> WorkflowVersion | None:
         """Publish workflow version."""
         workflow = self.workflow_repo.get(workflow_id)
         if not workflow:
             return None
-        
+
         # Validate
         errors = self.validate_draft(workflow_id)
         if errors:
             raise ValueError(f"Validation failed: {[e.message for e in errors]}")
-        
+
         # Get draft
         draft = self.version_repo.get_latest_draft(workflow_id)
         if not draft:
             return None
-        
+
         # Publish
         draft.state = VersionState.PUBLISHED
         draft.published_at = datetime.utcnow()
         draft = self.version_repo.update(draft)
-        
+
         # Update workflow
         workflow.current_published_version_id = draft.version_id
         workflow.state = WorkflowState.PUBLISHED
         workflow = self.workflow_repo.update(workflow)
-        
+
         return draft
-    
-    def get_draft(self, workflow_id: str) -> Optional[dict]:
+
+    def get_draft(self, workflow_id: str) -> dict | None:
         """Get draft with view."""
         draft = self.version_repo.get_latest_draft(workflow_id)
         if draft:

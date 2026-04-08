@@ -1,15 +1,16 @@
 """Execution engine adapter that uses middleware REST + WebSocket monitor."""
+
 import logging
 import threading
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Any
 
-from app.domain.models import Run, RunStatus
 from app.adapters.execution_engine import ExecutionEngineAdapter
 from app.adapters.middleware_client import (
     MiddlewareClient,
     run_middleware_monitor_ws,
 )
+from app.domain.models import Run, RunStatus
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,13 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
         self.run_event_repo = run_event_repo
         self.workflow_repo = workflow_repo
         self.workflow_version_repo = workflow_version_repo
-        self._monitor_thread: Optional[threading.Thread] = None
+        self._monitor_thread: threading.Thread | None = None
 
     def start_execution(
         self,
         run_id: str,
-        workflow_dsl: Dict[str, Any],
-        run_input: Optional[Dict[str, Any]] = None,
+        workflow_dsl: dict[str, Any],
+        run_input: dict[str, Any] | None = None,
     ) -> None:
         """Start workflow on middleware and start monitor WebSocket (persist to DB)."""
         run = self.run_repo.get(run_id)
@@ -61,7 +62,6 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
             return
 
         workflow_id = resp.get("workflow_id")
-        status = (resp.get("status") or "").lower()
         if not workflow_id:
             run.status = RunStatus.FAILED
             run.failure_code = "MIDDLEWARE_NO_WORKFLOW_ID"
@@ -116,6 +116,7 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
         self.run_repo.update(run)
 
         import uuid
+
         from app.domain.models import RunEvent
 
         seq = (self.run_event_repo.get_max_seq(run_id) or 0) + 1
@@ -135,7 +136,7 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
         self,
         run_id: str,
         state_name: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
     ) -> None:
         """Resume is not implemented for middleware adapter (middleware may support later)."""
         logger.warning("resume_wait not implemented for middleware adapter")
@@ -183,6 +184,7 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
                     self.run_repo.update(run)
 
                     import uuid
+
                     from app.domain.models import RunEvent
 
                     seq = (self.run_event_repo.get_max_seq(run_id) or 0) + 1
@@ -194,7 +196,10 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
                             timestamp=datetime.utcnow(),
                             event_type="RUN_CANCELED" if run.status == RunStatus.CANCELED else "RUN_COMPLETED",
                             state_name=None,
-                            payload_json={"source": "reconcile_stale_run", "middleware_status": status},
+                            payload_json={
+                                "source": "reconcile_stale_run",
+                                "middleware_status": status,
+                            },
                         )
                     )
                     logger.info(
@@ -213,6 +218,7 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
         self.run_repo.update(run)
 
         import uuid
+
         from app.domain.models import RunEvent
 
         seq = (self.run_event_repo.get_max_seq(run_id) or 0) + 1
@@ -224,7 +230,10 @@ class MiddlewareExecutionEngineAdapter(ExecutionEngineAdapter):
                 timestamp=datetime.utcnow(),
                 event_type="RUN_CANCELED",
                 state_name=None,
-                payload_json={"source": "reconcile_stale_run", "middleware_status": "unknown"},
+                payload_json={
+                    "source": "reconcile_stale_run",
+                    "middleware_status": "unknown",
+                },
             )
         )
         logger.info("Reconciled stale run %s (middleware idle, marked CANCELED)", run_id)

@@ -1,8 +1,28 @@
 """Workflow API endpoints."""
-from datetime import timezone
-from flask import Blueprint, request, jsonify
-from werkzeug.exceptions import BadRequest, NotFound, Conflict
 
+from datetime import timezone
+
+from flask import Blueprint, jsonify, request
+from werkzeug.exceptions import BadRequest, NotFound
+
+from app.repos.registry import (
+    node_run_repo as _node_run_repo,
+)
+from app.repos.registry import (
+    run_event_repo as _run_event_repo,
+)
+from app.repos.registry import (
+    run_repo as _run_repo,
+)
+from app.repos.registry import (
+    version_repo as _version_repo,
+)
+from app.repos.registry import (
+    view_repo as _view_repo,
+)
+from app.repos.registry import (
+    workflow_repo as _workflow_repo,
+)
 from app.services.workflow_service import WorkflowService
 from app.utils.datetime_helpers import run_duration_ms
 
@@ -14,14 +34,6 @@ def _utc_timestamp(dt):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.timestamp()
-from app.repos.registry import (
-    workflow_repo as _workflow_repo,
-    version_repo as _version_repo,
-    view_repo as _view_repo,
-    run_repo as _run_repo,
-    node_run_repo as _node_run_repo,
-    run_event_repo as _run_event_repo,
-)
 
 
 _workflow_service = WorkflowService(
@@ -41,16 +53,13 @@ bp = Blueprint("workflows", __name__)
 def list_workflows():
     """List all workflows."""
     workflows = _workflow_service.list_workflows()
-    
+
     result = []
     for wf in workflows:
         latest_run = None
         runs = _run_repo.list_all({"workflow_id": wf.workflow_id})
         if runs:
-            run = max(
-                runs,
-                key=lambda r: _utc_timestamp(r.started_at or r.created_at)
-            )
+            run = max(runs, key=lambda r: _utc_timestamp(r.started_at or r.created_at))
             duration_ms = run_duration_ms(run.started_at, run.finished_at)
             latest_run = {
                 "runId": run.run_id,
@@ -71,15 +80,17 @@ def list_workflows():
                     "versionNumber": version.version_number,
                     "publishedAt": version.published_at.isoformat() if version.published_at else None,
                 }
-        
-        result.append({
-            "workflowId": wf.workflow_id,
-            "name": wf.name,
-            "state": wf.state.value,
-            "latestVersion": latest_version,
-            "latestRun": latest_run,
-        })
-    
+
+        result.append(
+            {
+                "workflowId": wf.workflow_id,
+                "name": wf.name,
+                "state": wf.state.value,
+                "latestVersion": latest_version,
+                "latestRun": latest_run,
+            }
+        )
+
     return jsonify(result)
 
 
@@ -89,15 +100,17 @@ def create_workflow():
     data = request.get_json() or {}
     name = data.get("name", "Untitled Workflow")
     description = data.get("description")
-    
+
     workflow = _workflow_service.create_workflow(name, description)
-    
-    return jsonify({
-        "workflowId": workflow.workflow_id,
-        "name": workflow.name,
-        "description": workflow.description,
-        "state": workflow.state.value,
-    }), 201
+
+    return jsonify(
+        {
+            "workflowId": workflow.workflow_id,
+            "name": workflow.name,
+            "description": workflow.description,
+            "state": workflow.state.value,
+        }
+    ), 201
 
 
 @bp.route("/<workflow_id>", methods=["GET"])
@@ -106,14 +119,16 @@ def get_workflow(workflow_id: str):
     workflow = _workflow_service.get_workflow(workflow_id)
     if not workflow:
         raise NotFound(f"Workflow {workflow_id} not found")
-    
-    return jsonify({
-        "workflowId": workflow.workflow_id,
-        "name": workflow.name,
-        "description": workflow.description,
-        "state": workflow.state.value,
-        "currentPublishedVersionId": workflow.current_published_version_id,
-    })
+
+    return jsonify(
+        {
+            "workflowId": workflow.workflow_id,
+            "name": workflow.name,
+            "description": workflow.description,
+            "state": workflow.state.value,
+            "currentPublishedVersionId": workflow.current_published_version_id,
+        }
+    )
 
 
 @bp.route("/<workflow_id>", methods=["PATCH"])
@@ -122,16 +137,18 @@ def update_workflow(workflow_id: str):
     data = request.get_json() or {}
     name = data.get("name")
     description = data.get("description")
-    
+
     workflow = _workflow_service.update_workflow_metadata(workflow_id, name, description)
     if not workflow:
         raise NotFound(f"Workflow {workflow_id} not found")
-    
-    return jsonify({
-        "workflowId": workflow.workflow_id,
-        "name": workflow.name,
-        "description": workflow.description,
-    })
+
+    return jsonify(
+        {
+            "workflowId": workflow.workflow_id,
+            "name": workflow.name,
+            "description": workflow.description,
+        }
+    )
 
 
 @bp.route("/<workflow_id>/draft", methods=["GET"])
@@ -140,7 +157,7 @@ def get_draft(workflow_id: str):
     draft = _workflow_service.get_draft(workflow_id)
     if not draft:
         raise NotFound(f"Draft not found for workflow {workflow_id}")
-    
+
     return jsonify(draft)
 
 
@@ -150,32 +167,36 @@ def save_draft(workflow_id: str):
     data = request.get_json() or {}
     dsl_json = data.get("dsl_json", {})
     view_json = data.get("view_json", {})
-    
+
     version = _workflow_service.save_draft(workflow_id, dsl_json, view_json)
     if not version:
         raise NotFound(f"Workflow {workflow_id} not found")
-    
-    return jsonify({
-        "workflowId": workflow_id,
-        "dsl_json": version.dsl_json,
-        "view_json": view_json,
-        "updatedAt": version.created_at.isoformat(),
-    })
+
+    return jsonify(
+        {
+            "workflowId": workflow_id,
+            "dsl_json": version.dsl_json,
+            "view_json": view_json,
+            "updatedAt": version.created_at.isoformat(),
+        }
+    )
 
 
 @bp.route("/<workflow_id>/validate", methods=["POST"])
 def validate_draft(workflow_id: str):
     """Validate draft workflow (DSL v1)."""
     errors = _workflow_service.validate_draft(workflow_id)
-    
-    return jsonify([
-        {
-            "node_name": e.nodeId if e.nodeId else None,
-            "error_code": e.error_code if e.error_code else e.id.upper(),
-            "message": e.message,
-        }
-        for e in errors
-    ])
+
+    return jsonify(
+        [
+            {
+                "node_name": e.nodeId if e.nodeId else None,
+                "error_code": e.error_code if e.error_code else e.id.upper(),
+                "message": e.message,
+            }
+            for e in errors
+        ]
+    )
 
 
 @bp.route("/<workflow_id>/publish", methods=["POST"])
@@ -185,14 +206,16 @@ def publish_workflow(workflow_id: str):
         version = _workflow_service.publish_workflow(workflow_id)
         if not version:
             raise NotFound(f"Workflow {workflow_id} not found")
-        
-        return jsonify({
-            "versionId": version.version_id,
-            "versionNumber": version.version_number,
-            "publishedAt": version.published_at.isoformat() if version.published_at else None,
-        }), 201
+
+        return jsonify(
+            {
+                "versionId": version.version_id,
+                "versionNumber": version.version_number,
+                "publishedAt": version.published_at.isoformat() if version.published_at else None,
+            }
+        ), 201
     except ValueError as e:
-        raise BadRequest(str(e))
+        raise BadRequest(str(e)) from e
 
 
 @bp.route("/<workflow_id>", methods=["DELETE"])

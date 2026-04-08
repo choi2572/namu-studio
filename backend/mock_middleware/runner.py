@@ -1,8 +1,9 @@
 """Simulate workflow execution order from DSL (StartAt, Next, Condition, Parallel, Repeat, Retry)."""
-from typing import Any, Dict, List, Optional, Tuple
+
+from typing import Any
 
 
-def _eval_if_condition(if_block: Dict[str, Any]) -> bool:
+def _eval_if_condition(if_block: dict[str, Any]) -> bool:
     """Evaluate If.Condition (Variable, Operator, Value) like the real runner; default True if malformed."""
     cond = (if_block or {}).get("Condition")
     if not isinstance(cond, dict):
@@ -11,7 +12,7 @@ def _eval_if_condition(if_block: Dict[str, Any]) -> bool:
     op = str(cond.get("Operator") or "==").strip()
     val = cond.get("Value")
 
-    def as_num(x: Any) -> Optional[float]:
+    def as_num(x: Any) -> float | None:
         if isinstance(x, bool):
             return None
         if isinstance(x, (int, float)):
@@ -44,7 +45,7 @@ def _eval_if_condition(if_block: Dict[str, Any]) -> bool:
     return False
 
 
-def _resolve_start_state(dsl: Dict[str, Any], states: Dict[str, Any]) -> Optional[str]:
+def _resolve_start_state(dsl: dict[str, Any], states: dict[str, Any]) -> str | None:
     """StartAt가 States에 없으면 top-level Inputs.Next로 보조 (에디터 외부 Input 블록)."""
     start_at = dsl.get("StartAt")
     if isinstance(start_at, str) and start_at in states:
@@ -57,7 +58,7 @@ def _resolve_start_state(dsl: Dict[str, Any], states: Dict[str, Any]) -> Optiona
     return None
 
 
-def _is_inputs_pass_state(state_name: str, state: Dict[str, Any]) -> bool:
+def _is_inputs_pass_state(state_name: str, state: dict[str, Any]) -> bool:
     """
     States 안에 남아 있는 레거시 Input(Pass)은 모니터/실행에서 노드로 치지 않고 Next만 탄다.
     VLM Pass(플래너)는 제외.
@@ -70,14 +71,12 @@ def _is_inputs_pass_state(state_name: str, state: Dict[str, Any]) -> bool:
     if sk:
         return False
     label = str(state.get("Label") or "")
-    if state_name.startswith("VLMPlanner") or (
-        "VLM" in label.upper() and "PLANNER" in label.upper()
-    ):
+    if state_name.startswith("VLMPlanner") or ("VLM" in label.upper() and "PLANNER" in label.upper()):
         return False
     return True
 
 
-def get_execution_order(dsl: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+def get_execution_order(dsl: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """
     Flatten DSL into a list of (state_name, state_def) in execution order.
     - Linear: StartAt -> Next -> ... -> End
@@ -88,7 +87,7 @@ def get_execution_order(dsl: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]
     if not states:
         return []
 
-    order: List[Tuple[str, Dict[str, Any]]] = []
+    order: list[tuple[str, dict[str, Any]]] = []
     start_at = _resolve_start_state(dsl, states)
     if not start_at:
         return order
@@ -143,8 +142,8 @@ def get_execution_order(dsl: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]
 
     def _collect_linear(
         name: str,
-        local_states: Dict[str, Any],
-        out: List[Tuple[str, Dict[str, Any]]],
+        local_states: dict[str, Any],
+        out: list[tuple[str, dict[str, Any]]],
         seen: set,
     ) -> None:
         if name in seen:
@@ -163,13 +162,13 @@ def get_execution_order(dsl: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]
     return order
 
 
-def get_branch_order(branch: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+def get_branch_order(branch: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """한 Parallel 브랜치 내 (state_name, state_def) 순서. 스레드에서 실행용."""
     branch_states = branch.get("States") or {}
     branch_start = branch.get("StartAt")
     if not branch_start or branch_start not in branch_states:
         return []
-    out: List[Tuple[str, Dict[str, Any]]] = []
+    out: list[tuple[str, dict[str, Any]]] = []
     seen: set = set()
 
     def walk(name: str) -> None:

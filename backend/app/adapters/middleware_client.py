@@ -1,22 +1,24 @@
 """Middleware REST + WebSocket client (workflow execution & monitor).
 See docs/middleware-api-spec.md.
 """
+
 import json
 import logging
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional
-from urllib.request import Request, urlopen
+from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-from app.domain.models import NodeRun, NodeStatus, Run, RunEvent, RunStatus
+from app.domain.models import NodeRun, NodeStatus, RunEvent, RunStatus
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_ts(ts: Any) -> Optional[datetime]:
+def _parse_ts(ts: Any) -> datetime | None:
     """Parse timestamp (ISO string or number) to datetime."""
     if ts is None:
         return None
@@ -62,8 +64,8 @@ class MiddlewareClient:
         self,
         method: str,
         path: str,
-        body: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         url = self._url(path)
         data = None
         if body is not None:
@@ -81,17 +83,17 @@ class MiddlewareClient:
             body = e.read().decode("utf-8") if e.fp else ""
             try:
                 err = json.loads(body)
-                raise RuntimeError(err.get("message", err.get("error", body)))
-            except json.JSONDecodeError:
-                raise RuntimeError(body or str(e))
+                raise RuntimeError(err.get("message", err.get("error", body))) from e
+            except json.JSONDecodeError as dec_err:
+                raise RuntimeError(body or str(dec_err)) from dec_err
         except URLError as e:
-            raise RuntimeError(f"Middleware unreachable: {e.reason}")
+            raise RuntimeError(f"Middleware unreachable: {e.reason}") from e
 
-    def get_runner_status(self) -> Dict[str, Any]:
+    def get_runner_status(self) -> dict[str, Any]:
         """GET /api/v1/runner/status"""
         return self._request("GET", "/api/v1/runner/status")
 
-    def start_workflow(self, workflow_json: Dict[str, Any]) -> Dict[str, Any]:
+    def start_workflow(self, workflow_json: dict[str, Any]) -> dict[str, Any]:
         """POST /api/v1/workflows/run with request_type start."""
         return self._request(
             "POST",
@@ -99,7 +101,7 @@ class MiddlewareClient:
             {"request_type": "start", "workflow_json": workflow_json},
         )
 
-    def cancel_workflow(self) -> Dict[str, Any]:
+    def cancel_workflow(self) -> dict[str, Any]:
         """POST /api/v1/workflows/run with request_type cancel."""
         return self._request(
             "POST",
@@ -107,36 +109,36 @@ class MiddlewareClient:
             {"request_type": "cancel"},
         )
 
-    def workflows_run(self, body: Dict[str, Any]) -> Dict[str, Any]:
+    def workflows_run(self, body: dict[str, Any]) -> dict[str, Any]:
         """POST /api/v1/workflows/run — forward request body (start/cancel)."""
         return self._request("POST", "/api/v1/workflows/run", body=body)
 
-    def workflows_action_status(self, body: Dict[str, Any]) -> Dict[str, Any]:
+    def workflows_action_status(self, body: dict[str, Any]) -> dict[str, Any]:
         """POST /api/v1/workflows/action-status — external action status update."""
         return self._request("POST", "/api/v1/workflows/action-status", body=body)
 
-    def get_workflow_info(self, workflow_id: str) -> Dict[str, Any]:
+    def get_workflow_info(self, workflow_id: str) -> dict[str, Any]:
         """GET /api/v1/workflows/{workflow_id} (workflow information)."""
         return self._request(
             "GET",
             f"/api/v1/workflows/{workflow_id}",
         )
 
-    def get_workflow_json(self, workflow_id: str) -> Dict[str, Any]:
+    def get_workflow_json(self, workflow_id: str) -> dict[str, Any]:
         """GET /api/v1/workflows/{workflow_id}/json — workflow DSL JSON for rendering."""
         return self._request(
             "GET",
             f"/api/v1/workflows/{workflow_id}/json",
         )
 
-    def get_skill_set(self) -> Dict[str, Any]:
+    def get_skill_set(self) -> dict[str, Any]:
         """GET /api/v1/skill-sets from middleware (skillsets list)."""
         return self._request("GET", "/api/v1/skill-sets")
 
 
 def _apply_initial_to_db(
     run_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     run_repo,
     node_run_repo,
     run_event_repo,
@@ -256,7 +258,10 @@ def _apply_initial_to_db(
                         timestamp=completed_at,
                         event_type="NODE_SUCCEEDED",
                         state_name=node_name,
-                        payload_json={"output": output_json, "duration_ms": duration_ms},
+                        payload_json={
+                            "output": output_json,
+                            "duration_ms": duration_ms,
+                        },
                     )
                 )
             elif status_str == "FAILURE":
@@ -276,7 +281,7 @@ def _apply_initial_to_db(
 
 def _apply_node_status_change(
     run_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     run_repo,
     node_run_repo,
     run_event_repo,
@@ -383,7 +388,7 @@ def _apply_node_status_change(
 
 def _apply_workflow_completed(
     run_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     run_repo,
     node_run_repo,
     run_event_repo,
@@ -443,7 +448,7 @@ def _apply_workflow_completed(
 
     # terminal 보정으로 추가된 노드 completion 이벤트도 넣어서
     # 모니터 timeline/replay에도 반영되게 한다.
-    seq = (run_event_repo.get_max_seq(run_id) or 0)
+    seq = run_event_repo.get_max_seq(run_id) or 0
     for node_name in updated_node_state_names:
         seq += 1
         run_event_repo.create(
@@ -474,7 +479,7 @@ def _apply_workflow_completed(
 
 def _apply_error(
     run_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     run_repo,
     node_run_repo,
     run_event_repo,
@@ -519,7 +524,7 @@ def _apply_error(
 
 def _apply_feedback(
     run_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     node_run_repo,
 ) -> None:
     """Store feedback on node_run."""
@@ -534,7 +539,7 @@ def _apply_feedback(
 
 def _apply_graph_patch(
     run_id: str,
-    data: Dict[str, Any],
+    data: dict[str, Any],
     run_event_repo,
 ) -> None:
     """Persist graph_patch event for replay and monitor (VLM dynamic workflow)."""
@@ -568,7 +573,7 @@ def run_middleware_monitor_ws(
     run_repo,
     node_run_repo,
     run_event_repo,
-    on_done: Optional[Callable[[], None]] = None,
+    on_done: Callable[[], None] | None = None,
 ) -> None:
     """
     Connect to WS /api/v1/workflows/monitor and persist all events to DB.
@@ -578,9 +583,7 @@ def run_middleware_monitor_ws(
     try:
         import websocket
     except ImportError:
-        logger.warning(
-            "websocket-client not installed; run pip install websocket-client for middleware monitor"
-        )
+        logger.warning("websocket-client not installed; run pip install websocket-client for middleware monitor")
         if on_done:
             on_done()
         return
@@ -591,31 +594,31 @@ def run_middleware_monitor_ws(
         path = "/" + path
     url = f"{ws_url.rstrip('/')}{path}"
 
-    def persist_initial(data: Dict[str, Any]) -> None:
-        _apply_initial_to_db(
-            run_id, data, run_repo, node_run_repo, run_event_repo
-        )
+    def persist_initial(data: dict[str, Any]) -> None:
+        _apply_initial_to_db(run_id, data, run_repo, node_run_repo, run_event_repo)
 
-    def persist_node_change(data: Dict[str, Any]) -> None:
-        _apply_node_status_change(
-            run_id, data, run_repo, node_run_repo, run_event_repo
-        )
+    def persist_node_change(data: dict[str, Any]) -> None:
+        _apply_node_status_change(run_id, data, run_repo, node_run_repo, run_event_repo)
 
-    def persist_workflow_completed(data: Dict[str, Any]) -> None:
+    def persist_workflow_completed(data: dict[str, Any]) -> None:
         _apply_workflow_completed(run_id, data, run_repo, node_run_repo, run_event_repo)
 
-    def persist_error(data: Dict[str, Any]) -> None:
+    def persist_error(data: dict[str, Any]) -> None:
         _apply_error(run_id, data, run_repo, node_run_repo, run_event_repo)
 
-    def persist_feedback(data: Dict[str, Any]) -> None:
+    def persist_feedback(data: dict[str, Any]) -> None:
         _apply_feedback(run_id, data, node_run_repo)
 
-    def persist_graph_patch(data: Dict[str, Any]) -> None:
+    def persist_graph_patch(data: dict[str, Any]) -> None:
         _apply_graph_patch(run_id, data, run_event_repo)
 
     closed = threading.Event()
 
-    debug_ws = os.getenv("NAMU_MONITOR_WS_DEBUG", "").strip().lower() in ("1", "true", "yes")
+    debug_ws = os.getenv("NAMU_MONITOR_WS_DEBUG", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     def on_message(ws, message: str) -> None:
         try:
@@ -625,7 +628,12 @@ def run_middleware_monitor_ws(
             return
         msg_type = (data.get("type") or "").strip().lower()
         if debug_ws:
-            logger.info("Monitor WS run_id=%s type=%s payload=%s", run_id, msg_type, json.dumps(data, ensure_ascii=False))
+            logger.info(
+                "Monitor WS run_id=%s type=%s payload=%s",
+                run_id,
+                msg_type,
+                json.dumps(data, ensure_ascii=False),
+            )
         else:
             logger.debug("Monitor WS run_id=%s type=%s", run_id, msg_type)
         try:
@@ -689,7 +697,11 @@ def run_middleware_monitor_ws(
     finally:
         # Fallback: if run still active, sync once via workflow information API (REST)
         run = run_repo.get(run_id)
-        if run and run.status in (RunStatus.RUNNING, RunStatus.WAITING) and getattr(run, "middleware_workflow_id", None):
+        if (
+            run
+            and run.status in (RunStatus.RUNNING, RunStatus.WAITING)
+            and getattr(run, "middleware_workflow_id", None)
+        ):
             try:
                 client = MiddlewareClient(base_url)
                 info = client.get_workflow_info(run.middleware_workflow_id)
