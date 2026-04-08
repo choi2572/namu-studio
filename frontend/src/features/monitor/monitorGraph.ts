@@ -89,7 +89,6 @@ function collectNodesAndEdges(
   edges: MonitorEdge[],
   edgeIdCounter: { current: number }
 ): void {
-  const pathBase = pathPrefix.length > 0 ? pathPrefix[pathPrefix.length - 1] : NODE_PATH.ROOT;
   Object.entries(states).forEach(([stateName, state]) => {
     if (!isRecord(state)) return;
     const type = state.Type as string | undefined;

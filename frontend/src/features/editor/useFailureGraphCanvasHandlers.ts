@@ -37,7 +37,7 @@ export type UseFailureGraphCanvasHandlersParams = {
   buildDefaultParams: (kind: NodeKind) => Record<string, string>;
   createConditionExpression: (operator: ConditionOperator | null) => ConditionExpression;
   normalizeConditionExpressions: (expressions: ConditionExpression[]) => ConditionExpression[];
-  nextFailureNodeIndex: MutableRefObject<number>;
+  nextFailureNodeIndexRef: MutableRefObject<number>;
   nextVariableRowIndex: MutableRefObject<number>;
   getCanvasBounds: (
     canvasBase: { width: number; height: number },
@@ -59,7 +59,7 @@ export function useFailureGraphCanvasHandlers({
   buildDefaultParams,
   createConditionExpression,
   normalizeConditionExpressions,
-  nextFailureNodeIndex,
+  nextFailureNodeIndexRef,
   nextVariableRowIndex,
   getCanvasBounds,
   clamp,
@@ -77,7 +77,7 @@ export function useFailureGraphCanvasHandlers({
         return;
       }
       const config = nodeTypeConfig[kind];
-      const index = nextFailureNodeIndex.current++;
+      const index = nextFailureNodeIndexRef.current++;
       const id = `failure-node-${index}`;
       const name = config ? `${config.label} ${index}` : `${kind} ${index}`;
       const params = buildDefaultParams(kind);

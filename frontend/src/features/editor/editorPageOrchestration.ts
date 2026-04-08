@@ -81,7 +81,7 @@ type ImportRollbackRefs = {
   nextEdgeIndex: MutableRefObject<number>;
   nextConditionIndex: MutableRefObject<number>;
   nextVariableRowIndex: MutableRefObject<number>;
-  nextFailureNodeIndex: MutableRefObject<number>;
+  nextFailureNodeIndexRef: MutableRefObject<number>;
   setHasUnsavedChanges: (value: boolean) => void;
   setSelectedNode: (value: string | null) => void;
   setSelectedEdgeId: (value: string | null) => void;
@@ -105,7 +105,7 @@ export function restoreEditorFromImportRollbackSnapshot(
   a.nextEdgeIndex.current = snapshot.nextEdgeIndex;
   a.nextConditionIndex.current = snapshot.nextConditionIndex;
   a.nextVariableRowIndex.current = snapshot.nextVariableRowIndex;
-  a.nextFailureNodeIndex.current = snapshot.nextFailureNodeIndex;
+  a.nextFailureNodeIndexRef.current = snapshot.nextFailureNodeIndex;
   a.setHasUnsavedChanges(snapshot.hasUnsavedChanges);
   a.setSelectedNode(snapshot.selectedNode);
   a.setSelectedEdgeId(snapshot.selectedEdgeId);

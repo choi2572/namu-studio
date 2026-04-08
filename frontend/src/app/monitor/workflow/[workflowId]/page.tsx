@@ -9,7 +9,7 @@ import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { buildMonitorGraph } from "@/features/monitor/monitorGraph";
 import { DagView } from "@/features/monitor/DagView";
-import { NodeStatus, RunStatus } from "@/domain/types";
+import { NodeStatus } from "@/domain/types";
 import type { NodeStateSnapshot } from "@/api/interfaces";
 
 function getRunErrorMessage(err: unknown): string {

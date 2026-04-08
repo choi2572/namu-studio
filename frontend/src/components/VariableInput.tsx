@@ -156,7 +156,7 @@ export function VariableInput({
       : undefined;
 
   return (
-    <div className="relative w-full">
+    <div className={cn("relative w-full", className)}>
       <input
         ref={inputRef}
         type="text"

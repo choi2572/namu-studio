@@ -28,14 +28,11 @@ import {
 import {
   CANVAS_DEFAULT,
   CANVAS_PADDING,
-  CONTAINER_FRAME_DEFAULTS,
   CONTAINER_FRAME_METRICS,
-  CONTAINER_LAYOUT,
   DEFAULT_PARALLEL_BRANCHES,
   FAILURE_CANVAS_BASE,
   NODE_METRICS,
   RETRY_THEME_COLORS,
-  RIBBON_EXTRA_HEIGHT,
   STATIC_NODE_TYPE_CONFIG,
   ZOOM_LIMITS
 } from "./editorConstants";
@@ -91,28 +88,21 @@ import {
   isForbiddenInRetryScope,
   recomputeRetryScopeMembership
 } from "./editorRetryScope";
-import {
-  createNodeTypeConfigFromSkillsets,
-  getSkillDisplayType,
-  getSkillNodeKind
-} from "./editorSkillset";
+import { createNodeTypeConfigFromSkillsets, getSkillNodeKind } from "./editorSkillset";
 import type {
   ConditionExpression,
   ConditionOperator,
   ConnectingState,
   ContainerFrameData,
-  ContainerType,
   DragState,
   EditorEdge,
   EditorNode,
-  EditorViewJson,
   EdgeDragPayload,
   FailureHandlingGraph,
   NodeCategory,
   NodeKind,
   NodeTypeConfig,
   ResizeState,
-  VariableRow,
   VariableValueType
 } from "./editorTypes";
 import { EditorNoticeToasts } from "./components/EditorNoticeToasts";
@@ -218,7 +208,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const nextConditionIndex = useRef(1);
   const nextVariableRowIndex = useRef(1);
   const nextRetryThemeIndex = useRef(0);
-  const nextFailureNodeIndex = useRef(1);
+  const nextFailureNodeIndexRef = useRef(1);
   const loadedWorkflowId = useRef<string | null>(null);
   const preservedOnFailureDslRef = useRef<Record<string, unknown> | null>(null);
 
@@ -343,7 +333,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const applyFailureStateFromDraft = () => {
         if (!hasOnFailure) {
           setFailureGraph(createInitialFailureGraph(false));
-          nextFailureNodeIndex.current = 1;
+          nextFailureNodeIndexRef.current = 1;
           return;
         }
         const viewFailure = parsed?.failure;
@@ -357,7 +347,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             nodes: viewFailure.nodes,
             edges: viewFailure.edges
           });
-          nextFailureNodeIndex.current = getNextIndexFromIds(
+          nextFailureNodeIndexRef.current = getNextIndexFromIds(
             viewFailure.nodes.map((node) => node.id),
             "failure-node"
           );
@@ -368,13 +358,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
             onFailureDsl && failureGraphFromOnFailureDsl(onFailureDsl, nodeTypeConfig);
           if (fromDsl) {
             setFailureGraph(fromDsl);
-            nextFailureNodeIndex.current = getNextIndexFromIds(
+            nextFailureNodeIndexRef.current = getNextIndexFromIds(
               fromDsl.nodes.map((n) => n.id),
               "failure-node"
             );
           } else {
             setFailureGraph(createInitialFailureGraph(true));
-            nextFailureNodeIndex.current = 1;
+            nextFailureNodeIndexRef.current = 1;
           }
         }
       };
@@ -1257,7 +1247,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     buildDefaultParams,
     createConditionExpression,
     normalizeConditionExpressions,
-    nextFailureNodeIndex,
+    nextFailureNodeIndexRef,
     nextVariableRowIndex,
     getCanvasBounds,
     clamp,
@@ -1523,7 +1513,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       nextEdgeIndex: nextEdgeIndex.current,
       nextConditionIndex: nextConditionIndex.current,
       nextVariableRowIndex: nextVariableRowIndex.current,
-      nextFailureNodeIndex: nextFailureNodeIndex.current,
+      nextFailureNodeIndex: nextFailureNodeIndexRef.current,
       hasUnsavedChanges,
       selectedNode,
       selectedEdgeId
@@ -1554,7 +1544,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         nextEdgeIndex,
         nextConditionIndex,
         nextVariableRowIndex,
-        nextFailureNodeIndex,
+        nextFailureNodeIndexRef,
         setHasUnsavedChanges,
         setSelectedNode,
         setSelectedEdgeId

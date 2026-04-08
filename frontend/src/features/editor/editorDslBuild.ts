@@ -18,7 +18,6 @@ import type {
   EditorNode,
   EditorViewJson,
   FailureHandlingGraph,
-  NodeKind,
   VariableValueType
 } from "./editorTypes";
 

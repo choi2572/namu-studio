@@ -1,7 +1,6 @@
 import {
   NodeDebugBundle,
   RunEvent,
-  RunStatus,
   RunSummary,
   SkillsetsResponse,
   ValidationError,
@@ -245,7 +244,8 @@ export const httpRunsApi: RunsApi = {
       params.append("timeRange", filters.timeRange);
     }
     const queryString = params.toString();
-    const url = getApiUrl(`/runs${queryString ? `?${queryString}` : ""}`);
+    const query = queryString ? `?${queryString}` : "";
+    const url = getApiUrl(`/runs${query}`);
     logApiCall("GET", url);
     const response = await fetch(url);
     return handleResponse<RunSummary[]>(response);

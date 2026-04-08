@@ -7,12 +7,7 @@ import { cn } from "@/lib/cn";
 import { formatDuration } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ContainerFrame, type ContainerFrameRegion } from "@/components/ContainerFrame";
-import type {
-  MonitorGraph,
-  MonitorNode,
-  MonitorEdge,
-  MonitorContainer
-} from "@/features/monitor/monitorGraph";
+import type { MonitorGraph, MonitorNode, MonitorContainer } from "@/features/monitor/monitorGraph";
 import { nodePathId, NODE_PATH } from "@/lib/ids";
 import { computeStartEndForScope } from "@/lib/startEndDetection";
 
@@ -22,7 +17,6 @@ const NODE_METRICS = {
   collapsedHeight: 86
 };
 
-const CANVAS_PADDING = { x: 12, y: 12 };
 const CANVAS_DEFAULT = { width: 1000, height: 600 };
 
 // Auto layout 상수 (Editor와 동일)
@@ -303,7 +297,6 @@ function computeMonitorLayout(
     if (node.isContainer && node.containerType) {
       const container = graph.containers.find((c) => c.pathId === node.pathId);
       if (!container) return;
-      const innerNodes = graph.nodes.filter((n) => n.containerPathId === node.pathId);
       const frameX = pos.x;
       // 컨테이너 노드에 리본이 있으면 프레임을 더 아래로 (겹침 방지)
       const nodeRibbonHeight =
@@ -431,7 +424,6 @@ function computeMonitorLayout(
           });
         });
       } else {
-        const branchCount = container.branchCount || 1;
         const minRegionHeight = PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING * 2;
 
         // 각 브랜치별로 독립적인 auto layout 수행 (에디터와 동일한 좌->우 DAG 형태)
@@ -792,7 +784,7 @@ function getNodeTypeInfoFromDsl(
 /** Flat 모드용: nodeName 기반 추론 (DSL 없을 때) */
 function getNodeTypeInfo(
   nodeName: string,
-  stateName: string
+  _stateName: string
 ): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
   const name = nodeName.toLowerCase();
   if (name.includes("condition") || name.includes("if")) {

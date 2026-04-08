@@ -122,7 +122,7 @@ export function DashboardPage() {
       const created = await workflowsApi.create({ name: newName });
       const source = await workflowsApi.getDraft(workflow.workflowId);
       const sentDsl = JSON.parse(JSON.stringify(source.dsl_json ?? {})) as Record<string, unknown>;
-      let saved = await workflowsApi.saveDraft(created.workflowId, {
+      const saved = await workflowsApi.saveDraft(created.workflowId, {
         workflowId: created.workflowId,
         dsl_json: sentDsl,
         view_json: {},
@@ -136,7 +136,7 @@ export function DashboardPage() {
         dslJsonHasOnFailureKey(sentDsl) &&
         !dslJsonHasOnFailureKey(saved.dsl_json as Record<string, unknown>)
       ) {
-        saved = await workflowsApi.saveDraft(created.workflowId, {
+        await workflowsApi.saveDraft(created.workflowId, {
           workflowId: created.workflowId,
           dsl_json: fixedDsl,
           view_json: {},

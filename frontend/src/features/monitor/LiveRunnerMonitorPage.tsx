@@ -228,22 +228,6 @@ export function LiveRunnerMonitorPage() {
     setMiddlewareWsDebug({});
   }, [loadedWorkflowId]);
 
-  const resetToEmpty = useCallback(() => {
-    loadGenRef.current += 1;
-    loadedWorkflowIdRef.current = null;
-    setLoadedWorkflowId(null);
-    setDslJson(null);
-    setViewJson(null);
-    setNodeStates([]);
-    setGraphPatches([]);
-    setRunStatusForDag(null);
-    setFeedEvents([]);
-    feedSeqRef.current = 0;
-    setDslFetchError(null);
-    setSelectedNode(null);
-    setMiddlewareWsDebug({});
-  }, []);
-
   const appendFeed = useCallback((ev: RunEvent) => {
     setFeedEvents((prev) => [...prev, ev].sort((a, b) => a.seq - b.seq));
   }, []);
