@@ -70,7 +70,9 @@ test.describe("Smoke: Dashboard", () => {
     const dash = new DashboardPage(page);
     await dash.goto();
     const root = dash.root();
-    const latestSection = root.locator("section").filter({ has: page.getByRole("heading", { name: "Latest Run" }) });
+    const latestSection = root
+      .locator("section")
+      .filter({ has: page.getByRole("heading", { name: "Latest Run" }) });
     await expect(latestSection.getByText(SEED_PUBLISHED_WORKFLOW_NAME)).toBeVisible({
       timeout: 15_000
     });
@@ -101,9 +103,7 @@ test.describe("Smoke: Dashboard", () => {
     const dash = new DashboardPage(page);
     await dash.goto();
     await dash.workflowRowByName(SEED_PUBLISHED_WORKFLOW_NAME).click();
-    await expect(page).toHaveURL(
-      new RegExp(`/monitor/workflow/${SEED_PUBLISHED_WORKFLOW_ID}`)
-    );
+    await expect(page).toHaveURL(new RegExp(`/monitor/workflow/${SEED_PUBLISHED_WORKFLOW_ID}`));
   });
 
   test("행의 More 메뉴에서 Export·Duplicate가 보인다", async ({ page }) => {

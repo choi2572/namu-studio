@@ -35,9 +35,7 @@ export function serializeEditorNodeClipboard(node: EditorNode): string {
 export function parseEditorNodeClipboard(text: string): EditorNode | null {
   if (!text.startsWith(EDITOR_NODE_CLIPBOARD_PREFIX)) return null;
   try {
-    const parsed: unknown = JSON.parse(
-      text.slice(EDITOR_NODE_CLIPBOARD_PREFIX.length)
-    );
+    const parsed: unknown = JSON.parse(text.slice(EDITOR_NODE_CLIPBOARD_PREFIX.length));
     if (!isRecord(parsed) || parsed.v !== 1) return null;
     const raw = parsed.node;
     if (!isRecord(raw)) return null;
@@ -162,19 +160,13 @@ export function isValidContainerFrameData(value: unknown): value is ContainerFra
   const height = value.height;
   if (typeof width !== "number" || typeof height !== "number") return false;
   const branchCount = (value as { branchCount?: unknown }).branchCount;
-  if (
-    branchCount !== undefined &&
-    (typeof branchCount !== "number" || branchCount < 1)
-  ) {
+  if (branchCount !== undefined && (typeof branchCount !== "number" || branchCount < 1)) {
     return false;
   }
   return true;
 }
 
-export function isValidEditorNode(
-  value: unknown,
-  nodeTypes: NodeKind[]
-): value is EditorNode {
+export function isValidEditorNode(value: unknown, nodeTypes: NodeKind[]): value is EditorNode {
   if (!isRecord(value)) return false;
   if (typeof value.id !== "string" || typeof value.name !== "string") return false;
   if (typeof value.kind !== "string" || !nodeTypes.includes(value.kind as NodeKind)) {
@@ -198,8 +190,7 @@ export function isValidEditorNode(
   }
   if (
     value.variableRows !== undefined &&
-    (!Array.isArray(value.variableRows) ||
-      !value.variableRows.every(isValidVariableRow))
+    (!Array.isArray(value.variableRows) || !value.variableRows.every(isValidVariableRow))
   ) {
     return false;
   }
@@ -241,8 +232,7 @@ export function normalizeConditionExpressionFromView(
   ) {
     return {
       id: String(raw.id),
-      operator:
-        raw.operator === "AND" || raw.operator === "OR" ? raw.operator : null,
+      operator: raw.operator === "AND" || raw.operator === "OR" ? raw.operator : null,
       variable: raw.variable,
       comparisonOperator: raw.comparisonOperator,
       value: raw.value
@@ -251,8 +241,7 @@ export function normalizeConditionExpressionFromView(
   const parsed = parseConditionExpressionString(String(raw.expression ?? ""));
   return {
     id: String(raw.id),
-    operator:
-      raw.operator === "AND" || raw.operator === "OR" ? raw.operator : null,
+    operator: raw.operator === "AND" || raw.operator === "OR" ? raw.operator : null,
     variable: parsed.variable,
     comparisonOperator: parsed.comparisonOperator,
     value: parsed.value
@@ -285,16 +274,12 @@ export function assignEditorCountersAfterDraftLoad(
     loadedEdges.map((edge) => edge.id),
     "edge"
   );
-  const conditionIds = loadedNodes.flatMap(
-    (node) => node.conditionExpressions ?? []
-  );
+  const conditionIds = loadedNodes.flatMap((node) => node.conditionExpressions ?? []);
   refs.nextConditionIndex.current = getNextIndexFromIds(
     conditionIds.map((expression) => expression.id),
     "condition"
   );
-  const variableRowIds = loadedNodes.flatMap(
-    (node) => node.variableRows ?? []
-  );
+  const variableRowIds = loadedNodes.flatMap((node) => node.variableRows ?? []);
   refs.nextVariableRowIndex.current = getNextIndexFromIds(
     variableRowIds.map((row) => row.id),
     "var"

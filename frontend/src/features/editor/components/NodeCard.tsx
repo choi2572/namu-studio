@@ -1,10 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import type {
-  DragEvent,
-  PointerEvent as ReactPointerEvent
-} from "react";
+import type { DragEvent, PointerEvent as ReactPointerEvent } from "react";
 
 import { VariableInput } from "@/components/VariableInput";
 import type { Skillset } from "@/domain/types";
@@ -139,7 +136,7 @@ export function NodeCard({
   );
   const outputOffsets = getPortOffsets(displayHeight, outputs.length);
   const conditionExpressions =
-    node.kind === "flow_control.condition" ? node.conditionExpressions ?? [] : [];
+    node.kind === "flow_control.condition" ? (node.conditionExpressions ?? []) : [];
 
   // 노드 타입별 색상 (Monitor와 동일)
   const getNodeTypeColors = (category: NodeCategory, kind: NodeKind) => {
@@ -181,8 +178,7 @@ export function NodeCard({
   let nodeTypeColors = getNodeTypeColors(config.category, node.kind);
   if (node.kind === "flow_control.retry" && node.retryThemeColor) {
     const theme =
-      RETRY_THEME_COLORS.find((t) => t.key === node.retryThemeColor) ??
-      RETRY_THEME_COLORS[0];
+      RETRY_THEME_COLORS.find((t) => t.key === node.retryThemeColor) ?? RETRY_THEME_COLORS[0];
     nodeTypeColors = {
       border: theme.border,
       bg: theme.bg,
@@ -199,10 +195,10 @@ export function NodeCard({
 
   const showStartRibbon =
     startEndBadge?.showStart && !startEndBadge?.showEnd && !startEndBadge?.startError;
-  const showEndRibbon =
-    Boolean(startEndBadge?.showEnd && !startEndBadge?.showStart);
-  const showStartEndRibbon =
-    Boolean(startEndBadge?.showStart && startEndBadge?.showEnd && !startEndBadge?.startError);
+  const showEndRibbon = Boolean(startEndBadge?.showEnd && !startEndBadge?.showStart);
+  const showStartEndRibbon = Boolean(
+    startEndBadge?.showStart && startEndBadge?.showEnd && !startEndBadge?.startError
+  );
   const hasRibbon = showStartRibbon || showEndRibbon || showStartEndRibbon;
 
   const getRetryScopeCandidates = useCallback(
@@ -312,12 +308,7 @@ export function NodeCard({
         </>
       )}
       {/* 왼쪽 타입 인디케이터 바 */}
-      <div
-        className={cn(
-          "absolute left-0 top-0 bottom-0 w-1",
-          nodeTypeColors.indicator
-        )}
-      />
+      <div className={cn("absolute left-0 top-0 bottom-0 w-1", nodeTypeColors.indicator)} />
       {config.inputEnabled !== false && (
         <button
           type="button"
@@ -326,11 +317,7 @@ export function NodeCard({
             inputConnected ? "border-slate-400" : "border-slate-200",
             isVertical ? "left-1/2" : "left-0"
           )}
-          style={
-            isVertical
-              ? { top: 0 }
-              : { top: displayHeight / 2 }
-          }
+          style={isVertical ? { top: 0 } : { top: displayHeight / 2 }}
           title={inputConnected ? "Input connected" : "Input"}
           onDragOver={(event) => {
             event.stopPropagation();
@@ -346,10 +333,7 @@ export function NodeCard({
           }}
         >
           <span
-            className={cn(
-              "h-2 w-2 rounded-full",
-              inputConnected ? "bg-slate-600" : "bg-slate-400"
-            )}
+            className={cn("h-2 w-2 rounded-full", inputConnected ? "bg-slate-600" : "bg-slate-400")}
           />
         </button>
       )}
@@ -537,7 +521,7 @@ export function NodeCard({
               </>
             )}
           </div>
-          
+
           {/* 노드 타입 배지 + Retry 스코프 배지 */}
           <div className="flex items-center gap-2 mb-1">
             <span
@@ -550,48 +534,52 @@ export function NodeCard({
             >
               {nodeTypeLabel}
             </span>
-            {node.retryScopeType && node.retryOwnerId && (() => {
-              const ownerNode = nodes.find((n) => n.id === node.retryOwnerId);
-              const mainTheme =
-                node.retryScopeType === "main" && ownerNode?.retryThemeColor
-                  ? RETRY_THEME_COLORS.find((t) => t.key === ownerNode.retryThemeColor) ??
-                    RETRY_THEME_COLORS[0]
-                  : null;
-              const badgeClass =
-                node.retryScopeType === "main"
-                  ? mainTheme
-                    ? `${mainTheme.border} ${mainTheme.bg} ${mainTheme.text}`
-                    : "border-emerald-500 bg-emerald-50 text-emerald-700"
-                  : "border-rose-500 bg-rose-50 text-rose-700";
-              return (
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold border",
-                    badgeClass
-                  )}
-                  title={
-                    node.retryScopeType === "main"
-                      ? "Retry main scope member"
-                      : "Retry failure scope member"
-                  }
-                >
-                  {node.retryScopeType === "main" ? (
-                    <span className="text-[10px]">↻</span>
-                  ) : (
-                    <span className="text-[10px]">!</span>
-                  )}
-                </span>
-              );
-            })()}
+            {node.retryScopeType &&
+              node.retryOwnerId &&
+              (() => {
+                const ownerNode = nodes.find((n) => n.id === node.retryOwnerId);
+                const mainTheme =
+                  node.retryScopeType === "main" && ownerNode?.retryThemeColor
+                    ? (RETRY_THEME_COLORS.find((t) => t.key === ownerNode.retryThemeColor) ??
+                      RETRY_THEME_COLORS[0])
+                    : null;
+                const badgeClass =
+                  node.retryScopeType === "main"
+                    ? mainTheme
+                      ? `${mainTheme.border} ${mainTheme.bg} ${mainTheme.text}`
+                      : "border-emerald-500 bg-emerald-50 text-emerald-700"
+                    : "border-rose-500 bg-rose-50 text-rose-700";
+                return (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold border",
+                      badgeClass
+                    )}
+                    title={
+                      node.retryScopeType === "main"
+                        ? "Retry main scope member"
+                        : "Retry failure scope member"
+                    }
+                  >
+                    {node.retryScopeType === "main" ? (
+                      <span className="text-[10px]">↻</span>
+                    ) : (
+                      <span className="text-[10px]">!</span>
+                    )}
+                  </span>
+                );
+              })()}
           </div>
 
           {/* Skill 노드: 펼쳤을 때 타입을 namespace.name 형태로 노출 */}
           {skillset && node.isExpanded && (
-            <div className="mb-1 text-[10px] text-slate-500 truncate" title={getSkillDisplayType(skillset)}>
+            <div
+              className="mb-1 text-[10px] text-slate-500 truncate"
+              title={getSkillDisplayType(skillset)}
+            >
               {getSkillDisplayType(skillset)}
             </div>
           )}
-
         </div>
         {warningLabel && (
           <span className="mt-1 inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-700">
@@ -616,11 +604,7 @@ export function NodeCard({
               stroke="currentColor"
               className="w-4 h-4"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4.5 15.75l7.5-7.5 7.5 7.5"
-              />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
             </svg>
           ) : (
             <svg
@@ -631,16 +615,11 @@ export function NodeCard({
               stroke="currentColor"
               className="w-4 h-4"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19.5 8.25l-7.5 7.5-7.5-7.5"
-              />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
             </svg>
           )}
         </button>
       </div>
-
 
       {node.isExpanded && node.kind === "flow_control.condition" && (
         <div className="mt-3 space-y-2 text-xs text-slate-600 pr-12">
@@ -658,11 +637,7 @@ export function NodeCard({
                   <VariableInput
                     value={expression.variable}
                     onChange={(value) =>
-                      onConditionExpressionFieldChange(
-                        expression.id,
-                        "variable",
-                        value
-                      )
+                      onConditionExpressionFieldChange(expression.id, "variable", value)
                     }
                     placeholder="$.var or $"
                     suggestions={availableVariables}
@@ -690,11 +665,7 @@ export function NodeCard({
                   <VariableInput
                     value={expression.value}
                     onChange={(value) =>
-                      onConditionExpressionFieldChange(
-                        expression.id,
-                        "value",
-                        value
-                      )
+                      onConditionExpressionFieldChange(expression.id, "value", value)
                     }
                     placeholder="value or $"
                     suggestions={availableVariables}
@@ -719,11 +690,7 @@ export function NodeCard({
                       stroke="currentColor"
                       className="h-3.5 w-3.5"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19.5 12h-15"
-                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12h-15" />
                     </svg>
                   </button>
                 )}
@@ -765,17 +732,13 @@ export function NodeCard({
               <div key={row.id} className="flex items-center gap-2 min-w-0">
                 <input
                   value={row.name}
-                  onChange={(event) =>
-                    onVariableRowChange?.(row.id, "name", event.target.value)
-                  }
+                  onChange={(event) => onVariableRowChange?.(row.id, "name", event.target.value)}
                   placeholder="variable"
                   className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                 />
                 <input
                   value={row.value}
-                  onChange={(event) =>
-                    onVariableRowChange?.(row.id, "value", event.target.value)
-                  }
+                  onChange={(event) => onVariableRowChange?.(row.id, "value", event.target.value)}
                   placeholder={row.valueType}
                   className="flex-1 min-w-0 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
                 />
@@ -798,11 +761,7 @@ export function NodeCard({
                       stroke="currentColor"
                       className="h-3.5 w-3.5"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M19.5 12h-15"
-                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12h-15" />
                     </svg>
                   </button>
                 )}
@@ -862,9 +821,7 @@ export function NodeCard({
                   <VariableInput
                     value={node.params[field.key] ?? ""}
                     onChange={(value) => onParamChange(field.key, value)}
-                    placeholder={
-                      field.placeholder ? `${field.placeholder} or $` : undefined
-                    }
+                    placeholder={field.placeholder ? `${field.placeholder} or $` : undefined}
                     suggestions={availableVariables}
                     className="mt-1"
                   />

@@ -13,8 +13,7 @@ export function getExpandedContentHeight(
     //   - 둘째 줄: fieldHeight
     //   - 두 줄 사이 gap: fieldGap
     // expression 들 사이 gap: fieldGap
-    const perExpressionHeight =
-      2 * NODE_METRICS.fieldHeight + NODE_METRICS.fieldGap;
+    const perExpressionHeight = 2 * NODE_METRICS.fieldHeight + NODE_METRICS.fieldGap;
     const expressionsHeight =
       expressionCount * perExpressionHeight +
       Math.max(0, expressionCount - 1) * NODE_METRICS.fieldGap;
@@ -25,8 +24,7 @@ export function getExpandedContentHeight(
   if (node.kind === "flow_control.input" || node.kind === "flow_control.output") {
     const rowCount = node.variableRows?.length ?? 0;
     const rowsHeight =
-      rowCount * NODE_METRICS.fieldHeight +
-      Math.max(0, rowCount - 1) * NODE_METRICS.fieldGap;
+      rowCount * NODE_METRICS.fieldHeight + Math.max(0, rowCount - 1) * NODE_METRICS.fieldGap;
     const addButtonHeight = NODE_METRICS.fieldHeight + NODE_METRICS.fieldGap;
     return NODE_METRICS.expandedTopPadding + rowsHeight + addButtonHeight;
   }

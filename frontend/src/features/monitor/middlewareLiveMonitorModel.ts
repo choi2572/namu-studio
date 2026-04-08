@@ -13,7 +13,9 @@ export function runnerStatusIndicatesActiveWorkflow(
   return true;
 }
 
-export function extractNodeHistoryFromInitialPayload(data: Record<string, unknown>): MiddlewareNodeHistoryItem[] {
+export function extractNodeHistoryFromInitialPayload(
+  data: Record<string, unknown>
+): MiddlewareNodeHistoryItem[] {
   const wf = data.workflow as Record<string, unknown> | null | undefined;
   const nested = wf?.node_history;
   const top = data.node_history;
@@ -32,7 +34,9 @@ export function mapMiddlewareNodeStatus(status: string | undefined): NodeStatus 
   return NodeStatus.WAITING;
 }
 
-export function currentNodeNameFromWorkflow(wf: RunnerWorkflowInfo | null | undefined): string | null {
+export function currentNodeNameFromWorkflow(
+  wf: RunnerWorkflowInfo | null | undefined
+): string | null {
   if (!wf) return null;
   const cn = wf.current_node as unknown;
   if (typeof cn === "string") return cn || null;
@@ -297,7 +301,9 @@ export function resolveTimelineStateNameFromMiddleware(
   const direct = nodeStatesFallback.find((n) => n.stateName === nodeName);
   if (direct) return direct.stateName;
   if (monitorGraph) {
-    const mn = monitorGraph.nodes.find((x) => x.apiStateName === nodeName || x.stateName === nodeName);
+    const mn = monitorGraph.nodes.find(
+      (x) => x.apiStateName === nodeName || x.stateName === nodeName
+    );
     if (mn) return mn.apiStateName;
   }
   return nodeName;

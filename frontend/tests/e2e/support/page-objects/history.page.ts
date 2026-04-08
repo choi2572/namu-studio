@@ -12,15 +12,19 @@ export class HistoryPage {
   }
 
   filtersCard(): Locator {
-    return this.root().locator("section").filter({
-      has: this.page.getByRole("heading", { name: "Filters" })
-    });
+    return this.root()
+      .locator("section")
+      .filter({
+        has: this.page.getByRole("heading", { name: "Filters" })
+      });
   }
 
   runsCard(): Locator {
-    return this.root().locator("section").filter({
-      has: this.page.getByRole("heading", { name: "Runs" })
-    });
+    return this.root()
+      .locator("section")
+      .filter({
+        has: this.page.getByRole("heading", { name: "Runs" })
+      });
   }
 
   runRow(runId: string): Locator {

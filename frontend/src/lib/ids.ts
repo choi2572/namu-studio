@@ -47,7 +47,11 @@ export function repeatBodyPathId(repeatStateName: string, stateName: string): st
 /**
  * Parallel branch node path ID (root/parallelStateName/branch:i/stateName).
  */
-export function parallelBranchPathId(parallelStateName: string, branchIndex: number, stateName: string): string {
+export function parallelBranchPathId(
+  parallelStateName: string,
+  branchIndex: number,
+  stateName: string
+): string {
   return nodePathId([
     NODE_PATH.ROOT,
     parallelStateName,

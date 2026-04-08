@@ -108,10 +108,7 @@ function writeWorkflowFiles(files: WorkflowFileEntry[]) {
     return;
   }
   try {
-    window.localStorage.setItem(
-      WORKFLOW_FILES_STORAGE_KEY,
-      JSON.stringify(files)
-    );
+    window.localStorage.setItem(WORKFLOW_FILES_STORAGE_KEY, JSON.stringify(files));
   } catch {
     return;
   }
@@ -142,9 +139,7 @@ function findWorkflowFile(workflowId: string) {
 }
 
 function createWorkflowId() {
-  return `workflow-${Date.now().toString(36)}-${Math.random()
-    .toString(36)
-    .slice(2, 6)}`;
+  return `workflow-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
 const validationErrorsByWorkflow: Record<string, ValidationError[]> = {
@@ -200,10 +195,7 @@ export const mockWorkflowsApi: WorkflowsApi = {
     }
     return delay(deepClone(base));
   },
-  async create(payload?: {
-    name?: string;
-    description?: string;
-  }): Promise<WorkflowListItem> {
+  async create(payload?: { name?: string; description?: string }): Promise<WorkflowListItem> {
     const workflowId = createWorkflowId();
     const workflowName = payload?.name ?? "Untitled Workflow";
     const item: WorkflowListItem = {
@@ -262,10 +254,7 @@ export const mockWorkflowsApi: WorkflowsApi = {
       updatedAt: MOCK_NOW
     });
   },
-  async saveDraft(
-    workflowId: string,
-    payload: WorkflowDraft
-  ): Promise<WorkflowDraft> {
+  async saveDraft(workflowId: string, payload: WorkflowDraft): Promise<WorkflowDraft> {
     const isNewWorkflow = workflowId === "new";
     const resolvedWorkflowId = isNewWorkflow ? createWorkflowId() : workflowId;
     const updatedAt = payload.updatedAt || new Date().toISOString();
@@ -308,9 +297,7 @@ export const mockWorkflowsApi: WorkflowsApi = {
       publishedAt: MOCK_NOW
     };
     workflowVersions[workflowId] = newVersion;
-    const workflowIndex = workflowList.findIndex(
-      (workflow) => workflow.workflowId === workflowId
-    );
+    const workflowIndex = workflowList.findIndex((workflow) => workflow.workflowId === workflowId);
     if (workflowIndex >= 0) {
       workflowList[workflowIndex] = {
         ...workflowList[workflowIndex],
@@ -323,9 +310,7 @@ export const mockWorkflowsApi: WorkflowsApi = {
 
   async delete(workflowId: string): Promise<void> {
     // workflow 리스트에서 제거
-    const index = workflowList.findIndex(
-      (workflow) => workflow.workflowId === workflowId
-    );
+    const index = workflowList.findIndex((workflow) => workflow.workflowId === workflowId);
     if (index >= 0) {
       workflowList.splice(index, 1);
     }
@@ -528,9 +513,7 @@ export const mockRunsApi: RunsApi = {
     );
   },
   async getNodeDebug(runId: string, stateName: string): Promise<NodeDebugBundle> {
-    const bundle = (nodeDebugBundles[runId] ?? []).find(
-      (item) => item.stateName === stateName
-    );
+    const bundle = (nodeDebugBundles[runId] ?? []).find((item) => item.stateName === stateName);
     if (!bundle) {
       return delay({
         runId,
@@ -550,10 +533,7 @@ export const mockRunsApi: RunsApi = {
     return delay(deepClone(events.filter((event) => event.seq > afterSeq)));
   },
 
-  async startRun(
-    workflowId: string,
-    _runInput?: Record<string, unknown>
-  ): Promise<RunSummary> {
+  async startRun(workflowId: string, _runInput?: Record<string, unknown>): Promise<RunSummary> {
     const workflow = workflowList.find((w) => w.workflowId === workflowId);
     if (!workflow || workflow.state !== "PUBLISHED") {
       throw new Error(`Workflow ${workflowId} not found or not published`);
@@ -595,7 +575,11 @@ export const mockRunsApi: RunsApi = {
     if (!run) {
       throw new Error(`Run not found: ${runId}`);
     }
-    if (run.status === RunStatus.SUCCESS || run.status === RunStatus.FAILED || run.status === RunStatus.CANCELED) {
+    if (
+      run.status === RunStatus.SUCCESS ||
+      run.status === RunStatus.FAILED ||
+      run.status === RunStatus.CANCELED
+    ) {
       return delay(deepClone(run));
     }
     run.status = RunStatus.CANCELED;
@@ -648,14 +632,8 @@ export const mockSkillsetsApi: SkillsetsApi = {
             }
           },
           feedback: [],
-          pre_conditions: [
-            "Object must be visible",
-            "Gripper must be ready"
-          ],
-          post_effects: [
-            "Object is held by gripper",
-            "Location is now empty"
-          ]
+          pre_conditions: ["Object must be visible", "Gripper must be ready"],
+          post_effects: ["Object is held by gripper", "Location is now empty"]
         },
         {
           namespace: "default",
@@ -683,14 +661,8 @@ export const mockSkillsetsApi: SkillsetsApi = {
             }
           },
           feedback: [],
-          pre_conditions: [
-            "Object must be held by gripper",
-            "Destination must be available"
-          ],
-          post_effects: [
-            "Object is placed at destination",
-            "Gripper is now empty"
-          ]
+          pre_conditions: ["Object must be held by gripper", "Destination must be available"],
+          post_effects: ["Object is placed at destination", "Gripper is now empty"]
         },
         {
           namespace: "default",
@@ -726,10 +698,7 @@ export const mockSkillsetsApi: SkillsetsApi = {
             "Object must exist at source location",
             "Target location must be available"
           ],
-          post_effects: [
-            "Object is now at target location",
-            "Source location is now empty"
-          ]
+          post_effects: ["Object is now at target location", "Source location is now empty"]
         }
       ]
     };

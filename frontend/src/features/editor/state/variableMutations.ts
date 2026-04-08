@@ -21,9 +21,7 @@ export function applyVariableRowChange(
     )
       return node;
     const rows = node.variableRows ?? [];
-    const nextRows = rows.map((row) =>
-      row.id === rowId ? { ...row, [field]: value } : row
-    );
+    const nextRows = rows.map((row) => (row.id === rowId ? { ...row, [field]: value } : row));
     return { ...node, variableRows: nextRows };
   });
 }

@@ -5,7 +5,10 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** 리포 루트(namu-studio) 기준 `docs/dsl-example.json` (SSOT) */
-export const DSL_EXAMPLE_JSON_PATH = path.resolve(__dirname, "../../../../../docs/dsl-example.json");
+export const DSL_EXAMPLE_JSON_PATH = path.resolve(
+  __dirname,
+  "../../../../../docs/dsl-example.json"
+);
 
 export class EditorPageObject {
   constructor(private readonly page: Page) {}
@@ -41,7 +44,10 @@ export class EditorPageObject {
       importBtn.click()
     ]);
     await fileChooser.setFiles(absolutePath);
-    await this.page.getByRole("dialog", { name: "Replace editor contents?" }).getByRole("button", { name: "OK" }).click();
+    await this.page
+      .getByRole("dialog", { name: "Replace editor contents?" })
+      .getByRole("button", { name: "OK" })
+      .click();
   }
 
   async openMenuAndImportDslExample() {

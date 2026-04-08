@@ -30,8 +30,7 @@ export function applyParamChangeToNodes(
 ): EditorNode[] {
   const retryNode = prev.find((n) => n.id === nodeId);
   const isRetryNode = retryNode?.kind === "flow_control.retry";
-  const isRetryTurningOffFailure =
-    isRetryNode && key === "onFailureEnabled" && value === "false";
+  const isRetryTurningOffFailure = isRetryNode && key === "onFailureEnabled" && value === "false";
 
   let nextNodes = prev.map((node) => {
     if (node.id === nodeId) {
@@ -126,9 +125,7 @@ export function applyNameChangeToNodes(
   nodeId: string,
   value: string
 ): EditorNode[] {
-  return prev.map((node) =>
-    node.id === nodeId ? { ...node, name: value } : node
-  );
+  return prev.map((node) => (node.id === nodeId ? { ...node, name: value } : node));
 }
 
 export function mapNodesForToggleExpand(
@@ -172,15 +169,9 @@ export function reduceMainGraphNodesAfterDelete(
   nodeId: string,
   edges: EditorEdge[]
 ): EditorNode[] {
-  const trimmedEdgesForDelete = edges.filter(
-    (e) => e.from !== nodeId && e.to !== nodeId
-  );
-  const isContainer = prev.some(
-    (node) => node.id === nodeId && isContainerNode(node)
-  );
-  const isRetryNode = prev.some(
-    (node) => node.id === nodeId && node.kind === "flow_control.retry"
-  );
+  const trimmedEdgesForDelete = edges.filter((e) => e.from !== nodeId && e.to !== nodeId);
+  const isContainer = prev.some((node) => node.id === nodeId && isContainerNode(node));
+  const isRetryNode = prev.some((node) => node.id === nodeId && node.kind === "flow_control.retry");
   const deletedNode = prev.find((n) => n.id === nodeId);
   const deletedInScopeOwnerId = deletedNode?.retryOwnerId ?? null;
   const deletedInScopeType = deletedNode?.retryScopeType ?? null;

@@ -17,7 +17,7 @@ export type EditorNode = {
   containerId?: string | null;
   containerType?: string | null;
   branchIndex?: number | null;
-  variableRows?: Array< { id: string; name: string; value: string; valueType: string } >;
+  variableRows?: Array<{ id: string; name: string; value: string; valueType: string }>;
 };
 
 export type EditorEdge = {
@@ -200,8 +200,10 @@ export function filterVariableSuggestions(
   if (!lower) return suggestions;
   return suggestions.filter(
     (s) =>
-      s.path.toLowerCase().replace(/^\$\.?/, "").startsWith(lower) ||
-      s.path.toLowerCase().includes(lower)
+      s.path
+        .toLowerCase()
+        .replace(/^\$\.?/, "")
+        .startsWith(lower) || s.path.toLowerCase().includes(lower)
   );
 }
 
@@ -229,7 +231,10 @@ export function validateVariablePath(
   if (prefixMatch) return { valid: true };
 
   if (!/^\$\.([A-Za-z0-9_]+\.?)+$/.test(trimmed)) {
-    return { valid: false, error: "Invalid variable path (use $.Inputs.name or $.NodeName.output.key)" };
+    return {
+      valid: false,
+      error: "Invalid variable path (use $.Inputs.name or $.NodeName.output.key)"
+    };
   }
 
   return {

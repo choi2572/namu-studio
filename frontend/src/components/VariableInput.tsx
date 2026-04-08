@@ -1,17 +1,9 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import type { VariableSuggestion } from "@/lib/variableReferences";
-import {
-  filterVariableSuggestions,
-  validateVariablePath
-} from "@/lib/variableReferences";
+import { filterVariableSuggestions, validateVariablePath } from "@/lib/variableReferences";
 
 const DEFAULT_PLACEHOLDER = "Value or $";
 
@@ -113,9 +105,7 @@ export function VariableInput({
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setHighlightIndex((i) =>
-          i === 0 ? filtered.length - 1 : i - 1
-        );
+        setHighlightIndex((i) => (i === 0 ? filtered.length - 1 : i - 1));
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
@@ -132,22 +122,14 @@ export function VariableInput({
         closeDropdown();
       }
     },
-    [
-      showSuggestions,
-      filtered,
-      highlightIndex,
-      closeDropdown,
-      insertSuggestion
-    ]
+    [showSuggestions, filtered, highlightIndex, closeDropdown, insertSuggestion]
   );
 
   useEffect(() => {
     if (!showDropdown) return;
     const el = dropdownRef.current;
     if (!el) return;
-    const highlighted = el.querySelector(
-      `[data-index="${highlightIndex}"]`
-    ) as HTMLElement | null;
+    const highlighted = el.querySelector(`[data-index="${highlightIndex}"]`) as HTMLElement | null;
     highlighted?.scrollIntoView({ block: "nearest" });
   }, [showDropdown, highlightIndex]);
 
@@ -155,17 +137,13 @@ export function VariableInput({
     if (!showSuggestions) return;
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (
-        inputRef.current?.contains(target) ||
-        dropdownRef.current?.contains(target)
-      ) {
+      if (inputRef.current?.contains(target) || dropdownRef.current?.contains(target)) {
         return;
       }
       closeDropdown();
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () =>
-      document.removeEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showSuggestions, closeDropdown]);
 
   const resolvedSuggestion = value.trim().startsWith("$")
@@ -201,11 +179,8 @@ export function VariableInput({
         data-no-drag={dataNoDrag}
         className={cn(
           "w-full rounded-md border px-2 py-1 text-xs text-slate-700 focus:outline-none",
-          hasError &&
-            "border-red-400 focus:border-red-500",
-          !hasError &&
-            isVariableRef &&
-            "border-amber-300 focus:border-amber-400",
+          hasError && "border-red-400 focus:border-red-500",
+          !hasError && isVariableRef && "border-amber-300 focus:border-amber-400",
           !hasError && !isVariableRef && "border-slate-200 focus:border-slate-400",
           disabled && "cursor-not-allowed bg-slate-50 text-slate-500"
         )}
@@ -237,18 +212,13 @@ export function VariableInput({
               }}
             >
               <span className="font-mono text-slate-600">{s.path}</span>
-              {s.type && (
-                <span className="ml-2 text-slate-400">({s.type})</span>
-              )}
+              {s.type && <span className="ml-2 text-slate-400">({s.type})</span>}
             </button>
           ))}
         </div>
       )}
       {hasError && validation.error && (
-        <p
-          className="mt-0.5 text-[10px] text-red-600"
-          role="alert"
-        >
+        <p className="mt-0.5 text-[10px] text-red-600" role="alert">
           {validation.error}
         </p>
       )}

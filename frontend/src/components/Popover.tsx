@@ -13,11 +13,7 @@ export function Popover({ trigger, children, align = "left" }: PopoverProps) {
 
   return (
     <div className="relative inline-flex">
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex"
-      >
+      <button type="button" onClick={() => setOpen((prev) => !prev)} className="inline-flex">
         {trigger}
       </button>
       {open && (

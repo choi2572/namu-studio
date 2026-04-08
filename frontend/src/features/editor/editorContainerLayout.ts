@@ -63,10 +63,7 @@ export function getContainerBranchLabel(containerType: ContainerType, index: num
 export function getDefaultContainerFrameSize(containerType: ContainerType, branchCount: number) {
   const baseWidth =
     containerType === "parallel"
-      ? Math.max(
-          CONTAINER_FRAME_DEFAULTS.width,
-          branchCount * CONTAINER_FRAME_DEFAULTS.branchWidth
-        )
+      ? Math.max(CONTAINER_FRAME_DEFAULTS.width, branchCount * CONTAINER_FRAME_DEFAULTS.branchWidth)
       : CONTAINER_FRAME_DEFAULTS.width;
   return {
     width: Math.max(baseWidth, CONTAINER_FRAME_METRICS.minWidth),
@@ -98,10 +95,7 @@ export function getContainerFrameLayout(
   const bodyX = frameX + CONTAINER_FRAME_METRICS.padding;
   const bodyY = frameY + headerHeight + CONTAINER_FRAME_METRICS.padding;
   const bodyWidth = Math.max(0, frameWidth - CONTAINER_FRAME_METRICS.padding * 2);
-  const bodyHeight = Math.max(
-    0,
-    frameHeight - headerHeight - CONTAINER_FRAME_METRICS.padding * 2
-  );
+  const bodyHeight = Math.max(0, frameHeight - headerHeight - CONTAINER_FRAME_METRICS.padding * 2);
   // Repeat: 단일 body 영역, Parallel: 브랜치를 세로로 스택 배치
   const regions: ContainerFrameRegion[] =
     branchCount > 0
@@ -127,16 +121,10 @@ export function getContainerFrameLayout(
   };
 }
 
-export function getCanvasBounds(
-  canvasBase: { width: number; height: number },
-  nodeHeight: number
-) {
+export function getCanvasBounds(canvasBase: { width: number; height: number }, nodeHeight: number) {
   const minX = CANVAS_PADDING.x;
   const minY = CANVAS_PADDING.y;
-  const maxX = Math.max(
-    minX,
-    canvasBase.width - NODE_METRICS.width - CANVAS_PADDING.x
-  );
+  const maxX = Math.max(minX, canvasBase.width - NODE_METRICS.width - CANVAS_PADDING.x);
   const maxY = Math.max(minY, canvasBase.height - nodeHeight - CANVAS_PADDING.y);
   return { minX, minY, maxX, maxY };
 }
@@ -262,14 +250,18 @@ export function getTopologicalOrder(nodes: EditorNode[], edges: EditorEdge[]) {
       inDegree.set(to, (inDegree.get(to) ?? 0) - 1);
       if (inDegree.get(to) === 0) {
         queue.push(to);
-        queue.sort((a, b) => (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? ""));
+        queue.sort((a, b) =>
+          (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? "")
+        );
       }
     });
   }
 
   const remaining = nodeIds.filter((id) => !ordered.includes(id));
   if (remaining.length > 0) {
-    remaining.sort((a, b) => (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? ""));
+    remaining.sort((a, b) =>
+      (nodeMap.get(a)?.name ?? "").localeCompare(nodeMap.get(b)?.name ?? "")
+    );
   }
   return [...ordered, ...remaining];
 }
@@ -372,10 +364,7 @@ export function layoutNodesInRegion(
   return positions;
 }
 
-export function expandContainerFrameForNodes(
-  containerNode: EditorNode,
-  nodes: EditorNode[]
-) {
+export function expandContainerFrameForNodes(containerNode: EditorNode, nodes: EditorNode[]) {
   const containerType = getContainerType(containerNode.kind);
   if (!containerType) return containerNode;
   const branchCount = containerType === "parallel" ? getContainerBranchCount(containerNode) : 1;
@@ -384,9 +373,7 @@ export function expandContainerFrameForNodes(
       return nodes.filter((node) => node.containerId === containerNode.id).length;
     }
     return nodes.filter(
-      (node) =>
-        node.containerId === containerNode.id &&
-        (node.branchIndex ?? 0) === index
+      (node) => node.containerId === containerNode.id && (node.branchIndex ?? 0) === index
     ).length;
   });
   const maxNodes = Math.max(1, ...branchCounts);
@@ -504,9 +491,7 @@ export function applyImportedLayout(
     }
     layout.regions.forEach((region) => {
       const branchNodes = nextNodes.filter(
-        (node) =>
-          node.containerId === containerId &&
-          (node.branchIndex ?? 0) === region.index
+        (node) => node.containerId === containerId && (node.branchIndex ?? 0) === region.index
       );
       const branchNodeIds = new Set(branchNodes.map((node) => node.id));
       const branchEdges = edges.filter(
@@ -542,14 +527,8 @@ export function getCanvasSizeForNodes(
     if (isContainerNode(node)) {
       const layout = getContainerFrameLayout(node, nodeTypeConfig);
       if (layout) {
-        maxX = Math.max(
-          maxX,
-          layout.frame.x + layout.frame.width + CANVAS_PADDING.x
-        );
-        maxY = Math.max(
-          maxY,
-          layout.frame.y + layout.frame.height + CANVAS_PADDING.y
-        );
+        maxX = Math.max(maxX, layout.frame.x + layout.frame.width + CANVAS_PADDING.x);
+        maxY = Math.max(maxY, layout.frame.y + layout.frame.height + CANVAS_PADDING.y);
       }
     }
   });

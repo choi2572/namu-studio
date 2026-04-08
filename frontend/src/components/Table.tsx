@@ -10,9 +10,7 @@ type TableProps = {
 export function Table({ children, className }: TableProps) {
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <table className={cn("w-full text-left text-sm", className)}>
-        {children}
-      </table>
+      <table className={cn("w-full text-left text-sm", className)}>{children}</table>
     </div>
   );
 }

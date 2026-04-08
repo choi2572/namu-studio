@@ -2,11 +2,7 @@ import type { MutableRefObject } from "react";
 
 import type { WorkflowDraft } from "@/domain/types";
 
-import type {
-  EditorEdge,
-  EditorNode,
-  FailureHandlingGraph
-} from "./editorTypes";
+import type { EditorEdge, EditorNode, FailureHandlingGraph } from "./editorTypes";
 
 /** Import 실패 시 `confirmImportOverwrite`의 try 블록 이전에 캡처하던 스냅샷과 동일한 형태. */
 type EditorImportRollbackSnapshot = {
@@ -134,9 +130,7 @@ export function collectChildNodeIdsForContainer(
   nodes: EditorNode[],
   containerId: string
 ): Set<string> {
-  return new Set(
-    nodes.filter((node) => node.containerId === containerId).map((node) => node.id)
-  );
+  return new Set(nodes.filter((node) => node.containerId === containerId).map((node) => node.id));
 }
 
 export function clampEditorNodePositionToCanvas(

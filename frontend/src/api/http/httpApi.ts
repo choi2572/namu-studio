@@ -70,7 +70,11 @@ export const httpMiddlewareApi: MiddlewareApi = {
     });
     if (!response.ok) {
       const text = await response.text();
-      let body: { error?: string; message?: string; details?: { state?: string; reason?: string } } = {};
+      let body: {
+        error?: string;
+        message?: string;
+        details?: { state?: string; reason?: string };
+      } = {};
       try {
         body = JSON.parse(text);
       } catch {
@@ -133,10 +137,7 @@ export const httpWorkflowsApi: WorkflowsApi = {
     return handleResponse<WorkflowListItem>(response);
   },
 
-  async create(payload?: {
-    name?: string;
-    description?: string;
-  }): Promise<WorkflowListItem> {
+  async create(payload?: { name?: string; description?: string }): Promise<WorkflowListItem> {
     const url = getApiUrl("/workflows");
     logApiCall("POST", url, payload);
     const response = await fetch(url, {
@@ -280,10 +281,7 @@ export const httpRunsApi: RunsApi = {
     return handleResponse<RunEvent[]>(response);
   },
 
-  async startRun(
-    workflowId: string,
-    runInput?: Record<string, unknown>
-  ): Promise<RunSummary> {
+  async startRun(workflowId: string, runInput?: Record<string, unknown>): Promise<RunSummary> {
     const url = getApiUrl("/runs");
     logApiCall("POST", url, { workflowId, runInput });
     const response = await fetch(url, {
@@ -291,7 +289,9 @@ export const httpRunsApi: RunsApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workflowId, runInput: runInput ?? {} })
     });
-    const created = await handleResponse<{ runId: string; workflowId: string; status: string }>(response);
+    const created = await handleResponse<{ runId: string; workflowId: string; status: string }>(
+      response
+    );
     return this.get(created.runId);
   },
 

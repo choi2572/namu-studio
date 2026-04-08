@@ -30,13 +30,7 @@ export type RunSnapshot = {
 };
 
 // Middleware runner status (see docs/middleware-api-spec.md + live monitor contract)
-export type RunnerStatusValue =
-  | "idle"
-  | "running"
-  | "paused"
-  | "unspecified"
-  | "unknown"
-  | "error";
+export type RunnerStatusValue = "idle" | "running" | "paused" | "unspecified" | "unknown" | "error";
 
 /** @deprecated use RunnerStatusValue */
 export type RunnerStatus = "idle" | "running" | "error";
@@ -157,7 +151,9 @@ export interface MiddlewareApi {
   /** 워크플로우 실행 취소 (POST /api/v1/workflows/run, request_type: cancel) */
   runWorkflowCancel(): Promise<WorkflowRunResponse>;
   /** 액션 상태 변경 요청 (POST /api/v1/workflows/action-status) */
-  postWorkflowActionStatus(payload: WorkflowActionStatusRequest): Promise<WorkflowActionStatusResponse>;
+  postWorkflowActionStatus(
+    payload: WorkflowActionStatusRequest
+  ): Promise<WorkflowActionStatusResponse>;
 }
 
 export interface RunsApi {

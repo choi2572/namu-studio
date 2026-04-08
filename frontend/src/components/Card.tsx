@@ -10,15 +10,9 @@ type CardProps = {
   className?: string;
 };
 
-export function Card({
-  title,
-  description,
-  actions,
-  children,
-  className
-}: CardProps) {
+export function Card({ title, description, actions, children, className }: CardProps) {
   const isFlex = className?.includes("flex");
-  
+
   return (
     <section
       className={cn(
@@ -27,23 +21,15 @@ export function Card({
       )}
     >
       {(title || actions) && (
-        <div className={cn(
-          "flex items-start justify-between gap-4",
-          isFlex && "flex-shrink-0"
-        )}>
+        <div className={cn("flex items-start justify-between gap-4", isFlex && "flex-shrink-0")}>
           <div>
             {title && <h3 className="text-sm font-semibold">{title}</h3>}
-            {description && (
-              <p className="mt-1 text-xs text-slate-500">{description}</p>
-            )}
+            {description && <p className="mt-1 text-xs text-slate-500">{description}</p>}
           </div>
           {actions}
         </div>
       )}
-      <div className={cn(
-        title || actions ? "mt-4" : "",
-        isFlex && "flex min-h-0 flex-1 flex-col"
-      )}>
+      <div className={cn(title || actions ? "mt-4" : "", isFlex && "flex min-h-0 flex-1 flex-col")}>
         {children}
       </div>
     </section>

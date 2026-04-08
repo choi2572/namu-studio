@@ -99,9 +99,7 @@ test.describe("Smoke: Run History", () => {
     const hist = new HistoryPage(page);
     await hist.goto();
     await hist.runRow(SEED_RUN_SUCCESS_ID).click();
-    await expect(page).toHaveURL(
-      new RegExp(`/monitor/${SEED_RUN_SUCCESS_ID}\\?mode=replay`)
-    );
+    await expect(page).toHaveURL(new RegExp(`/monitor/${SEED_RUN_SUCCESS_ID}\\?mode=replay`));
   });
 
   test("실패 런의 결과 뱃지로 실패 상세를 볼 수 있다", async ({ page }) => {

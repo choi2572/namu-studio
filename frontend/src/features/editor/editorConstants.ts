@@ -1,13 +1,6 @@
 import type { ContainerType, NodeCategory, NodeKind, NodeTypeConfig } from "./editorTypes";
 
-export const CONDITION_COMPARISON_OPERATORS = [
-  "==",
-  "!=",
-  ">=",
-  "<=",
-  ">",
-  "<"
-] as const;
+export const CONDITION_COMPARISON_OPERATORS = ["==", "!=", ">=", "<=", ">", "<"] as const;
 
 /** 에디터 연산자(==, != 등) → DSL JSON 연산자(Equals, NotEquals 등) */
 export const EDITOR_OP_TO_DSL: Record<string, string> = {

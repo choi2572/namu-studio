@@ -23,10 +23,7 @@ type ContainerFrameProps = {
   readOnly?: boolean;
   /** Optional badge in header (e.g. "Branch 1: running", "Repeat: 2/5"). */
   badgeLabel?: string | null;
-  onResizeStart?: (
-    handle: ResizeHandle,
-    event: ReactPointerEvent<HTMLButtonElement>
-  ) => void;
+  onResizeStart?: (handle: ResizeHandle, event: ReactPointerEvent<HTMLButtonElement>) => void;
 };
 
 export function ContainerFrame({
@@ -52,8 +49,7 @@ export function ContainerFrame({
 
   // Parallel 세로 스택 레이아웃일 때 브랜치 사이를 가르는 가로 구분선
   const hasVerticalStack =
-    regions.length > 1 &&
-    regions.every((region) => region.bounds.x === regions[0].bounds.x);
+    regions.length > 1 && regions.every((region) => region.bounds.x === regions[0].bounds.x);
 
   const horizontalDividerPositions = hasVerticalStack
     ? Array.from(

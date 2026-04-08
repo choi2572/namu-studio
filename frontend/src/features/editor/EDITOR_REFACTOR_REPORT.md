@@ -68,14 +68,14 @@ editor/
 
 **목표**: `EditorPage.tsx` 모듈 스코프에 있던 **React·DOM과 무관한 함수**만 잘라서 전용 파일로 이동. 시그니처·동작은 그대로 유지.
 
-| 모듈 | 주요 심볼 |
-|------|-----------|
-| `editorPureUtils.ts` | `comparisonOperatorToDsl`, `dslOperatorToEditor`, `clamp`, `isRecord`, view/노드 검증·정규화, 클립보드 직렬화, `getNextIndexFromIds`, `assignEditorCountersAfterDraftLoad` |
-| `editorViewJson.ts` | `parseEditorView` |
-| `editorContainerLayout.ts` | 컨테이너 타입·프레임·`getCanvasBounds`, 엣지 필터·정규화, topological / auto-layout, `applyImportedLayout`, `getCanvasSizeForNodes` |
-| `editorRetryScope.ts` (확장) | 기존 `getRetryScopeStartNodeId` + `isForbiddenInRetryScope`, `recomputeRetryScopeMembership`, `getRetryScopeNodeIds`, `getRetryScopeEndNodeId` |
-| `editorDslBuild.ts` | `buildStateNameMap`, `ContainerDslPayload`, 조건값·state 레코드, `buildDslJson`, `buildOnFailureDsl`, `buildViewJson`, `buildRetryScopeSubflow` (`buildStateRecords`와 동일 파일에 두어 순환 방지) |
-| `editorDslParse.ts` | `DslState` 등 내부 타입, `parseDslToEditor`, 실패 캔버스 기본 레이아웃, `failureGraphFromOnFailureDsl`, `validateImportedDslForEditor` |
+| 모듈                         | 주요 심볼                                                                                                                                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `editorPureUtils.ts`         | `comparisonOperatorToDsl`, `dslOperatorToEditor`, `clamp`, `isRecord`, view/노드 검증·정규화, 클립보드 직렬화, `getNextIndexFromIds`, `assignEditorCountersAfterDraftLoad`                         |
+| `editorViewJson.ts`          | `parseEditorView`                                                                                                                                                                                  |
+| `editorContainerLayout.ts`   | 컨테이너 타입·프레임·`getCanvasBounds`, 엣지 필터·정규화, topological / auto-layout, `applyImportedLayout`, `getCanvasSizeForNodes`                                                                |
+| `editorRetryScope.ts` (확장) | 기존 `getRetryScopeStartNodeId` + `isForbiddenInRetryScope`, `recomputeRetryScopeMembership`, `getRetryScopeNodeIds`, `getRetryScopeEndNodeId`                                                     |
+| `editorDslBuild.ts`          | `buildStateNameMap`, `ContainerDslPayload`, 조건값·state 레코드, `buildDslJson`, `buildOnFailureDsl`, `buildViewJson`, `buildRetryScopeSubflow` (`buildStateRecords`와 동일 파일에 두어 순환 방지) |
+| `editorDslParse.ts`          | `DslState` 등 내부 타입, `parseDslToEditor`, 실패 캔버스 기본 레이아웃, `failureGraphFromOnFailureDsl`, `validateImportedDslForEditor`                                                             |
 
 **`EditorPage.tsx`에 남긴 것**: `isEditableKeyboardTarget` — `document` / `composedPath` 등 **DOM 의존**으로 순수 모듈로 옮기지 않음.
 
@@ -93,9 +93,9 @@ editor/
 
 ## 3. 상태 소유 (중복이 아닌 이유)
 
-| 영역           | 상태                          | 비고                         |
-|----------------|-------------------------------|------------------------------|
-| 메인 워크플로 | `nodes`, `edges`, 캔버스·줌 등 | 단일 진실 공급원             |
+| 영역          | 상태                                    | 비고                    |
+| ------------- | --------------------------------------- | ----------------------- |
+| 메인 워크플로 | `nodes`, `edges`, 캔버스·줌 등          | 단일 진실 공급원        |
 | 실패 핸들링   | `failureGraph`, `failureConnectingFrom` | 별도 캔버스·훅으로 분리 |
 
 ---
@@ -135,4 +135,4 @@ editor/
 
 ---
 
-*문서 버전: DSL/레이아웃 순수 로직 모듈 분리 반영. 내용이 코드와 어긋나면 코드를 우선하고, 이 파일을 갱신하세요.*
+_문서 버전: DSL/레이아웃 순수 로직 모듈 분리 반영. 내용이 코드와 어긋나면 코드를 우선하고, 이 파일을 갱신하세요._

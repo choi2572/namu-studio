@@ -157,15 +157,9 @@ export function buildStateRecords(
       const firstExpr = node.conditionExpressions?.[0];
       const variableRaw = firstExpr?.variable?.trim() ?? "";
       const Operator = comparisonOperatorToDsl(firstExpr?.comparisonOperator ?? "==");
-      const Variable = conditionFieldToDslValue(
-        variableRaw,
-        inputValuesForConditions
-      );
+      const Variable = conditionFieldToDslValue(variableRaw, inputValuesForConditions);
       const valueRaw = firstExpr?.value ?? "";
-      const Value = conditionFieldToDslValue(
-        valueRaw,
-        inputValuesForConditions
-      );
+      const Value = conditionFieldToDslValue(valueRaw, inputValuesForConditions);
       state = {
         Type: "Condition",
         If: {
@@ -208,8 +202,7 @@ export function buildStateRecords(
       let next: string | null = null;
       if (mainScopeEndId) {
         const outEdge = fullEdges.find((e) => e.from === mainScopeEndId);
-        if (outEdge && !mainScopeIds.has(outEdge.to))
-          next = stateNameMap.get(outEdge.to) ?? null;
+        if (outEdge && !mainScopeIds.has(outEdge.to)) next = stateNameMap.get(outEdge.to) ?? null;
       }
       const mainScope = buildRetryScopeSubflow(
         node.id,
@@ -233,10 +226,7 @@ export function buildStateRecords(
             inputValuesForConditions
           )
         : null;
-      const maxAttempts = Math.max(
-        1,
-        Number.parseInt(node.params.maxAttempts ?? "2", 10) || 2
-      );
+      const maxAttempts = Math.max(1, Number.parseInt(node.params.maxAttempts ?? "2", 10) || 2);
       state = {
         Type: "Retry",
         MaxAttempts: maxAttempts,
@@ -245,10 +235,7 @@ export function buildStateRecords(
       };
       if (next) state.Next = next;
       else state.End = true;
-      if (
-        failureScope &&
-        Object.keys(failureScope.states).length > 0
-      ) {
+      if (failureScope && Object.keys(failureScope.states).length > 0) {
         state.BeforeRetryAfterFailure = failureScope.states;
       }
     } else if (node.kind === "flow_control.vlm") {
@@ -304,9 +291,7 @@ export function buildDslJson(
   const containerNodes = nodes.filter(isContainerNode);
   const containerIds = new Set(containerNodes.map((node) => node.id));
   const topLevelNodes = nodes.filter(
-    (node) =>
-      (!node.containerId || !containerIds.has(node.containerId)) &&
-      !node.retryOwnerId
+    (node) => (!node.containerId || !containerIds.has(node.containerId)) && !node.retryOwnerId
   );
   const topLevelNodeIds = new Set(topLevelNodes.map((node) => node.id));
   const topLevelEdges = edges.filter(
@@ -340,7 +325,7 @@ export function buildDslJson(
       containerPayloads.set(container.id, {
         type: "repeat",
         repeatCount: getRepeatCount(container),
-        startAt: bodyStartNode ? stateNameMap.get(bodyStartNode.id) ?? null : null,
+        startAt: bodyStartNode ? (stateNameMap.get(bodyStartNode.id) ?? null) : null,
         states: bodyStates
       });
       return;
@@ -348,9 +333,7 @@ export function buildDslJson(
     const branchCount = getContainerBranchCount(container);
     const branches = Array.from({ length: branchCount }, (_, index) => {
       const branchNodes = nodes.filter(
-        (node) =>
-          node.containerId === container.id &&
-          (node.branchIndex ?? 0) === index
+        (node) => node.containerId === container.id && (node.branchIndex ?? 0) === index
       );
       const branchNodeIds = new Set(branchNodes.map((node) => node.id));
       const branchEdges = edges.filter(
@@ -368,9 +351,7 @@ export function buildDslJson(
         inputValuesForConditions
       );
       return {
-        StartAt: branchStartNode
-          ? stateNameMap.get(branchStartNode.id) ?? null
-          : null,
+        StartAt: branchStartNode ? (stateNameMap.get(branchStartNode.id) ?? null) : null,
         States: branchStates
       };
     });
@@ -394,12 +375,9 @@ export function buildDslJson(
   const inputNextEdge = inputNode
     ? topLevelEdges.find((e) => e.from === inputNode.id && e.fromPort === "next")
     : undefined;
-  const inputNextStateName = inputNextEdge
-    ? stateNameMap.get(inputNextEdge.to)
-    : undefined;
+  const inputNextStateName = inputNextEdge ? stateNameMap.get(inputNextEdge.to) : undefined;
 
-  const inputsParameters: Record<string, { Type: string; Value: number | boolean | string }> =
-    {};
+  const inputsParameters: Record<string, { Type: string; Value: number | boolean | string }> = {};
   inputNode?.variableRows?.forEach(({ name, value, valueType }) => {
     if (!name.trim()) return;
     const Type = valueType;
@@ -434,11 +412,7 @@ export function buildDslJson(
     return baseDsl;
   }
 
-  const onFailure = buildOnFailureDsl(
-    failureGraph,
-    stateNameMap,
-    inputValuesForConditions
-  );
+  const onFailure = buildOnFailureDsl(failureGraph, stateNameMap, inputValuesForConditions);
   if (!onFailure) {
     return baseDsl;
   }
@@ -471,9 +445,7 @@ export function buildOnFailureDsl(
 
   const failureNodes = nodes.filter((n) => n.id !== entry.id);
   const failureNodeIds = new Set(failureNodes.map((n) => n.id));
-  const failureEdges = edges.filter(
-    (e) => failureNodeIds.has(e.from) && failureNodeIds.has(e.to)
-  );
+  const failureEdges = edges.filter((e) => failureNodeIds.has(e.from) && failureNodeIds.has(e.to));
 
   const failureStateNameMap = new Map<string, string>();
   Array.from(failureNodeIds).forEach((id, index) => {
@@ -501,9 +473,7 @@ export function buildOnFailureDsl(
   while (currentName && !visited.has(currentName)) {
     visited.add(currentName);
     lastName = currentName;
-    const state = states[currentName] as
-      | (Record<string, unknown> & { Next?: string })
-      | undefined;
+    const state = states[currentName] as (Record<string, unknown> & { Next?: string }) | undefined;
     if (!state || !state.Next) break;
     currentName = state.Next;
   }
@@ -562,9 +532,7 @@ export function buildRetryScopeSubflow(
   const startId = getRetryScopeStartNodeId(retryNodeId, scopeType, edges);
   if (!startId) return { startAt: null, states: {} };
   const scopeNodes = nodes.filter((n) => scopeNodeIds.has(n.id));
-  const scopeEdges = edges.filter(
-    (e) => scopeNodeIds.has(e.from) && scopeNodeIds.has(e.to)
-  );
+  const scopeEdges = edges.filter((e) => scopeNodeIds.has(e.from) && scopeNodeIds.has(e.to));
   const states = buildStateRecords(
     scopeNodes,
     scopeEdges,

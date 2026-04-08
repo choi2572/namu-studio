@@ -13,11 +13,7 @@ import {
   normalizeContainerAssignments,
   normalizeContainerFrames
 } from "./editorContainerLayout";
-import {
-  dslOperatorToEditor,
-  isRecord,
-  parseConditionExpressionString
-} from "./editorPureUtils";
+import { dslOperatorToEditor, isRecord, parseConditionExpressionString } from "./editorPureUtils";
 import { getNodeHeight } from "./editorNodeLayout";
 import type {
   ConditionExpression,
@@ -190,8 +186,7 @@ export function parseDslToEditor(
     inputVariableRows = Object.entries(rawInputs.Parameters)
       .map(([name, entry]) => mapEntryToVariableRow(name, entry, varRowCounter))
       .filter((row): row is VariableRow => row != null);
-    inputNextFromDsl =
-      typeof rawInputs.Next === "string" ? rawInputs.Next : null;
+    inputNextFromDsl = typeof rawInputs.Next === "string" ? rawInputs.Next : null;
   } else if (isRecord(rawInputs)) {
     inputVariableRows = Object.entries(rawInputs)
       .filter(
@@ -280,17 +275,19 @@ export function parseDslToEditor(
           )
         : {};
       if (kind === "flow_control.repeat") {
-        const repeatCount = typeof state.RepeatCount === "number" ? state.RepeatCount : typeof state.Count === "number" ? state.Count : undefined;
+        const repeatCount =
+          typeof state.RepeatCount === "number"
+            ? state.RepeatCount
+            : typeof state.Count === "number"
+              ? state.Count
+              : undefined;
         if (repeatCount !== undefined) {
           params.count = `${repeatCount}`;
         }
       }
       if (kind === "flow_control.retry") {
         const ma = state.MaxAttempts;
-        const n =
-          typeof ma === "number" && Number.isFinite(ma)
-            ? Math.max(1, Math.floor(ma))
-            : 2;
+        const n = typeof ma === "number" && Number.isFinite(ma) ? Math.max(1, Math.floor(ma)) : 2;
         params.maxAttempts = String(n);
         const fail = state.BeforeRetryAfterFailure;
         const hasFail = isRecord(fail) && Object.keys(fail).length > 0;
@@ -300,7 +297,8 @@ export function parseDslToEditor(
       }
       let conditionExpressions: ConditionExpression[] | undefined;
       if (kind === "flow_control.condition") {
-        const ifCond = isRecord(state.If) && isRecord(state.If.Condition) ? state.If.Condition : null;
+        const ifCond =
+          isRecord(state.If) && isRecord(state.If.Condition) ? state.If.Condition : null;
         if (ifCond) {
           const rawVar = (ifCond as { Variable?: unknown }).Variable;
           const variable =
@@ -309,7 +307,9 @@ export function parseDslToEditor(
               : typeof rawVar === "number" || typeof rawVar === "boolean"
                 ? String(rawVar)
                 : "";
-          const comparisonOperator = dslOperatorToEditor(typeof ifCond.Operator === "string" ? ifCond.Operator : "Equals");
+          const comparisonOperator = dslOperatorToEditor(
+            typeof ifCond.Operator === "string" ? ifCond.Operator : "Equals"
+          );
           const rawVal = ifCond.Value;
           const value =
             typeof rawVal === "string"
@@ -317,7 +317,9 @@ export function parseDslToEditor(
               : typeof rawVal === "number"
                 ? String(rawVal)
                 : typeof rawVal === "boolean"
-                  ? rawVal ? "true" : "false"
+                  ? rawVal
+                    ? "true"
+                    : "false"
                   : "";
           conditionExpressions = [
             {
@@ -366,7 +368,7 @@ export function parseDslToEditor(
             ? syntheticInputFromBlock
               ? "Inputs"
               : (state.Label ?? stateName)
-            : state.Label ?? stateName,
+            : (state.Label ?? stateName),
         kind,
         position: { x: 0, y: 0 },
         isExpanded: false,
@@ -383,7 +385,7 @@ export function parseDslToEditor(
         branchIndex: inRetryScope
           ? null
           : context?.containerType === "parallel"
-            ? context.branchIndex ?? 0
+            ? (context.branchIndex ?? 0)
             : null,
         containerFrame:
           kind === "flow_control.parallel"
@@ -406,8 +408,7 @@ export function parseDslToEditor(
         isRetryScopeEnd: false,
         ...(kind === "flow_control.retry" && !inRetryScope
           ? {
-              retryThemeColor:
-                RETRY_THEME_COLORS[stateName.length % RETRY_THEME_COLORS.length]!.key
+              retryThemeColor: RETRY_THEME_COLORS[stateName.length % RETRY_THEME_COLORS.length]!.key
             }
           : {})
       });
@@ -419,8 +420,10 @@ export function parseDslToEditor(
       if (state.Type === "Condition" && isRecord(state.If)) {
         const thenStateName = state.If.Then;
         const elseStateName = state.Else;
-        const trueTarget = typeof thenStateName === "string" ? idByState.get(thenStateName) : undefined;
-        const falseTarget = typeof elseStateName === "string" ? idByState.get(elseStateName) : undefined;
+        const trueTarget =
+          typeof thenStateName === "string" ? idByState.get(thenStateName) : undefined;
+        const falseTarget =
+          typeof elseStateName === "string" ? idByState.get(elseStateName) : undefined;
         if (trueTarget) {
           edges.push({
             id: `edge-${edgeIndex++}`,
@@ -439,10 +442,12 @@ export function parseDslToEditor(
         }
       } else if (state.Type === "Choice" && Array.isArray(state.Choices)) {
         const trueChoice = state.Choices.find(
-          (choice) => isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === true
+          (choice) =>
+            isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === true
         );
         const falseChoice = state.Choices.find(
-          (choice) => isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === false
+          (choice) =>
+            isRecord(choice) && (choice as { BooleanEquals?: unknown }).BooleanEquals === false
         );
         const remainingChoices = state.Choices.filter(
           (choice) => choice !== trueChoice && choice !== falseChoice
@@ -613,22 +618,14 @@ export function parseDslToEditor(
 
   const workflowRootIdByState = parseStateGroup(states);
 
-  if (
-    syntheticInputFromBlock &&
-    inputNodeIdForSynthetic &&
-    workflowRootIdByState
-  ) {
+  if (syntheticInputFromBlock && inputNodeIdForSynthetic && workflowRootIdByState) {
     const nextName =
-      inputNextFromDsl ??
-      (typeof dslJson.StartAt === "string" ? dslJson.StartAt : null);
+      inputNextFromDsl ?? (typeof dslJson.StartAt === "string" ? dslJson.StartAt : null);
     if (nextName) {
       const targetId = workflowRootIdByState.get(nextName);
       if (targetId && targetId !== inputNodeIdForSynthetic) {
         const alreadyLinked = edges.some(
-          (e) =>
-            e.from === inputNodeIdForSynthetic &&
-            e.to === targetId &&
-            e.fromPort === "next"
+          (e) => e.from === inputNodeIdForSynthetic && e.to === targetId && e.fromPort === "next"
         );
         if (!alreadyLinked) {
           edges.push({
@@ -748,8 +745,7 @@ export function layoutFailureGraphImportedDefaultVertical(
       ...group.map((n) => getNodeHeight(n, nodeTypeConfig)),
       NODE_METRICS.collapsedHeight
     );
-    const rowW =
-      group.length * NODE_METRICS.width + Math.max(0, group.length - 1) * colGap;
+    const rowW = group.length * NODE_METRICS.width + Math.max(0, group.length - 1) * colGap;
     let x = canvasCenterX - rowW / 2;
     for (const node of group) {
       positions.set(node.id, { x, y: yCursor });
@@ -774,8 +770,7 @@ export function failureGraphFromOnFailureDsl(
   });
   const stateMap = parsed?.rootStateNameToNodeId;
   if (!parsed || !stateMap || parsed.nodes.length === 0) return null;
-  const startAt =
-    typeof onFailureDsl.StartAt === "string" ? onFailureDsl.StartAt.trim() : "";
+  const startAt = typeof onFailureDsl.StartAt === "string" ? onFailureDsl.StartAt.trim() : "";
   if (!startAt) return null;
   const startNodeId = stateMap.get(startAt);
   if (!startNodeId) return null;
@@ -810,7 +805,7 @@ export function failureGraphFromOnFailureDsl(
     containerId: remapNodeId(node.containerId),
     retryOwnerId:
       node.retryOwnerId != null
-        ? idMap.get(node.retryOwnerId) ?? node.retryOwnerId
+        ? (idMap.get(node.retryOwnerId) ?? node.retryOwnerId)
         : node.retryOwnerId
   }));
 

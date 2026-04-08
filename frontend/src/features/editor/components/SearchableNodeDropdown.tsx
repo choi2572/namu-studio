@@ -24,8 +24,7 @@ export function SearchableNodeDropdown({
     return selected?.name ?? "";
   });
   const filtered = useMemo(
-    () =>
-      nodes.filter((n) => (n.name ?? "").toLowerCase().includes(query.toLowerCase())),
+    () => nodes.filter((n) => (n.name ?? "").toLowerCase().includes(query.toLowerCase())),
     [nodes, query]
   );
   const selected = nodes.find((n) => n.id === selectedId) ?? null;

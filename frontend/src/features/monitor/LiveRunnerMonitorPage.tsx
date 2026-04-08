@@ -75,7 +75,8 @@ function computeTakenBranches(
   const conditionNodes = monitorGraph.nodes.filter((n) => n.dslType === "Condition");
   for (const cond of conditionNodes) {
     const outgoing = monitorGraph.edges.filter(
-      (e) => e.from === cond.pathId && (e.conditionBranch === "then" || e.conditionBranch === "else")
+      (e) =>
+        e.from === cond.pathId && (e.conditionBranch === "then" || e.conditionBranch === "else")
     );
     if (outgoing.length === 0) continue;
     const thenEdge = outgoing.find((e) => e.conditionBranch === "then");
@@ -127,9 +128,9 @@ export function LiveRunnerMonitorPage() {
 
   const [feedEvents, setFeedEvents] = useState<RunEvent[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [actionStatusInFlight, setActionStatusInFlight] = useState<
-    null | "success" | "failure"
-  >(null);
+  const [actionStatusInFlight, setActionStatusInFlight] = useState<null | "success" | "failure">(
+    null
+  );
   const [actionStatusToast, setActionStatusToast] = useState<ActionStatusToastState | null>(null);
   const actionStatusSubmittingRef = useRef(false);
   const [middlewareWsDebug, setMiddlewareWsDebug] = useState<
@@ -644,10 +645,7 @@ export function LiveRunnerMonitorPage() {
     };
   }, []);
 
-  const baseMonitorGraph = useMemo(
-    () => buildMonitorGraph(dslJson ?? undefined),
-    [dslJson]
-  );
+  const baseMonitorGraph = useMemo(() => buildMonitorGraph(dslJson ?? undefined), [dslJson]);
 
   const monitorGraph = useMemo(() => {
     if (!ENABLE_DYNAMIC_GRAPH_PATCH || graphPatches.length === 0) return baseMonitorGraph;
@@ -659,10 +657,7 @@ export function LiveRunnerMonitorPage() {
     [monitorGraph, feedEvents]
   );
 
-  const onFailureApiStateNames = useMemo(
-    () => collectOnFailureApiStateNames(dslJson),
-    [dslJson]
-  );
+  const onFailureApiStateNames = useMemo(() => collectOnFailureApiStateNames(dslJson), [dslJson]);
 
   const displayNodeStates = useMemo(() => {
     if (!dslJson || !monitorGraph) return nodeStates;
@@ -728,7 +723,10 @@ export function LiveRunnerMonitorPage() {
 
   const historyDebugByState = useMemo(() => {
     const hist = lastRunnerStatus?.workflow?.node_history ?? [];
-    const map = new Map<string, { input?: Record<string, unknown> | null; output?: Record<string, unknown> | null }>();
+    const map = new Map<
+      string,
+      { input?: Record<string, unknown> | null; output?: Record<string, unknown> | null }
+    >();
     for (const h of hist) {
       const name = h.node_name || h.name;
       if (!name) continue;
@@ -759,7 +757,7 @@ export function LiveRunnerMonitorPage() {
       const typeDisplay =
         node.nodeName === "VLM Planner"
           ? "VLM Planner"
-          : node.skillName ?? node.dslType ?? "Task";
+          : (node.skillName ?? node.dslType ?? "Task");
       return {
         stateName: node.apiStateName,
         nodeName: node.nodeName,
@@ -807,7 +805,8 @@ export function LiveRunnerMonitorPage() {
     !actionStatusPending &&
     (selectedNodeState?.status === NodeStatus.RUNNING ||
       (selectedNodeState?.status === NodeStatus.WAITING && isInRunningContainer));
-  const actionStatusTargetId = selectedMonitorNode?.stateName ?? selectedNodeState?.stateName ?? null;
+  const actionStatusTargetId =
+    selectedMonitorNode?.stateName ?? selectedNodeState?.stateName ?? null;
 
   const submitActionStatus = async (status: "success" | "failure") => {
     if (!actionStatusTargetId || !selectedNodeState) return;
@@ -873,18 +872,12 @@ export function LiveRunnerMonitorPage() {
       nodeName: studio?.nodeName ?? selectedNodeState.nodeName,
       status: studio?.status ?? selectedNodeState.status,
       durationMs: studio?.durationMs ?? selectedNodeState.durationMs ?? null,
-      input: (ws?.input ?? hist?.input ?? studio?.input) ?? null,
-      output: (ws?.output ?? hist?.output ?? studio?.output) ?? null,
-      feedback: (ws?.feedback ?? studio?.feedback) ?? null,
+      input: ws?.input ?? hist?.input ?? studio?.input ?? null,
+      output: ws?.output ?? hist?.output ?? studio?.output ?? null,
+      feedback: ws?.feedback ?? studio?.feedback ?? null,
       decision: studio?.decision
     };
-  }, [
-    debugStateName,
-    selectedNodeState,
-    historyDebugByState,
-    middlewareWsDebug,
-    studioNodeDebug
-  ]);
+  }, [debugStateName, selectedNodeState, historyDebugByState, middlewareWsDebug, studioNodeDebug]);
 
   const wsConnected = displayWsReadyState === WebSocket.OPEN;
   const showGraph = Boolean(dslJson && monitorGraph && loadedWorkflowId);
@@ -953,8 +946,8 @@ export function LiveRunnerMonitorPage() {
         >
           <p className="font-medium text-amber-900">Failure-handling flow in progress</p>
           <p className="mt-0.5 text-amber-800/90">
-            The workflow entered the OnFailure branch. Recovery steps are executing — the graph may look idle for main
-            states while this path runs.
+            The workflow entered the OnFailure branch. Recovery steps are executing — the graph may
+            look idle for main states while this path runs.
           </p>
         </div>
       )}
@@ -997,9 +990,13 @@ export function LiveRunnerMonitorPage() {
                 <div className="space-y-4 text-xs">
                   <div>
                     <p className="font-semibold text-slate-900">{selectedNodeState.nodeName}</p>
-                    {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string }).typeDisplay && (
+                    {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string })
+                      .typeDisplay && (
                       <p className="mt-0.5 text-slate-500">
-                        {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string }).typeDisplay}
+                        {
+                          (selectedNodeState as NodeStateSnapshot & { typeDisplay?: string })
+                            .typeDisplay
+                        }
                       </p>
                     )}
                   </div>
@@ -1110,9 +1107,7 @@ export function LiveRunnerMonitorPage() {
             No workflow is currently running
           </div>
         ) : (
-          <div className="flex flex-1 items-center justify-center text-slate-500">
-            Loading…
-          </div>
+          <div className="flex flex-1 items-center justify-center text-slate-500">Loading…</div>
         )}
       </div>
       <ActionStatusToast toast={actionStatusToast} onDismiss={() => setActionStatusToast(null)} />

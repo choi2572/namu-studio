@@ -10,7 +10,9 @@ export function resolveMiddlewareDebugStateKey(
   monitorGraph: MonitorGraph | null
 ): string {
   if (!monitorGraph) return nodeName;
-  const mn = monitorGraph.nodes.find((x) => x.apiStateName === nodeName || x.stateName === nodeName);
+  const mn = monitorGraph.nodes.find(
+    (x) => x.apiStateName === nodeName || x.stateName === nodeName
+  );
   return mn?.apiStateName ?? nodeName;
 }
 
@@ -18,7 +20,8 @@ export function pickInputOutputFromMiddlewareMessage(msg: Record<string, unknown
   input?: Record<string, unknown> | null;
   output?: Record<string, unknown> | null;
 } {
-  const patch: { input?: Record<string, unknown> | null; output?: Record<string, unknown> | null } = {};
+  const patch: { input?: Record<string, unknown> | null; output?: Record<string, unknown> | null } =
+    {};
   if ("input" in msg) {
     patch.input = isRecord(msg.input) ? (msg.input as Record<string, unknown>) : null;
   }

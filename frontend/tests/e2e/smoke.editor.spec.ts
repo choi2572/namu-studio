@@ -70,11 +70,16 @@ test.describe("Smoke: Editor · 시드 워크플로 (API에서 DSL 로드)", () 
       page.getByRole("heading", { name: SEED_CONDITION_PARALLEL_WORKFLOW_NAME })
     ).toBeVisible();
     const canvas = editor.root();
-    await expect(canvas.getByText("CheckCondition", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(canvas.getByText("CheckCondition", { exact: true })).toBeVisible({
+      timeout: 15_000
+    });
     await expect(canvas.getByText("ParallelSplit", { exact: true })).toBeVisible();
   });
 
-  test("Wait 시드 DSL에 WaitForEvent 상태가 API에 있고 에디터 셸이 뜬다", async ({ page, request }) => {
+  test("Wait 시드 DSL에 WaitForEvent 상태가 API에 있고 에디터 셸이 뜬다", async ({
+    page,
+    request
+  }) => {
     const draftRes = await request.get(
       `http://127.0.0.1:5000/api/workflows/${SEED_WAIT_WORKFLOW_ID}/draft`
     );
@@ -92,7 +97,9 @@ test.describe("Smoke: Editor · 시드 워크플로 (API에서 DSL 로드)", () 
 test.describe("Smoke: Editor · SSOT dsl-example.json (Import + 저장)", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("Import 후 dsl-example Label·Inputs가 보인다 (상태명이 아닌 DSL Label)", async ({ page }) => {
+  test("Import 후 dsl-example Label·Inputs가 보인다 (상태명이 아닌 DSL Label)", async ({
+    page
+  }) => {
     const editor = new EditorPageObject(page);
     await editor.goto(SEED_DRAFT_WORKFLOW_ID);
     await expect(editor.root()).toBeVisible({ timeout: 15_000 });
@@ -154,4 +161,3 @@ test.describe("Smoke: Editor · 앱 셸 내비게이션", () => {
     await expect(page.getByTestId("dashboard-page")).toBeVisible();
   });
 });
-

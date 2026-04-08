@@ -78,11 +78,7 @@ export type ValidationError = {
   nodeId?: string | null;
 };
 
-export const RUN_TERMINAL_STATUSES = [
-  RunStatus.SUCCESS,
-  RunStatus.FAILED,
-  RunStatus.CANCELED
-];
+export const RUN_TERMINAL_STATUSES = [RunStatus.SUCCESS, RunStatus.FAILED, RunStatus.CANCELED];
 
 export function isRunTerminal(status: RunStatus) {
   return RUN_TERMINAL_STATUSES.includes(status);

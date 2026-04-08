@@ -1,4 +1,5 @@
 # Spec-Driven E2E Testing Strategy
+
 _Playwright + Gherkin + YAML for regression-safe refactoring and feature development_
 
 ## Purpose
@@ -14,6 +15,7 @@ It is intended to be used in two situations:
    so future work follows the same spec-driven pattern instead of ad hoc test writing
 
 The current immediate use case is the large editor refactor, but this document should remain valid for:
+
 - editor
 - dashboard
 - monitor
@@ -28,13 +30,16 @@ The goal is to preserve **observable behavior**, not internal implementation.
 ## Core principles
 
 ### 1. Test behavior, not structure
+
 We care about:
+
 - what the user can do
 - what the user can see
 - what state transitions happen
 - what gets saved / rendered / updated
 
 We do **not** care about:
+
 - component boundaries
 - file layout
 - internal hook names
@@ -42,27 +47,34 @@ We do **not** care about:
 - CSS class names unless they are part of a visual contract
 
 ### 2. One testing system for the whole product
+
 We should not invent a different testing style for each page.
 
 Use one consistent system across the app:
+
 - **Playwright** for execution
 - **Gherkin** for readable scenarios
 - **YAML** for machine-friendly structured specs
 - **Generated Playwright tests** for maintainable implementation
 
 ### 3. Refactor-safe, feature-friendly
+
 This system should be useful both:
+
 - when freezing current behavior before refactoring
 - and when defining acceptance behavior for new features
 
 That means the same spec structure should work for:
+
 - regression coverage
 - new feature development
 - bug reproduction / prevention
 - release confidence
 
 ### 4. Spec first, then tests
+
 When possible, define:
+
 1. feature intent in Gherkin
 2. structured actions/assertions in YAML
 3. generate Playwright tests from that spec
@@ -76,18 +88,22 @@ This keeps tests readable, reviewable, and scalable.
 We use a 3-layer model:
 
 ### Layer 1: Gherkin
+
 Human-readable feature scenarios
 
 Use this for:
+
 - acceptance criteria
 - feature discussion
 - behavior review
 - preserving intent during refactors
 
 ### Layer 2: YAML spec
+
 Structured scenario data
 
 Use this for:
+
 - route
 - fixtures
 - actions
@@ -96,9 +112,11 @@ Use this for:
 - page-specific setup
 
 ### Layer 3: Playwright
+
 Executable browser tests
 
 Use this for:
+
 - actual browser interaction
 - network/mock integration
 - DOM assertions
@@ -173,6 +191,7 @@ This structure is intentionally **product-wide**, not editor-only.
 This testing approach should cover any user-facing flow, including:
 
 ### App shell / navigation
+
 - sidebar tab navigation
 - route changes
 - page entry
@@ -180,12 +199,14 @@ This testing approach should cover any user-facing flow, including:
 - global loading/error states
 
 ### Dashboard
+
 - workflow list rendering
 - current run summaries
 - runner status display
 - navigation into workflow/run-related detail
 
 ### Editor
+
 - workflow loading
 - node editing
 - save / publish
@@ -195,6 +216,7 @@ This testing approach should cover any user-facing flow, including:
 - export-related behavior
 
 ### Monitor
+
 - live monitor empty state
 - websocket bootstrap
 - workflow switching
@@ -202,18 +224,21 @@ This testing approach should cover any user-facing flow, including:
 - workflow completion handling
 
 ### Run History
+
 - run list rendering
 - run detail entry
 - historical status visibility
 - monitor entry from history if supported
 
 ### Workflow execution / monitoring
+
 - rendering the correct workflow
 - live state updates
 - timeline / status panel behavior
 - failure-related status display
 
 ### Future features
+
 As new pages are added, they should plug into the same pattern rather than creating a separate testing style.
 
 ---
@@ -221,10 +246,13 @@ As new pages are added, they should plug into the same pattern rather than creat
 ## When to use this strategy
 
 ### A. Before a big refactor
+
 Example:
+
 - editor page is ~8000 lines and needs to be broken up
 
 Process:
+
 1. identify current critical flows
 2. spec the current behavior
 3. generate E2E tests
@@ -233,12 +261,15 @@ Process:
 6. re-run as regression gate
 
 ### B. During feature development
+
 Example:
+
 - adding Retry
 - adding Failure Handling Flow
 - adding Monitor tab
 
 Process:
+
 1. write acceptance scenario
 2. write YAML contract
 3. generate tests
@@ -246,10 +277,13 @@ Process:
 5. use tests as acceptance + regression proof
 
 ### C. For bugs
+
 Example:
+
 - monitor loads wrong workflow after workflow switch
 
 Process:
+
 1. write bug-repro scenario
 2. encode expected correct behavior
 3. generate E2E
@@ -263,12 +297,15 @@ Process:
 We should not treat every test equally.
 
 ### 1. Smoke E2E
+
 Purpose:
+
 - app opens
 - key pages load
 - core actions available
 
 Examples:
+
 - app shell renders
 - sidebar navigation works
 - dashboard loads
@@ -276,29 +313,38 @@ Examples:
 - monitor loads
 
 ### 2. Core workflow E2E
+
 Purpose:
+
 - critical end-to-end user flows
 
 Examples:
+
 - open workflow in editor, modify, save, reload
 - enable failure handling and verify persistence
 - monitor active workflow from middleware state
 - navigate from dashboard to history/detail
 
 ### 3. Feature contract E2E
+
 Purpose:
+
 - lock down feature-specific behavior
 
 Examples:
+
 - retry scope behavior
 - failure drawer behavior
 - monitor workflow replacement on workflow id change
 
 ### 4. Contract / export E2E
+
 Purpose:
+
 - verify behavior that depends on generated payloads or persisted state
 
 Examples:
+
 - retry DSL shape
 - OnFailure DSL presence/absence
 - reload after save preserves feature configuration
@@ -310,7 +356,9 @@ Examples:
 Do not try to cover everything at once.
 
 ### P0
+
 Must exist before risky refactors:
+
 - app shell navigation
 - dashboard basic load
 - editor basic load
@@ -319,7 +367,9 @@ Must exist before risky refactors:
 - monitor empty state and basic running state
 
 ### P1
+
 Feature-critical:
+
 - retry
 - failure handling drawer
 - workflow menu actions
@@ -327,7 +377,9 @@ Feature-critical:
 - run history basic flows
 
 ### P2
+
 More advanced:
+
 - export/DSL contract
 - monitor workflow switching
 - websocket edge cases
@@ -341,11 +393,13 @@ More advanced:
 Gherkin is the **human contract**.
 
 ### Use Gherkin for:
+
 - what the feature does
 - what state transition matters
 - what the user expects
 
 ### Good rules
+
 - one scenario = one behavior slice
 - avoid giant all-in-one scenarios
 - use product language, not implementation language
@@ -386,6 +440,7 @@ Feature: App shell navigation
 YAML is the **structured execution contract**.
 
 A spec should describe:
+
 - route / page
 - fixture / seed state
 - API / websocket mock behavior if needed
@@ -480,12 +535,14 @@ assertions:
 Generated tests must still be readable.
 
 ### Requirements
+
 - one feature/scenario should map clearly to one or more tests
 - output should be human-editable TypeScript
 - page objects should be used instead of raw selectors everywhere
 - generated tests should not become opaque metaprogrammed blobs
 
 ### Generator should do
+
 - parse Gherkin title/intent
 - parse YAML actions/assertions
 - map actions to page objects/helpers
@@ -499,6 +556,7 @@ Generated tests must still be readable.
 This is mandatory for maintainability.
 
 ### Shared page objects
+
 - `AppShellPage`
 - `DashboardPage`
 - `EditorPage`
@@ -508,16 +566,19 @@ This is mandatory for maintainability.
 ### Example responsibilities
 
 #### `AppShellPage`
+
 - open app
 - click sidebar tab
 - assert current route/page
 
 #### `DashboardPage`
+
 - wait for dashboard load
 - assert runner/workflow cards
 - navigate to relevant detail pages
 
 #### `EditorPage`
+
 - open workflow menu
 - add node
 - connect nodes
@@ -526,6 +587,7 @@ This is mandatory for maintainability.
 - modify retry node
 
 #### `MonitorPage`
+
 - wait for websocket bootstrap
 - assert empty state
 - assert graph rendered
@@ -539,6 +601,7 @@ This is mandatory for maintainability.
 Stable selectors are critical.
 
 Prefer `data-testid` for:
+
 - page roots
 - tabs
 - menu items
@@ -578,6 +641,7 @@ data-testid="monitor-current-node"
 ```
 
 ### Rule
+
 Do not depend on fragile DOM nesting when a stable test id can be added.
 
 ---
@@ -587,23 +651,30 @@ Do not depend on fragile DOM nesting when a stable test id can be added.
 Because this app has REST + websocket behavior, the test system should support both.
 
 ### REST
+
 Use:
+
 - real API in stable environments when practical
 - or deterministic mocks/fixtures when isolation is needed
 
 ### WebSocket
+
 Provide a reusable mock/test harness so tests can simulate:
+
 - `initial`
 - `node_status_change`
 - `workflow_completed`
 
 This is important for:
+
 - monitor page
 - live monitoring flows
 - future realtime features
 
 ### Important
+
 Realtime tests should verify:
+
 - initial bootstrap
 - state patching
 - workflow replacement
@@ -616,6 +687,7 @@ Realtime tests should verify:
 Canvas tests are flaky if done casually.
 
 ### Rules
+
 - reset zoom/pan when possible
 - use shared drag-drop helpers
 - use shared edge-connect helpers
@@ -624,6 +696,7 @@ Canvas tests are flaky if done casually.
 - keep canvas-specific helpers centralized
 
 ### Suggested helpers
+
 - `dragPaletteNodeToCanvas(nodeType, position)`
 - `connectNodePorts(fromNodeId, fromPort, toNodeId, toPort)`
 - `resetCanvasViewport()`
@@ -637,12 +710,15 @@ These helpers are reusable across editor, failure flow, and future graph-based v
 This system should support contracts that cross page boundaries.
 
 ### Example 1
+
 Editor save → dashboard reflects updated workflow metadata
 
 ### Example 2
+
 Workflow published in editor → monitor can render matching workflow definition
 
 ### Example 3
+
 Dashboard navigation → run history detail → monitor entry
 
 This is why the doc should remain global rather than editor-local.
@@ -654,6 +730,7 @@ This is why the doc should remain global rather than editor-local.
 Because the next immediate step is editor refactoring, we should still define a focused minimum baseline.
 
 ### Must-have before refactor
+
 - app shell navigation works
 - editor page loads
 - basic save works
@@ -663,6 +740,7 @@ Because the next immediate step is editor refactoring, we should still define a 
 - failure handling drawer opens and persists
 
 ### Strongly recommended
+
 - monitor empty state
 - monitor running workflow bootstrap
 - at least one reload persistence test
@@ -675,6 +753,7 @@ This keeps the short-term priority clear without making the whole strategy edito
 ## Anti-patterns to avoid
 
 Do not:
+
 - write giant page-specific docs that cannot scale to other pages
 - tightly couple tests to current component/file structure
 - generate unreadable Playwright code
@@ -702,7 +781,9 @@ Recommended order when using Cursor:
 8. expand feature coverage incrementally
 
 ### Important
+
 Cursor can generate a lot quickly, but humans must still review:
+
 - whether the scenario is actually useful
 - whether assertions are strong enough
 - whether selectors are stable
@@ -762,24 +843,29 @@ This strategy is working when:
 ## Appendix: suggested initial feature set
 
 ### App shell
+
 - sidebar navigation works
 
 ### Editor
+
 - editor basic
 - save/publish
 - retry
 - failure handling
 
 ### Monitor
+
 - empty state
 - initial running workflow bootstrap
 - workflow replacement after completion
 
 ### Run history
+
 - list load
 - detail entry
 
 ### Dashboard
+
 - dashboard loads
 - current workflow summary visible
 - navigation into related pages

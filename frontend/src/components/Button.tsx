@@ -7,19 +7,13 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   size?: "sm" | "md";
 };
 
-export function Button({
-  variant = "primary",
-  size = "md",
-  className,
-  ...props
-}: ButtonProps) {
+export function Button({ variant = "primary", size = "md", className, ...props }: ButtonProps) {
   return (
     <button
       className={cn(
         "cursor-pointer rounded-md font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
         size === "sm" ? "px-3 py-1 text-xs" : "px-4 py-2 text-sm",
-        variant === "primary" &&
-          "bg-slate-900 text-white hover:bg-slate-800",
+        variant === "primary" && "bg-slate-900 text-white hover:bg-slate-800",
         variant === "secondary" &&
           "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
         variant === "ghost" && "text-slate-600 hover:bg-slate-100",

@@ -35,12 +35,7 @@ export function Sidebar() {
           )}
           aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          <svg
-            className="h-6 w-6"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
+          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -91,11 +86,7 @@ export function Sidebar() {
               )}
               title={isCollapsed ? item.label : undefined}
             >
-              {isCollapsed ? (
-                <span className="text-lg">{item.label.charAt(0)}</span>
-              ) : (
-                item.label
-              )}
+              {isCollapsed ? <span className="text-lg">{item.label.charAt(0)}</span> : item.label}
             </Link>
           );
         })}

@@ -6,7 +6,10 @@ import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format";
 
 // 노드 타입 정보 (DagView와 동일)
-const NODE_TYPE_COLORS: Record<string, { border: string; bg: string; text: string; indicator: string }> = {
+const NODE_TYPE_COLORS: Record<
+  string,
+  { border: string; bg: string; text: string; indicator: string }
+> = {
   skill: {
     border: "border-blue-200",
     bg: "bg-blue-50",
@@ -39,7 +42,10 @@ const NODE_TYPE_COLORS: Record<string, { border: string; bg: string; text: strin
   }
 };
 
-function getNodeTypeInfo(nodeName: string, stateName: string): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
+function getNodeTypeInfo(
+  nodeName: string,
+  stateName: string
+): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
   const name = (nodeName || stateName || "").toLowerCase();
   if (name.includes("condition") || name.includes("if")) {
     return { type: "Condition", colors: NODE_TYPE_COLORS.condition };
@@ -66,7 +72,11 @@ function EventIcon({ type }: { type: string }) {
   if (type.includes("CREATED") || type.includes("STARTED")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+        />
         <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     );
@@ -74,14 +84,22 @@ function EventIcon({ type }: { type: string }) {
   if (type.includes("SUCCEEDED")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       </svg>
     );
   }
   if (type.includes("FAILED")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       </svg>
     );
   }
@@ -96,7 +114,11 @@ function EventIcon({ type }: { type: string }) {
   if (type.includes("WAITING")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       </svg>
     );
   }
@@ -110,28 +132,44 @@ function EventIcon({ type }: { type: string }) {
   if (type.includes("STATUS_CHANGED") || type.includes("REFRESH")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+        />
       </svg>
     );
   }
   if (type.includes("EXTERNAL_EVENT") || type.includes("RECEIVED")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+        />
       </svg>
     );
   }
   if (type.includes("SAFETY") || type.includes("WARNING")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        />
       </svg>
     );
   }
   if (type.includes("GRAPH_PATCH")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5z"
+        />
         <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M4 16h8" />
       </svg>
     );
@@ -139,14 +177,22 @@ function EventIcon({ type }: { type: string }) {
   if (type.includes("ON_FAILURE") || type.includes("FAILURE_FLOW")) {
     return (
       <svg {...iconProps}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        />
       </svg>
     );
   }
   // 기본 아이콘
   return (
     <svg {...iconProps}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+      />
     </svg>
   );
 }
@@ -164,10 +210,7 @@ type TimelineTableProps = {
 };
 
 // 이벤트 타입별 색상 (아이콘은 SVG로 대체)
-const EVENT_TYPE_CONFIG: Record<
-  string,
-  { color: string; bgColor: string }
-> = {
+const EVENT_TYPE_CONFIG: Record<string, { color: string; bgColor: string }> = {
   RUN_CREATED: {
     color: "text-blue-600",
     bgColor: "bg-blue-50"
@@ -257,18 +300,10 @@ export function TimelineTable({
       <Table className="text-xs">
         <TableHead>
           <tr>
-            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-              Seq
-            </th>
-            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-              Time
-            </th>
-            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-              Event
-            </th>
-            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-              Node
-            </th>
+            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Seq</th>
+            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Time</th>
+            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Event</th>
+            <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Node</th>
           </tr>
         </TableHead>
         <tbody>
@@ -286,18 +321,10 @@ export function TimelineTable({
     <Table className="text-xs">
       <TableHead>
         <tr>
-          <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-            Seq
-          </th>
-          <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-            Time
-          </th>
-          <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-            Event
-          </th>
-          <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">
-            Node
-          </th>
+          <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Seq</th>
+          <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Time</th>
+          <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Event</th>
+          <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Node</th>
         </tr>
       </TableHead>
       <tbody>
@@ -341,12 +368,8 @@ export function TimelineTable({
                   "border-l-2 border-rose-400 bg-rose-50/50"
               )}
             >
-              <TableCell className="font-mono text-slate-600">
-                {event.seq}
-              </TableCell>
-              <TableCell className="text-slate-600">
-                {formatDateTime(event.timestamp)}
-              </TableCell>
+              <TableCell className="font-mono text-slate-600">{event.seq}</TableCell>
+              <TableCell className="text-slate-600">{formatDateTime(event.timestamp)}</TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
                   <div className={cn("flex items-center justify-center", config.color)}>

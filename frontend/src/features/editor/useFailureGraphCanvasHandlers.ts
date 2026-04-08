@@ -103,9 +103,7 @@ export function useFailureGraphCanvasHandlers({
   const handleFailureToggleExpand = useCallback((nodeId: string) => {
     setFailureGraph((prev) => ({
       ...prev,
-      nodes: prev.nodes.map((n) =>
-        n.id === nodeId ? { ...n, isExpanded: !n.isExpanded } : n
-      )
+      nodes: prev.nodes.map((n) => (n.id === nodeId ? { ...n, isExpanded: !n.isExpanded } : n))
     }));
     setHasUnsavedChanges(true);
   }, []);
@@ -138,52 +136,49 @@ export function useFailureGraphCanvasHandlers({
     [failureConnectingFrom, failureGraph.edges.length]
   );
 
-  const handleFailureParamChange = useCallback(
-    (nodeId: string, key: string, value: string) => {
-      setFailureGraph((prev) => {
-        const retryNode = prev.nodes.find((n) => n.id === nodeId);
-        const isRetryNode = retryNode?.kind === "flow_control.retry";
-        const isRetryTurningOffFailure =
-          isRetryNode && key === "onFailureEnabled" && value === "false";
+  const handleFailureParamChange = useCallback((nodeId: string, key: string, value: string) => {
+    setFailureGraph((prev) => {
+      const retryNode = prev.nodes.find((n) => n.id === nodeId);
+      const isRetryNode = retryNode?.kind === "flow_control.retry";
+      const isRetryTurningOffFailure =
+        isRetryNode && key === "onFailureEnabled" && value === "false";
 
-        let nextNodes = prev.nodes.map((node) => {
-          if (node.id === nodeId) {
-            return { ...node, params: { ...node.params, [key]: value } };
-          }
-          if (
-            isRetryTurningOffFailure &&
-            node.retryOwnerId === nodeId &&
-            node.retryScopeType === "failure"
-          ) {
-            return {
-              ...node,
-              retryOwnerId: null,
-              retryScopeType: null,
-              isRetryScopeEnd: false
-            };
-          }
-          return node;
-        });
-
-        if (isRetryNode && (key === "mainScopeEndId" || key === "failureScopeEndId")) {
-          const scopeType = key === "mainScopeEndId" ? "main" : "failure";
-          nextNodes = recomputeRetryScopeMembership(nextNodes, nodeId, scopeType, prev.edges);
+      let nextNodes = prev.nodes.map((node) => {
+        if (node.id === nodeId) {
+          return { ...node, params: { ...node.params, [key]: value } };
         }
-
-        let nextEdges = prev.edges;
-        if (key === "onFailureEnabled" && value === "false") {
-          const n = prev.nodes.find((nn) => nn.id === nodeId);
-          if (n?.kind === "flow_control.retry") {
-            nextEdges = prev.edges.filter((e) => !(e.from === nodeId && e.fromPort === "failure"));
-          }
+        if (
+          isRetryTurningOffFailure &&
+          node.retryOwnerId === nodeId &&
+          node.retryScopeType === "failure"
+        ) {
+          return {
+            ...node,
+            retryOwnerId: null,
+            retryScopeType: null,
+            isRetryScopeEnd: false
+          };
         }
-
-        return { ...prev, nodes: nextNodes, edges: nextEdges };
+        return node;
       });
-      setHasUnsavedChanges(true);
-    },
-    []
-  );
+
+      if (isRetryNode && (key === "mainScopeEndId" || key === "failureScopeEndId")) {
+        const scopeType = key === "mainScopeEndId" ? "main" : "failure";
+        nextNodes = recomputeRetryScopeMembership(nextNodes, nodeId, scopeType, prev.edges);
+      }
+
+      let nextEdges = prev.edges;
+      if (key === "onFailureEnabled" && value === "false") {
+        const n = prev.nodes.find((nn) => nn.id === nodeId);
+        if (n?.kind === "flow_control.retry") {
+          nextEdges = prev.edges.filter((e) => !(e.from === nodeId && e.fromPort === "failure"));
+        }
+      }
+
+      return { ...prev, nodes: nextNodes, edges: nextEdges };
+    });
+    setHasUnsavedChanges(true);
+  }, []);
 
   const handleFailureConditionExpressionFieldChange = useCallback(
     (
@@ -278,9 +273,7 @@ export function useFailureGraphCanvasHandlers({
           )
             return node;
           const rows = node.variableRows ?? [];
-          const nextRows = rows.map((row) =>
-            row.id === rowId ? { ...row, [field]: value } : row
-          );
+          const nextRows = rows.map((row) => (row.id === rowId ? { ...row, [field]: value } : row));
           return { ...node, variableRows: nextRows };
         })
       }));
@@ -362,74 +355,69 @@ export function useFailureGraphCanvasHandlers({
   const handleFailureNameChange = useCallback((nodeId: string, value: string) => {
     setFailureGraph((prev) => ({
       ...prev,
-      nodes: prev.nodes.map((node) =>
-        node.id === nodeId ? { ...node, name: value } : node
-      )
+      nodes: prev.nodes.map((node) => (node.id === nodeId ? { ...node, name: value } : node))
     }));
     setHasUnsavedChanges(true);
   }, []);
 
-  const handleFailureRetryScopeEndChange = useCallback(
-    (nodeId: string, checked: boolean) => {
-      setFailureGraph((prev) => {
-        const node = prev.nodes.find((n) => n.id === nodeId);
-        const ownerId = node?.retryOwnerId;
-        const scopeType = node?.retryScopeType;
-        if (!ownerId || !scopeType) return prev;
-        const edgesLocal = prev.edges;
-        const nodeMap = new Map(prev.nodes.map((n) => [n.id, n]));
-        const outEdges = new Map<string, { to: string }>();
-        edgesLocal.forEach((e) => {
-          if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, { to: e.to });
-        });
-        const downstreamIds = new Set<string>();
-        let current: string | null = nodeId;
-        while (current) {
-          const nextId: string | undefined = outEdges.get(current)?.to;
-          if (!nextId) break;
-          const nextNode = nodeMap.get(nextId);
-          if (!nextNode || nextNode.retryOwnerId !== ownerId || nextNode.retryScopeType !== scopeType)
-            break;
-          downstreamIds.add(nextId);
-          current = nextId;
-        }
-        let nextNodeIdToAdd: string | null = null;
-        if (!checked) {
-          const immediateNextId = outEdges.get(nodeId)?.to ?? null;
-          if (immediateNextId) {
-            const immediateNext = nodeMap.get(immediateNextId);
-            const alreadyInScope =
-              immediateNext?.retryOwnerId === ownerId && immediateNext?.retryScopeType === scopeType;
-            if (!alreadyInScope && immediateNext && !isForbiddenInRetryScope(immediateNext.kind))
-              nextNodeIdToAdd = immediateNextId;
-          }
-        }
-        const nextNodes = prev.nodes.map((n) => {
-          if (n.id === nodeId) return { ...n, isRetryScopeEnd: checked };
-          if (checked && downstreamIds.has(n.id))
-            return { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false };
-          if (
-            checked &&
-            n.retryOwnerId === ownerId &&
-            n.retryScopeType === scopeType &&
-            n.isRetryScopeEnd
-          )
-            return { ...n, isRetryScopeEnd: false };
-          if (!checked && nextNodeIdToAdd && n.id === nextNodeIdToAdd)
-            return {
-              ...n,
-              retryOwnerId: ownerId,
-              retryScopeType: scopeType,
-              isRetryScopeEnd: true
-            };
-          return n;
-        });
-        return { ...prev, nodes: nextNodes };
+  const handleFailureRetryScopeEndChange = useCallback((nodeId: string, checked: boolean) => {
+    setFailureGraph((prev) => {
+      const node = prev.nodes.find((n) => n.id === nodeId);
+      const ownerId = node?.retryOwnerId;
+      const scopeType = node?.retryScopeType;
+      if (!ownerId || !scopeType) return prev;
+      const edgesLocal = prev.edges;
+      const nodeMap = new Map(prev.nodes.map((n) => [n.id, n]));
+      const outEdges = new Map<string, { to: string }>();
+      edgesLocal.forEach((e) => {
+        if (nodeMap.has(e.from) && nodeMap.has(e.to)) outEdges.set(e.from, { to: e.to });
       });
-      setHasUnsavedChanges(true);
-    },
-    []
-  );
+      const downstreamIds = new Set<string>();
+      let current: string | null = nodeId;
+      while (current) {
+        const nextId: string | undefined = outEdges.get(current)?.to;
+        if (!nextId) break;
+        const nextNode = nodeMap.get(nextId);
+        if (!nextNode || nextNode.retryOwnerId !== ownerId || nextNode.retryScopeType !== scopeType)
+          break;
+        downstreamIds.add(nextId);
+        current = nextId;
+      }
+      let nextNodeIdToAdd: string | null = null;
+      if (!checked) {
+        const immediateNextId = outEdges.get(nodeId)?.to ?? null;
+        if (immediateNextId) {
+          const immediateNext = nodeMap.get(immediateNextId);
+          const alreadyInScope =
+            immediateNext?.retryOwnerId === ownerId && immediateNext?.retryScopeType === scopeType;
+          if (!alreadyInScope && immediateNext && !isForbiddenInRetryScope(immediateNext.kind))
+            nextNodeIdToAdd = immediateNextId;
+        }
+      }
+      const nextNodes = prev.nodes.map((n) => {
+        if (n.id === nodeId) return { ...n, isRetryScopeEnd: checked };
+        if (checked && downstreamIds.has(n.id))
+          return { ...n, retryOwnerId: null, retryScopeType: null, isRetryScopeEnd: false };
+        if (
+          checked &&
+          n.retryOwnerId === ownerId &&
+          n.retryScopeType === scopeType &&
+          n.isRetryScopeEnd
+        )
+          return { ...n, isRetryScopeEnd: false };
+        if (!checked && nextNodeIdToAdd && n.id === nextNodeIdToAdd)
+          return {
+            ...n,
+            retryOwnerId: ownerId,
+            retryScopeType: scopeType,
+            isRetryScopeEnd: true
+          };
+        return n;
+      });
+      return { ...prev, nodes: nextNodes };
+    });
+    setHasUnsavedChanges(true);
+  }, []);
 
   return {
     addFailureNode,

@@ -61,9 +61,9 @@ NEXT_PUBLIC_USE_MOCK_API=false
 NEXT_PUBLIC_API_BASE_URL=http://localhost:5000/api
 ```
 
-| Variable | Description |
-|----------|-------------|
-| `NEXT_PUBLIC_USE_MOCK_API` | `true`: mock adapter (no backend). `false` or unset: HTTP adapter (backend required). |
+| Variable                   | Description                                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_USE_MOCK_API` | `true`: mock adapter (no backend). `false` or unset: HTTP adapter (backend required).                 |
 | `NEXT_PUBLIC_API_BASE_URL` | Base URL for backend API when not using mock. Only `NEXT_PUBLIC_*` vars are available in the browser. |
 
 ## Project structure
@@ -104,12 +104,12 @@ The image runs `npm run build` then `npm start` (Next.js on port 3000). For reve
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start dev server (default port 3000) |
-| `npm run build` | Production build |
-| `npm run start` | Run production server |
-| `npm run test` | Run tests (Vitest) |
+| Command         | Description                          |
+| --------------- | ------------------------------------ |
+| `npm run dev`   | Start dev server (default port 3000) |
+| `npm run build` | Production build                     |
+| `npm run start` | Run production server                |
+| `npm run test`  | Run tests (Vitest)                   |
 
 ## Tips
 

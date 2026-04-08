@@ -21,9 +21,7 @@ export function recomputeRetryScopeMembership(
   scopeType: "main" | "failure",
   edges: EditorEdge[]
 ): EditorNode[] {
-  const retryNode = prevNodes.find(
-    (n) => n.id === retryNodeId && n.kind === "flow_control.retry"
-  );
+  const retryNode = prevNodes.find((n) => n.id === retryNodeId && n.kind === "flow_control.retry");
   if (!retryNode) return prevNodes;
 
   const endKey = scopeType === "main" ? "mainScopeEndId" : "failureScopeEndId";

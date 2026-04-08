@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type {
-  ChangeEvent,
-  DragEvent,
-  MouseEvent,
-  PointerEvent as ReactPointerEvent
-} from "react";
+import type { ChangeEvent, DragEvent, MouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { skillsetsApi, workflowsApi } from "@/api";
@@ -21,10 +16,7 @@ import {
 import { StatusBadge } from "@/components/StatusBadge";
 import { ValidationError, type Skillset, WorkflowDraft } from "@/domain/types";
 import { cn } from "@/lib/cn";
-import {
-  computeStartEndForScope,
-  type ScopeGraph
-} from "@/lib/startEndDetection";
+import { computeStartEndForScope, type ScopeGraph } from "@/lib/startEndDetection";
 import { ENABLE_VLM_NODES } from "@/lib/featureFlags";
 import { downloadJsonFile, sanitizeDownloadFileBaseName } from "@/lib/downloadJsonFile";
 import {
@@ -62,11 +54,7 @@ import {
   restoreEditorFromImportRollbackSnapshot
 } from "./editorPageOrchestration";
 import { createInitialFailureGraph } from "./editorFailureGraphInit";
-import {
-  getEffectiveNodeHeight,
-  getNodeHeight,
-  getPortOffsets
-} from "./editorNodeLayout";
+import { getEffectiveNodeHeight, getNodeHeight, getPortOffsets } from "./editorNodeLayout";
 import {
   applyImportedLayout,
   filterEdgesByContainerRules,
@@ -174,9 +162,9 @@ function isEditableKeyboardTarget(event: KeyboardEvent): boolean {
     return true;
   }
 
-  return event.composedPath().some(
-    (node) => node instanceof HTMLElement && isEditableElement(node)
-  );
+  return event
+    .composedPath()
+    .some((node) => node instanceof HTMLElement && isEditableElement(node));
 }
 
 export function EditorPage({ workflowId }: EditorPageProps) {
@@ -297,14 +285,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     if (ENABLE_VLM_NODES) {
       staticTypes.push("flow_control.vlm");
     }
-    const skillTypes: NodeKind[] = skillsetsResponse?.skill_sets.map(
-      (s) => getSkillNodeKind(s)
-    ) ?? [];
+    const skillTypes: NodeKind[] =
+      skillsetsResponse?.skill_sets.map((s) => getSkillNodeKind(s)) ?? [];
     return [...skillTypes, ...staticTypes];
   }, [skillsetsResponse]);
 
   const activeDraft = draftOverride ?? draft;
-  
+
   // 현재 workflow의 이름 가져오기
   useEffect(() => {
     if (!workflows) return;
@@ -326,127 +313,126 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
   }, []);
 
-  const applyDraftToEditor = useCallback((
-    draftToApply: WorkflowDraft | null,
-    options?: { markUnsaved?: boolean }
-  ) => {
-    const markUnsaved = options?.markUnsaved === true;
-    const getSize = () => {
-      const viewportSize = getViewportCanvasSize();
-      return viewportSize;
-    };
+  const applyDraftToEditor = useCallback(
+    (draftToApply: WorkflowDraft | null, options?: { markUnsaved?: boolean }) => {
+      const markUnsaved = options?.markUnsaved === true;
+      const getSize = () => {
+        const viewportSize = getViewportCanvasSize();
+        return viewportSize;
+      };
 
-    if (!draftToApply) {
-      preservedOnFailureDslRef.current = null;
-      setNodes([]);
-      setEdges([]);
-      setCanvasBase(getSize());
-      setZoom(1);
-      setHasUnsavedChanges(false);
-      return;
-    }
-
-    preservedOnFailureDslRef.current = cloneDslOnFailureBlock(draftToApply.dsl_json);
-
-    const hasOnFailure = dslJsonHasOnFailureKey(draftToApply.dsl_json);
-
-    const parsed = parseEditorView(draftToApply.view_json, nodeTypes);
-    let loadedNodes: EditorNode[] = [];
-    let loadedEdges: EditorEdge[] = [];
-    let canvas = parsed?.canvas;
-
-    const applyFailureStateFromDraft = () => {
-      if (!hasOnFailure) {
-        setFailureGraph(createInitialFailureGraph(false));
-        nextFailureNodeIndex.current = 1;
+      if (!draftToApply) {
+        preservedOnFailureDslRef.current = null;
+        setNodes([]);
+        setEdges([]);
+        setCanvasBase(getSize());
+        setZoom(1);
+        setHasUnsavedChanges(false);
         return;
       }
-      const viewFailure = parsed?.failure;
-      const viewFailureHasFlow =
-        viewFailure &&
-        viewFailure.edges.some((e) => e.from === viewFailure.entryNodeId);
-      if (viewFailureHasFlow) {
-        setFailureGraph({
-          enabled: true,
-          drawerOpen: false,
-          entryNodeId: viewFailure.entryNodeId,
-          nodes: viewFailure.nodes,
-          edges: viewFailure.edges
-        });
-        nextFailureNodeIndex.current = getNextIndexFromIds(
-          viewFailure.nodes.map((node) => node.id),
-          "failure-node"
-        );
-      } else {
-        const rawOnFailure = draftToApply.dsl_json.OnFailure;
-        const onFailureDsl = isRecord(rawOnFailure) ? rawOnFailure : null;
-        const fromDsl =
-          onFailureDsl && failureGraphFromOnFailureDsl(onFailureDsl, nodeTypeConfig);
-        if (fromDsl) {
-          setFailureGraph(fromDsl);
+
+      preservedOnFailureDslRef.current = cloneDslOnFailureBlock(draftToApply.dsl_json);
+
+      const hasOnFailure = dslJsonHasOnFailureKey(draftToApply.dsl_json);
+
+      const parsed = parseEditorView(draftToApply.view_json, nodeTypes);
+      let loadedNodes: EditorNode[] = [];
+      let loadedEdges: EditorEdge[] = [];
+      let canvas = parsed?.canvas;
+
+      const applyFailureStateFromDraft = () => {
+        if (!hasOnFailure) {
+          setFailureGraph(createInitialFailureGraph(false));
+          nextFailureNodeIndex.current = 1;
+          return;
+        }
+        const viewFailure = parsed?.failure;
+        const viewFailureHasFlow =
+          viewFailure && viewFailure.edges.some((e) => e.from === viewFailure.entryNodeId);
+        if (viewFailureHasFlow) {
+          setFailureGraph({
+            enabled: true,
+            drawerOpen: false,
+            entryNodeId: viewFailure.entryNodeId,
+            nodes: viewFailure.nodes,
+            edges: viewFailure.edges
+          });
           nextFailureNodeIndex.current = getNextIndexFromIds(
-            fromDsl.nodes.map((n) => n.id),
+            viewFailure.nodes.map((node) => node.id),
             "failure-node"
           );
         } else {
-          setFailureGraph(createInitialFailureGraph(true));
-          nextFailureNodeIndex.current = 1;
+          const rawOnFailure = draftToApply.dsl_json.OnFailure;
+          const onFailureDsl = isRecord(rawOnFailure) ? rawOnFailure : null;
+          const fromDsl =
+            onFailureDsl && failureGraphFromOnFailureDsl(onFailureDsl, nodeTypeConfig);
+          if (fromDsl) {
+            setFailureGraph(fromDsl);
+            nextFailureNodeIndex.current = getNextIndexFromIds(
+              fromDsl.nodes.map((n) => n.id),
+              "failure-node"
+            );
+          } else {
+            setFailureGraph(createInitialFailureGraph(true));
+            nextFailureNodeIndex.current = 1;
+          }
+        }
+      };
+
+      if (parsed) {
+        const normalizedNodes = normalizeContainerFrames(
+          normalizeContainerAssignments(parsed.nodes)
+        );
+        loadedNodes = normalizedNodes;
+        loadedEdges = filterEdgesByContainerRules(normalizedNodes, parsed.edges);
+      } else {
+        const imported = parseDslToEditor(draftToApply.dsl_json, nodeTypeConfig);
+        if (imported) {
+          loadedNodes = imported.nodes;
+          loadedEdges = imported.edges;
+          canvas = imported.canvas;
         }
       }
-    };
 
-    if (parsed) {
-      const normalizedNodes = normalizeContainerFrames(
-        normalizeContainerAssignments(parsed.nodes)
-      );
-      loadedNodes = normalizedNodes;
-      loadedEdges = filterEdgesByContainerRules(normalizedNodes, parsed.edges);
-    } else {
-      const imported = parseDslToEditor(draftToApply.dsl_json, nodeTypeConfig);
-      if (imported) {
-        loadedNodes = imported.nodes;
-        loadedEdges = imported.edges;
-        canvas = imported.canvas;
+      if (loadedNodes.length === 0 && loadedEdges.length === 0) {
+        setNodes([]);
+        setEdges([]);
+        setCanvasBase(getSize());
+        setZoom(1);
+        applyFailureStateFromDraft();
+        setHasUnsavedChanges(markUnsaved);
+        return;
       }
-    }
 
-    if (loadedNodes.length === 0 && loadedEdges.length === 0) {
-      setNodes([]);
-      setEdges([]);
-      setCanvasBase(getSize());
-      setZoom(1);
       applyFailureStateFromDraft();
-      setHasUnsavedChanges(markUnsaved);
-      return;
-    }
 
-    applyFailureStateFromDraft();
-
-    setNodes(loadedNodes);
-    setEdges(loadedEdges);
-    if (canvas) {
-      const viewportSize = getViewportCanvasSize();
-      setCanvasBase({
-        width: Math.max(viewportSize.width, canvas.width),
-        height: Math.max(viewportSize.height, canvas.height)
+      setNodes(loadedNodes);
+      setEdges(loadedEdges);
+      if (canvas) {
+        const viewportSize = getViewportCanvasSize();
+        setCanvasBase({
+          width: Math.max(viewportSize.width, canvas.width),
+          height: Math.max(viewportSize.height, canvas.height)
+        });
+        setZoom(clamp(canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max));
+      } else {
+        setCanvasBase(getSize());
+        setZoom(1);
+      }
+      assignEditorCountersAfterDraftLoad(loadedNodes, loadedEdges, {
+        nextNodeIndex,
+        nextEdgeIndex,
+        nextConditionIndex,
+        nextVariableRowIndex
       });
-      setZoom(clamp(canvas.zoom, ZOOM_LIMITS.min, ZOOM_LIMITS.max));
-    } else {
-      setCanvasBase(getSize());
-      setZoom(1);
-    }
-    assignEditorCountersAfterDraftLoad(loadedNodes, loadedEdges, {
-      nextNodeIndex,
-      nextEdgeIndex,
-      nextConditionIndex,
-      nextVariableRowIndex
-    });
-    setSelectedNode(null);
-    setSelectedEdgeId(null);
-    setConnectingFrom(null);
-    setEditingNodeId(null);
-    setHasUnsavedChanges(markUnsaved);
-  }, [nodeTypeConfig, nodeTypes, getViewportCanvasSize]);
+      setSelectedNode(null);
+      setSelectedEdgeId(null);
+      setConnectingFrom(null);
+      setEditingNodeId(null);
+      setHasUnsavedChanges(markUnsaved);
+    },
+    [nodeTypeConfig, nodeTypes, getViewportCanvasSize]
+  );
 
   useEffect(() => {
     if (!activeDraft) return;
@@ -481,7 +467,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const resizeObserver = new ResizeObserver(() => {
       updateCanvasSize();
     });
-    
+
     resizeObserver.observe(containerRef.current);
 
     return () => {
@@ -529,9 +515,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       unknown
     >;
     let dslHasOnFailure = dslJsonHasOnFailureKey(dsl_json);
-    const hasFailureStartEdge = failureGraph.edges.some(
-      (e) => e.from === failureGraph.entryNodeId
-    );
+    const hasFailureStartEdge = failureGraph.edges.some((e) => e.from === failureGraph.entryNodeId);
     const mergedOnFailure = mergePreservedOnFailureIntoDraftDsl(
       dsl_json,
       dslHasOnFailure,
@@ -604,8 +588,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       } else {
         for (let index = 0; index < branchCount; index += 1) {
           const hasBranchNodes = nodes.some(
-            (child) =>
-              child.containerId === node.id && (child.branchIndex ?? 0) === index
+            (child) => child.containerId === node.id && (child.branchIndex ?? 0) === index
           );
           if (!hasBranchNodes) {
             empty.add(index);
@@ -662,9 +645,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const { startEndValidationErrors, startEndBadges } = useMemo(() => {
     const containerTypeById = getContainerTypeById(nodes);
     const containerIds = new Set(nodes.filter(isContainerNode).map((n) => n.id));
-    const topLevelNodes = nodes.filter(
-      (n) => !n.containerId || !containerIds.has(n.containerId)
-    );
+    const topLevelNodes = nodes.filter((n) => !n.containerId || !containerIds.has(n.containerId));
     const topLevelNodeIds = new Set(topLevelNodes.map((n) => n.id));
     const validEdgesLocal = edges.filter((edge) => {
       const fromNode = nodes.find((n) => n.id === edge.from);
@@ -714,8 +695,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       const branchCount = getContainerBranchCount(node);
       for (let index = 0; index < branchCount; index += 1) {
         const branchNodes = nodes.filter(
-          (n) =>
-            n.containerId === node.id && (n.branchIndex ?? 0) === index
+          (n) => n.containerId === node.id && (n.branchIndex ?? 0) === index
         );
         const branchIds = new Set(branchNodes.map((n) => n.id));
         scopes.push({
@@ -751,7 +731,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         edges: scope.edges
       };
       const result = computeStartEndForScope(graph);
-      const showBadges = scope.isRoot || (scope.containerId != null && expandedContainerIds.has(scope.containerId));
+      const showBadges =
+        scope.isRoot || (scope.containerId != null && expandedContainerIds.has(scope.containerId));
 
       if (result.startError) {
         const scopeLabel = scope.isRoot
@@ -782,8 +763,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           showEnd: (existing?.showEnd ?? false) || (showBadges && isEnd),
           isRootScope: existing?.isRootScope ?? scope.isRoot,
           startError:
-            existing?.startError ??
-            (isStartCandidateWithError ? result.startError : undefined)
+            existing?.startError ?? (isStartCandidateWithError ? result.startError : undefined)
         });
       });
     });
@@ -822,12 +802,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     nodes.forEach((node) => {
       if (node.kind !== "flow_control.retry") return;
       for (const scopeType of ["main", "failure"] as const) {
-        const scopeIds = getRetryScopeNodeIds(
-          node.id,
-          scopeType,
-          nodes,
-          edges
-        );
+        const scopeIds = getRetryScopeNodeIds(node.id, scopeType, nodes, edges);
         scopeIds.forEach((nid) => {
           const n = nodes.find((x) => x.id === nid);
           if (!n) return;
@@ -851,12 +826,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       ...startEndValidationErrors,
       ...retryValidationErrors
     ],
-    [
-      containerWarnings,
-      validationErrors,
-      startEndValidationErrors,
-      retryValidationErrors
-    ]
+    [containerWarnings, validationErrors, startEndValidationErrors, retryValidationErrors]
   );
 
   const hasErrors = allValidationErrors.length > 0;
@@ -952,25 +922,23 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const resolveContainerAssignment = useCallback(
     (allNodes: EditorNode[], targetNode: EditorNode) => {
       if (isContainerNode(targetNode)) return null;
-      const hasRibbon = Boolean(startEndBadges.get(targetNode.id)?.showStart || startEndBadges.get(targetNode.id)?.showEnd);
+      const hasRibbon = Boolean(
+        startEndBadges.get(targetNode.id)?.showStart || startEndBadges.get(targetNode.id)?.showEnd
+      );
       const nodeHeight = getEffectiveNodeHeight(targetNode, nodeTypeConfig, hasRibbon);
       const center = {
         x: targetNode.position.x + NODE_METRICS.width / 2,
         y: targetNode.position.y + nodeHeight / 2
       };
-      const containerNodes = allNodes.filter(
-        (node) => isContainerNode(node) && node.isExpanded
-      );
+      const containerNodes = allNodes.filter((node) => isContainerNode(node) && node.isExpanded);
       for (const containerNode of containerNodes) {
         const layout = getContainerFrameLayout(containerNode, nodeTypeConfig);
         if (!layout) continue;
         for (const region of layout.regions) {
           const withinX =
-            center.x >= region.bounds.x &&
-            center.x <= region.bounds.x + region.bounds.width;
+            center.x >= region.bounds.x && center.x <= region.bounds.x + region.bounds.width;
           const withinY =
-            center.y >= region.bounds.y &&
-            center.y <= region.bounds.y + region.bounds.height;
+            center.y >= region.bounds.y && center.y <= region.bounds.y + region.bounds.height;
           if (!withinX || !withinY) continue;
           const containerType = getContainerType(containerNode.kind);
           if (!containerType) continue;
@@ -1211,32 +1179,35 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     };
   }, [canvasBase.height, canvasBase.width, getCanvasPoint, nodeTypeConfig, resizeState]);
 
-  const buildDefaultParams = useCallback((kind: NodeKind) => {
-    const config = nodeTypeConfig[kind];
-    if (!config) return {};
-    const base = config.paramFields.reduce(
-      (acc, field) => ({
-        ...acc,
-        [field.key]: ""
-      }),
-      {} as Record<string, string>
-    );
-    if (kind === "flow_control.retry") {
-      if (!base.maxAttempts) {
-        base.maxAttempts = "2";
+  const buildDefaultParams = useCallback(
+    (kind: NodeKind) => {
+      const config = nodeTypeConfig[kind];
+      if (!config) return {};
+      const base = config.paramFields.reduce(
+        (acc, field) => ({
+          ...acc,
+          [field.key]: ""
+        }),
+        {} as Record<string, string>
+      );
+      if (kind === "flow_control.retry") {
+        if (!base.maxAttempts) {
+          base.maxAttempts = "2";
+        }
+        if (base.onFailureEnabled === undefined) {
+          base.onFailureEnabled = "true";
+        }
+        if (base.mainScopeEndId === undefined) {
+          base.mainScopeEndId = "";
+        }
+        if (base.failureScopeEndId === undefined) {
+          base.failureScopeEndId = "";
+        }
       }
-      if (base.onFailureEnabled === undefined) {
-        base.onFailureEnabled = "true";
-      }
-      if (base.mainScopeEndId === undefined) {
-        base.mainScopeEndId = "";
-      }
-      if (base.failureScopeEndId === undefined) {
-        base.failureScopeEndId = "";
-      }
-    }
-    return base;
-  }, [nodeTypeConfig]);
+      return base;
+    },
+    [nodeTypeConfig]
+  );
 
   const createConditionExpression = useCallback(
     (operator: ConditionOperator | null): ConditionExpression => ({
@@ -1297,9 +1268,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const createNode = useCallback(
     (kind: NodeKind, position?: { x: number; y: number }) => {
       if (kind === "flow_control.input") {
-        const existingInput = nodes.find(
-          (node) => node.kind === "flow_control.input"
-        );
+        const existingInput = nodes.find((node) => node.kind === "flow_control.input");
         if (existingInput) {
           setSelectedNode(existingInput.id);
           setSelectedEdgeId(null);
@@ -1338,9 +1307,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         containerType !== null
           ? {
               ...getDefaultContainerFrameSize(containerType, DEFAULT_PARALLEL_BRANCHES),
-              ...(containerType === "parallel"
-                ? { branchCount: DEFAULT_PARALLEL_BRANCHES }
-                : {})
+              ...(containerType === "parallel" ? { branchCount: DEFAULT_PARALLEL_BRANCHES } : {})
             }
           : undefined;
       let retryThemeColor: string | null = null;
@@ -1358,14 +1325,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         isExpanded: false,
         params,
         conditionExpressions:
-          kind === "flow_control.condition"
-            ? [createConditionExpression(null)]
-            : undefined,
+          kind === "flow_control.condition" ? [createConditionExpression(null)] : undefined,
         // input / output 노드는 초기 생성 시 파라미터 row 0개
         variableRows:
-          kind === "flow_control.input" || kind === "flow_control.output"
-            ? []
-            : undefined,
+          kind === "flow_control.input" || kind === "flow_control.output" ? [] : undefined,
         containerId: null,
         containerType: null,
         branchIndex: null,
@@ -1378,9 +1341,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setNodes((prev) => {
         const assignment =
           containerType === null ? resolveContainerAssignment(prev, baseNode) : null;
-        const nextNode = assignment
-          ? { ...baseNode, ...assignment }
-          : baseNode;
+        const nextNode = assignment ? { ...baseNode, ...assignment } : baseNode;
         return [...prev, nextNode];
       });
       setSelectedNode(id);
@@ -1409,12 +1370,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         y: clamp(source.position.y + offset, minY, maxY)
       };
 
-      const remappedConditions = (source.conditionExpressions ?? []).map(
-        (expr) => ({
-          ...expr,
-          id: `condition-${nextConditionIndex.current++}`
-        })
-      );
+      const remappedConditions = (source.conditionExpressions ?? []).map((expr) => ({
+        ...expr,
+        id: `condition-${nextConditionIndex.current++}`
+      }));
       const remappedVariableRows = (source.variableRows ?? []).map((row) => ({
         ...row,
         id: `var-${nextVariableRowIndex.current++}`
@@ -1441,8 +1400,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         params,
         conditionExpressions,
         variableRows:
-          source.kind === "flow_control.input" ||
-          source.kind === "flow_control.output"
+          source.kind === "flow_control.input" || source.kind === "flow_control.output"
             ? remappedVariableRows
             : undefined,
         containerId: null,
@@ -1541,9 +1499,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     pendingImportRef.current = null;
     if (!pending) return;
     if (!skillsetsResponse) {
-      setImportFailMessages([
-        "The skill catalog is still loading. Please try again in a moment."
-      ]);
+      setImportFailMessages(["The skill catalog is still loading. Please try again in a moment."]);
       setImportValidationFailOpen(true);
       return;
     }
@@ -1637,9 +1593,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     const target = nodes.find((node) => node.id === nodeId);
     const isContainer = target ? isContainerNode(target) : false;
     const willCollapse = Boolean(target && target.isExpanded && isContainer);
-    const childIds = willCollapse
-      ? collectChildNodeIdsForContainer(nodes, nodeId)
-      : null;
+    const childIds = willCollapse ? collectChildNodeIdsForContainer(nodes, nodeId) : null;
 
     setNodes((prev) =>
       mapNodesForToggleExpand(
@@ -1670,9 +1624,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       if (
         selectedEdgeId &&
         edges.some(
-          (edge) =>
-            edge.id === selectedEdgeId &&
-            (childIds.has(edge.from) || childIds.has(edge.to))
+          (edge) => edge.id === selectedEdgeId && (childIds.has(edge.from) || childIds.has(edge.to))
         )
       ) {
         setSelectedEdgeId(null);
@@ -1691,7 +1643,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     let shouldMarkUnsaved = false;
     setNodes((prev) => {
       shouldMarkUnsaved = prev.some((n) => n.id === nodeId);
-      return applyParamChangeToNodes(prev, nodeId, key, value, edges, recomputeRetryScopeMembership);
+      return applyParamChangeToNodes(
+        prev,
+        nodeId,
+        key,
+        value,
+        edges,
+        recomputeRetryScopeMembership
+      );
     });
     if (shouldMarkUnsaved) {
       setHasUnsavedChanges(true);
@@ -1699,9 +1658,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     if (key === "onFailureEnabled" && value === "false") {
       const node = nodes.find((n) => n.id === nodeId);
       if (node?.kind === "flow_control.retry") {
-        setEdges((prev) =>
-          prev.filter((e) => !(e.from === nodeId && e.fromPort === "failure"))
-        );
+        setEdges((prev) => prev.filter((e) => !(e.from === nodeId && e.fromPort === "failure")));
       }
     }
   };
@@ -1714,9 +1671,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   ) => {
     let shouldMarkUnsaved = false;
     setNodes((prev) => {
-      shouldMarkUnsaved = prev.some(
-        (n) => n.id === nodeId && n.kind === "flow_control.condition"
-      );
+      shouldMarkUnsaved = prev.some((n) => n.id === nodeId && n.kind === "flow_control.condition");
       return applyConditionExpressionFieldChange(
         prev,
         nodeId,
@@ -1729,15 +1684,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     if (shouldMarkUnsaved) setHasUnsavedChanges(true);
   };
 
-  const handleAddConditionExpression = (
-    nodeId: string,
-    operator: ConditionOperator
-  ) => {
+  const handleAddConditionExpression = (nodeId: string, operator: ConditionOperator) => {
     let shouldMarkUnsaved = false;
     setNodes((prev) => {
-      shouldMarkUnsaved = prev.some(
-        (n) => n.id === nodeId && n.kind === "flow_control.condition"
-      );
+      shouldMarkUnsaved = prev.some((n) => n.id === nodeId && n.kind === "flow_control.condition");
       return applyAddConditionExpression(
         prev,
         nodeId,
@@ -1758,9 +1708,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
   const handleRemoveConditionExpression = (nodeId: string, expressionId: string) => {
     let shouldMarkUnsaved = false;
     setNodes((prev) => {
-      shouldMarkUnsaved = prev.some(
-        (n) => n.id === nodeId && n.kind === "flow_control.condition"
-      );
+      shouldMarkUnsaved = prev.some((n) => n.id === nodeId && n.kind === "flow_control.condition");
       return applyRemoveConditionExpression(
         prev,
         nodeId,
@@ -1787,8 +1735,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setNodes((prev) => {
       shouldMarkUnsaved = prev.some(
         (n) =>
-          n.id === nodeId &&
-          (n.kind === "flow_control.input" || n.kind === "flow_control.output")
+          n.id === nodeId && (n.kind === "flow_control.input" || n.kind === "flow_control.output")
       );
       return applyVariableRowChange(prev, nodeId, rowId, field, value);
     });
@@ -1800,8 +1747,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setNodes((prev) => {
       shouldMarkUnsaved = prev.some(
         (n) =>
-          n.id === nodeId &&
-          (n.kind === "flow_control.input" || n.kind === "flow_control.output")
+          n.id === nodeId && (n.kind === "flow_control.input" || n.kind === "flow_control.output")
       );
       return applyAddVariableRow(
         prev,
@@ -1824,8 +1770,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setNodes((prev) => {
       shouldMarkUnsaved = prev.some(
         (n) =>
-          n.id === nodeId &&
-          (n.kind === "flow_control.input" || n.kind === "flow_control.output")
+          n.id === nodeId && (n.kind === "flow_control.input" || n.kind === "flow_control.output")
       );
       return applyRemoveVariableRow(
         prev,
@@ -1871,9 +1816,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       setFailureGraph((prev) => ({
         ...prev,
         nodes: prev.nodes.filter((n) => n.id !== nodeId),
-        edges: prev.edges.filter(
-          (e) => e.from !== nodeId && e.to !== nodeId
-        )
+        edges: prev.edges.filter((e) => e.from !== nodeId && e.to !== nodeId)
       }));
       setHasUnsavedChanges(true);
       return;
@@ -1885,20 +1828,14 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     setNodes((prev) => {
       const nextNodes = reduceMainGraphNodesAfterDelete(prev, nodeId, edges);
       setEdges((prevEdges) => {
-        const trimmed = prevEdges.filter(
-          (edge) => edge.from !== nodeId && edge.to !== nodeId
-        );
+        const trimmed = prevEdges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId);
         return filterEdgesByContainerRules(nextNodes, trimmed);
       });
       return nextNodes;
     });
     setSelectedNode((prev) => (prev === nodeId ? null : prev));
-    setSelectedEdgeId((prev) =>
-      prev && connectedEdgeIds.includes(prev) ? null : prev
-    );
-    setConnectingFrom((prev) =>
-      prev && prev.nodeId === nodeId ? null : prev
-    );
+    setSelectedEdgeId((prev) => (prev && connectedEdgeIds.includes(prev) ? null : prev));
+    setConnectingFrom((prev) => (prev && prev.nodeId === nodeId ? null : prev));
     setEditingNodeId((prev) => (prev === nodeId ? null : prev));
     setHasUnsavedChanges(true);
   };
@@ -1962,9 +1899,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
         if (!nodeTypeConfig[source.kind]) return;
         if (source.kind === "flow_control.vlm" && !ENABLE_VLM_NODES) return;
         if (source.kind === "flow_control.input") {
-          const existingInput = nodes.find(
-            (n) => n.kind === "flow_control.input"
-          );
+          const existingInput = nodes.find((n) => n.kind === "flow_control.input");
           if (existingInput) {
             setSelectedNode(existingInput.id);
             setSelectedEdgeId(null);
@@ -2136,12 +2071,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               to: toNodeId
             }
           ];
-          nextNodes = recomputeRetryScopeMembership(
-            nextNodes,
-            fromNodeId,
-            scopeType,
-            virtualEdges
-          );
+          nextNodes = recomputeRetryScopeMembership(nextNodes, fromNodeId, scopeType, virtualEdges);
           return nextNodes;
         });
       } else if (
@@ -2154,10 +2084,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           showEdgeError(retryScopeError);
           return;
         }
-        if (
-          toNode.retryOwnerId &&
-          toNode.retryOwnerId !== fromNode.retryOwnerId
-        ) {
+        if (toNode.retryOwnerId && toNode.retryOwnerId !== fromNode.retryOwnerId) {
           showEdgeError("Target node already belongs to another Retry scope.");
           return;
         }
@@ -2337,9 +2264,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     if (!node) return null;
     const config = nodeTypeConfig[node.kind];
     if (!config) return `${node.name} - ${connectingFrom.portKey}`;
-    const output = config.outputs.find(
-      (item) => item.key === connectingFrom.portKey
-    );
+    const output = config.outputs.find((item) => item.key === connectingFrom.portKey);
     return `${node.name} - ${output?.label ?? connectingFrom.portKey}`;
   }, [connectingFrom, nodeMap, nodeTypeConfig]);
 
@@ -2429,20 +2354,20 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 onBlur={async () => {
                   setIsEditingWorkflowName(false);
                   if (workflows) {
-                    const currentWorkflow = workflows.find(
-                      (w) => w.workflowId === workflowId
-                    );
-                    if (currentWorkflow && workflowName.trim() && workflowName !== currentWorkflow.name) {
+                    const currentWorkflow = workflows.find((w) => w.workflowId === workflowId);
+                    if (
+                      currentWorkflow &&
+                      workflowName.trim() &&
+                      workflowName !== currentWorkflow.name
+                    ) {
                       try {
                         const updated = await workflowsApi.update(currentWorkflow.workflowId, {
                           name: workflowName.trim()
                         });
-                        queryClient.setQueryData<typeof workflows>(
-                          ["workflows"],
-                          (old) =>
-                            old?.map((w) =>
-                              w.workflowId === workflowId ? { ...w, name: updated.name } : w
-                            )
+                        queryClient.setQueryData<typeof workflows>(["workflows"], (old) =>
+                          old?.map((w) =>
+                            w.workflowId === workflowId ? { ...w, name: updated.name } : w
+                          )
                         );
                         setOriginalWorkflowName(updated.name);
                       } catch (error) {
@@ -2478,7 +2403,9 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   }}
                   title="더블클릭하여 이름 변경"
                 >
-                  {isLoadingWorkflows ? "Loading..." : (workflowName || activeDraft?.workflowId || "Untitled Workflow")}
+                  {isLoadingWorkflows
+                    ? "Loading..."
+                    : workflowName || activeDraft?.workflowId || "Untitled Workflow"}
                 </h1>
                 <button
                   type="button"
@@ -2507,15 +2434,16 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               </div>
             )}
             <StatusBadge status="DRAFT" />
-            {workflows && (() => {
-              const current = workflows.find((w) => w.workflowId === workflowId);
-              const ver = current?.latestVersion?.versionNumber;
-              return ver ? (
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-                  Latest: v{ver}
-                </span>
-              ) : null;
-            })()}
+            {workflows &&
+              (() => {
+                const current = workflows.find((w) => w.workflowId === workflowId);
+                const ver = current?.latestVersion?.versionNumber;
+                return ver ? (
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                    Latest: v{ver}
+                  </span>
+                ) : null;
+              })()}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -2575,11 +2503,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   <button
                     type="button"
                     className="flex w-full cursor-pointer items-center px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-                    title={
-                      skillsetsResponse
-                        ? undefined
-                        : "Skill catalog is still loading."
-                    }
+                    title={skillsetsResponse ? undefined : "Skill catalog is still loading."}
                     disabled={!skillsetsResponse}
                     onClick={() => {
                       if (!skillsetsResponse) return;
@@ -2728,8 +2652,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     const config = nodeTypeConfig[node.kind];
                     if (!config) return null;
                     const outputs =
-                      node.kind === "flow_control.retry" &&
-                      node.params.onFailureEnabled === "false"
+                      node.kind === "flow_control.retry" && node.params.onFailureEnabled === "false"
                         ? config.outputs.filter((o) => o.key !== "failure")
                         : config.outputs;
                     const outputStates = outputs.map((output) => ({
@@ -2737,8 +2660,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       label: output.label,
                       isConnected: outgoingEdges.has(`${node.id}:${output.key}`),
                       isActive:
-                        connectingFrom?.nodeId === node.id &&
-                        connectingFrom.portKey === output.key
+                        connectingFrom?.nodeId === node.id && connectingFrom.portKey === output.key
                     }));
                     const skillset = node.kind.startsWith("skill.")
                       ? skillsetMap.get(node.kind)
@@ -2771,10 +2693,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           }}
                           onToggleExpand={() => handleToggleExpand(node.id)}
                           onDragStart={(event) => {
-                            const point = getCanvasPoint(
-                              event.clientX,
-                              event.clientY
-                            );
+                            const point = getCanvasPoint(event.clientX, event.clientY);
                             if (!point) return;
                             const offsetX = point.x - node.position.x;
                             const offsetY = point.y - node.position.y;
@@ -2786,21 +2705,15 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                               nodeId: node.id,
                               offsetX,
                               offsetY,
-                              height: effectiveNodeHeightMap.get(node.id) ?? getNodeHeight(node, nodeTypeConfig)
+                              height:
+                                effectiveNodeHeightMap.get(node.id) ??
+                                getNodeHeight(node, nodeTypeConfig)
                             });
                           }}
-                          onStartConnect={(portKey) =>
-                            handleStartConnect(node.id, portKey)
-                          }
+                          onStartConnect={(portKey) => handleStartConnect(node.id, portKey)}
                           onCompleteConnect={() => handleCompleteConnect(node.id)}
-                          onParamChange={(key, value) =>
-                            handleParamChange(node.id, key, value)
-                          }
-                          onConditionExpressionFieldChange={(
-                            expressionId,
-                            field,
-                            value
-                          ) =>
+                          onParamChange={(key, value) => handleParamChange(node.id, key, value)}
+                          onConditionExpressionFieldChange={(expressionId, field, value) =>
                             handleConditionExpressionFieldChange(
                               node.id,
                               expressionId,
@@ -2817,12 +2730,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onVariableRowChange={(rowId, field, value) =>
                             handleVariableRowChange(node.id, rowId, field, value)
                           }
-                          onAddVariableRow={(valueType) =>
-                            handleAddVariableRow(node.id, valueType)
-                          }
-                          onRemoveVariableRow={(rowId) =>
-                            handleRemoveVariableRow(node.id, rowId)
-                          }
+                          onAddVariableRow={(valueType) => handleAddVariableRow(node.id, valueType)}
+                          onRemoveVariableRow={(rowId) => handleRemoveVariableRow(node.id, rowId)}
                           onNameChange={(value) => handleNameChange(node.id, value)}
                           isEditingName={editingNodeId === node.id}
                           onStartEditName={() => handleStartEditName(node.id)}
@@ -2835,8 +2744,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           onInputDrop={(event) => handleInputDrop(event, node.id)}
                           onRetryScopeEndChange={
                             node.retryScopeType
-                              ? (checked) =>
-                                  handleRetryScopeEndChange(node.id, checked)
+                              ? (checked) => handleRetryScopeEndChange(node.id, checked)
                               : undefined
                           }
                         />
@@ -2901,8 +2809,12 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                         (output) => output.key === edge.fromPort
                       );
                       if (outputIndex < 0) return null;
-                      const toNodeHeight = effectiveNodeHeightMap.get(toNode.id) ?? getNodeHeight(toNode, nodeTypeConfig);
-                      const fromNodeHeight = effectiveNodeHeightMap.get(fromNode.id) ?? getNodeHeight(fromNode, nodeTypeConfig);
+                      const toNodeHeight =
+                        effectiveNodeHeightMap.get(toNode.id) ??
+                        getNodeHeight(toNode, nodeTypeConfig);
+                      const fromNodeHeight =
+                        effectiveNodeHeightMap.get(fromNode.id) ??
+                        getNodeHeight(fromNode, nodeTypeConfig);
                       const outputOffsets = getPortOffsets(fromNodeHeight, outputs.length);
                       const start = {
                         x: fromNode.position.x + NODE_METRICS.width,
@@ -2913,10 +2825,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                         y: toNode.position.y + toNodeHeight / 2
                       };
                       const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
-                      const controlX1 =
-                        start.x + (end.x >= start.x ? curve : -curve);
-                      const controlX2 =
-                        end.x + (end.x >= start.x ? -curve : curve);
+                      const controlX1 = start.x + (end.x >= start.x ? curve : -curve);
+                      const controlX2 = end.x + (end.x >= start.x ? -curve : curve);
                       const path = `M ${start.x} ${start.y} C ${controlX1} ${start.y}, ${controlX2} ${end.y}, ${end.x} ${end.y}`;
                       const isConditionNode = fromNode.kind === "flow_control.condition";
                       const isTrueEdge = edge.fromPort === "true";
@@ -2930,7 +2840,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       } else if (isConditionNode && isFalseEdge) {
                         strokeColor = selectedEdgeId === edge.id ? "#dc2626" : "#ef4444";
                         markerId = "arrow-false";
-                      } else if (fromNode.kind === "flow_control.retry" && edge.fromPort === "failure") {
+                      } else if (
+                        fromNode.kind === "flow_control.retry" &&
+                        edge.fromPort === "failure"
+                      ) {
                         strokeColor = selectedEdgeId === edge.id ? "#dc2626" : "#ef4444";
                         markerId = "arrow-false";
                       }
@@ -2959,9 +2872,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                   {nodes.length === 0 && (
                     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-sm text-slate-400">
                       <p>Drag a node here or click in the palette.</p>
-                      <p className="text-xs">
-                        Use output ports to connect nodes with arrows.
-                      </p>
+                      <p className="text-xs">Use output ports to connect nodes with arrows.</p>
                     </div>
                   )}
 
@@ -2990,9 +2901,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               >
                 -
               </button>
-              <span className="min-w-[36px] text-center">
-                {Math.round(zoom * 100)}%
-              </span>
+              <span className="min-w-[36px] text-center">{Math.round(zoom * 100)}%</span>
               <button
                 type="button"
                 className="cursor-pointer rounded px-1 text-slate-600 hover:text-slate-900"
@@ -3008,7 +2917,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                 type="button"
                 className="cursor-pointer rounded px-1 text-slate-500 hover:text-slate-900"
                 onClick={() => setZoom(1)}
-                >
+              >
                 Reset
               </button>
             </div>
@@ -3025,28 +2934,20 @@ export function EditorPage({ workflowId }: EditorPageProps) {
               <button
                 type="button"
                 className="absolute -left-4 top-1/2 z-30 flex h-10 w-6 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-r-md border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-600 shadow hover:bg-slate-200 hover:text-slate-700"
-                onClick={() =>
-                  setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
-                }
+                onClick={() => setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))}
                 aria-label="Close Failure Handling Flow"
               >
                 &gt;
               </button>
               <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-4 py-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-800">
-                    Failure Handling Flow
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Runs when the workflow fails
-                  </p>
+                  <h2 className="text-sm font-semibold text-slate-800">Failure Handling Flow</h2>
+                  <p className="text-xs text-slate-500">Runs when the workflow fails</p>
                 </div>
                 <button
                   type="button"
                   className="cursor-pointer rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-600"
-                  onClick={() =>
-                    setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))
-                  }
+                  onClick={() => setFailureGraph((prev) => ({ ...prev, drawerOpen: false }))}
                   aria-label="Close"
                 >
                   <span className="text-sm font-bold">✕</span>
@@ -3060,8 +2961,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                       Define what should happen when the workflow fails.
                     </p>
                     <p className="mt-1">
-                      Drag nodes from the palette into this area to build your
-                      failure handling flow.
+                      Drag nodes from the palette into this area to build your failure handling
+                      flow.
                     </p>
                   </div>
                 )}
@@ -3090,13 +2991,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      const kind = e.dataTransfer.getData(
-                        "application/x-node-kind"
-                      ) as NodeKind | "";
+                      const kind = e.dataTransfer.getData("application/x-node-kind") as
+                        | NodeKind
+                        | "";
                       if (!kind || kind === "system.on_failure_entry") return;
-                      const rect = (
-                        e.currentTarget as HTMLDivElement
-                      ).getBoundingClientRect();
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                       const { x, y } = failureCanvasLocalDropPosition(
                         rect,
                         e.clientX,
@@ -3113,8 +3012,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                     {failureGraph.nodes.map((node) => {
                       const config = nodeTypeConfig[node.kind];
                       if (!config) return null;
-                      const isEntry =
-                        node.id === failureGraph.entryNodeId;
+                      const isEntry = node.id === failureGraph.entryNodeId;
                       const failureOutgoing = new Map(
                         failureGraph.edges
                           .filter((e) => e.from === node.id)
@@ -3144,9 +3042,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                             node={node}
                             config={config}
                             isSelected={selectedNode === node.id}
-                            inputConnected={failureGraph.edges.some(
-                              (e) => e.to === node.id
-                            )}
+                            inputConnected={failureGraph.edges.some((e) => e.to === node.id)}
                             outputs={outputStates}
                             nodeTypeConfig={nodeTypeConfig}
                             skillset={skillset}
@@ -3159,9 +3055,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                               setSelectedNode(node.id);
                               setSelectedEdgeId(null);
                             }}
-                            onToggleExpand={() =>
-                              handleFailureToggleExpand(node.id)
-                            }
+                            onToggleExpand={() => handleFailureToggleExpand(node.id)}
                             onDragStart={(ev) => {
                               if (isEntry) return;
                               ev.preventDefault();
@@ -3176,14 +3070,13 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                               const offsetX = ev.clientX - targetRect.left;
                               const offsetY = ev.clientY - targetRect.top;
                               const onMove = (e: PointerEvent) => {
-                                const { x: nx, y: ny } =
-                                  parentLocalPositionFromPointer(
-                                    parentRect,
-                                    e.clientX,
-                                    e.clientY,
-                                    offsetX,
-                                    offsetY
-                                  );
+                                const { x: nx, y: ny } = parentLocalPositionFromPointer(
+                                  parentRect,
+                                  e.clientX,
+                                  e.clientY,
+                                  offsetX,
+                                  offsetY
+                                );
                                 setFailureGraph((prev) => ({
                                   ...prev,
                                   nodes: prev.nodes.map((n) =>
@@ -3194,8 +3087,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                                             x: Math.max(
                                               0,
                                               Math.min(
-                                                FAILURE_CANVAS_BASE.width -
-                                                  NODE_METRICS.width,
+                                                FAILURE_CANVAS_BASE.width - NODE_METRICS.width,
                                                 nx
                                               )
                                             ),
@@ -3203,10 +3095,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                                               0,
                                               Math.min(
                                                 FAILURE_CANVAS_BASE.height -
-                                                  getNodeHeight(
-                                                    n,
-                                                    nodeTypeConfig
-                                                  ),
+                                                  getNodeHeight(n, nodeTypeConfig),
                                                 ny
                                               )
                                             )
@@ -3217,14 +3106,8 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                                 }));
                               };
                               const onUp = () => {
-                                window.removeEventListener(
-                                  "pointermove",
-                                  onMove
-                                );
-                                window.removeEventListener(
-                                  "pointerup",
-                                  onUp
-                                );
+                                window.removeEventListener("pointermove", onMove);
+                                window.removeEventListener("pointerup", onUp);
                               };
                               window.addEventListener("pointermove", onMove);
                               window.addEventListener("pointerup", onUp);
@@ -3232,17 +3115,11 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                             onStartConnect={(portKey) =>
                               handleFailureStartConnect(node.id, portKey)
                             }
-                            onCompleteConnect={() =>
-                              handleFailureInputDrop(node.id)
-                            }
+                            onCompleteConnect={() => handleFailureInputDrop(node.id)}
                             onParamChange={(key, value) =>
                               handleFailureParamChange(node.id, key, value)
                             }
-                            onConditionExpressionFieldChange={(
-                              expressionId,
-                              field,
-                              value
-                            ) =>
+                            onConditionExpressionFieldChange={(expressionId, field, value) =>
                               handleFailureConditionExpressionFieldChange(
                                 node.id,
                                 expressionId,
@@ -3254,18 +3131,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                               handleFailureAddConditionExpression(node.id, operator)
                             }
                             onRemoveConditionExpression={(expressionId) =>
-                              handleFailureRemoveConditionExpression(
-                                node.id,
-                                expressionId
-                              )
+                              handleFailureRemoveConditionExpression(node.id, expressionId)
                             }
                             onVariableRowChange={(rowId, field, value) =>
-                              handleFailureVariableRowChange(
-                                node.id,
-                                rowId,
-                                field,
-                                value
-                              )
+                              handleFailureVariableRowChange(node.id, rowId, field, value)
                             }
                             onAddVariableRow={(valueType) =>
                               handleFailureAddVariableRow(node.id, valueType)
@@ -3273,22 +3142,17 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                             onRemoveVariableRow={(rowId) =>
                               handleFailureRemoveVariableRow(node.id, rowId)
                             }
-                            onNameChange={(value) =>
-                              handleFailureNameChange(node.id, value)
-                            }
+                            onNameChange={(value) => handleFailureNameChange(node.id, value)}
                             isEditingName={editingNodeId === node.id}
                             onStartEditName={() => handleStartEditName(node.id)}
                             onFinishEditName={handleFinishEditName}
                             onOutputDragStart={() => {}}
                             onOutputDragEnd={() => {}}
                             onInputDragOver={() => {}}
-                            onInputDrop={() =>
-                              handleFailureInputDrop(node.id)
-                            }
+                            onInputDrop={() => handleFailureInputDrop(node.id)}
                             onRetryScopeEndChange={
                               node.retryScopeType
-                                ? (checked) =>
-                                    handleFailureRetryScopeEndChange(node.id, checked)
+                                ? (checked) => handleFailureRetryScopeEndChange(node.id, checked)
                                 : undefined
                             }
                           />
@@ -3316,32 +3180,18 @@ export function EditorPage({ workflowId }: EditorPageProps) {
                           </marker>
                         </defs>
                         {failureGraph.edges.map((edge) => {
-                          const fromNode = failureGraph.nodes.find(
-                            (n) => n.id === edge.from
-                          );
-                          const toNode = failureGraph.nodes.find(
-                            (n) => n.id === edge.to
-                          );
+                          const fromNode = failureGraph.nodes.find((n) => n.id === edge.from);
+                          const toNode = failureGraph.nodes.find((n) => n.id === edge.to);
                           if (!fromNode || !toNode) return null;
                           const configFrom = nodeTypeConfig[fromNode.kind];
                           const outputs = configFrom?.outputs ?? [];
-                          const outIdx = outputs.findIndex(
-                            (o) => o.key === edge.fromPort
-                          );
-                          const fromH = getNodeHeight(
-                            fromNode,
-                            nodeTypeConfig
-                          );
-                          const outXOffsets = getPortOffsets(
-                            NODE_METRICS.width,
-                            outputs.length
-                          );
+                          const outIdx = outputs.findIndex((o) => o.key === edge.fromPort);
+                          const fromH = getNodeHeight(fromNode, nodeTypeConfig);
+                          const outXOffsets = getPortOffsets(NODE_METRICS.width, outputs.length);
                           const start = {
                             x:
                               fromNode.position.x +
-                              (outIdx >= 0
-                                ? outXOffsets[outIdx]
-                                : NODE_METRICS.width / 2),
+                              (outIdx >= 0 ? outXOffsets[outIdx] : NODE_METRICS.width / 2),
                             y: fromNode.position.y + fromH
                           };
                           const end = {

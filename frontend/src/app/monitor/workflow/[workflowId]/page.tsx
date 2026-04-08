@@ -33,8 +33,7 @@ export default function MonitorWorkflowPage() {
     queryKey: ["workflows"],
     queryFn: () => workflowsApi.list()
   });
-  const workflowName =
-    workflows.find((w) => w.workflowId === workflowId)?.name ?? workflowId;
+  const workflowName = workflows.find((w) => w.workflowId === workflowId)?.name ?? workflowId;
   const workflowState = workflows.find((w) => w.workflowId === workflowId)?.state;
   const isPublished = workflowState === "PUBLISHED";
 
@@ -73,9 +72,7 @@ export default function MonitorWorkflowPage() {
     return () => window.clearTimeout(id);
   }, [runErrorToast]);
 
-  const monitorGraph = workflowDraft
-    ? buildMonitorGraph(workflowDraft.dsl_json)
-    : null;
+  const monitorGraph = workflowDraft ? buildMonitorGraph(workflowDraft.dsl_json) : null;
 
   const edges =
     workflowDraft?.dsl_json && typeof workflowDraft.dsl_json === "object"
@@ -89,14 +86,12 @@ export default function MonitorWorkflowPage() {
           Object.entries(dsl.States).forEach(([stateName, state]) => {
             if (state.Next && typeof state.Next === "string") {
               const key = `${stateName}-${state.Next}`;
-              if (!edgeMap.has(key))
-                edgeMap.set(key, { from: stateName, to: state.Next! });
+              if (!edgeMap.has(key)) edgeMap.set(key, { from: stateName, to: state.Next! });
             }
             (state.Choices ?? []).forEach((c) => {
               if (c?.Next && typeof c.Next === "string") {
                 const key = `${stateName}-${c.Next}`;
-                if (!edgeMap.has(key))
-                  edgeMap.set(key, { from: stateName, to: c.Next! });
+                if (!edgeMap.has(key)) edgeMap.set(key, { from: stateName, to: c.Next! });
               }
             });
           });
@@ -121,11 +116,7 @@ export default function MonitorWorkflowPage() {
   }, [workflowDraft?.dsl_json]);
 
   if (draftLoading || !workflowId) {
-    return (
-      <div className="flex h-full items-center justify-center text-slate-500">
-        Loading...
-      </div>
-    );
+    return <div className="flex h-full items-center justify-center text-slate-500">Loading...</div>;
   }
 
   if (!workflowDraft) {
@@ -150,8 +141,19 @@ export default function MonitorWorkflowPage() {
               onClick={() => router.push(`/editor/${workflowId}`)}
               className="inline-flex items-center gap-2"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                className="h-4 w-4"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"
+                />
               </svg>
               Edit
             </Button>
@@ -181,8 +183,19 @@ export default function MonitorWorkflowPage() {
               disabled={executeMutation.isPending || !isPublished}
               className="inline-flex items-center gap-2"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={1.5}
+                stroke="currentColor"
+                className="h-4 w-4"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z"
+                />
               </svg>
               {executeMutation.isPending ? "Starting..." : "Run"}
             </Button>

@@ -6,13 +6,7 @@ import {
   normalizeConditionExpressionFromView,
   normalizeVariableRowFromView
 } from "./editorPureUtils";
-import type {
-  EditorEdge,
-  EditorNode,
-  EditorViewJson,
-  NodeKind,
-  VariableRow
-} from "./editorTypes";
+import type { EditorEdge, EditorNode, EditorViewJson, NodeKind, VariableRow } from "./editorTypes";
 
 export function parseEditorView(
   viewJson: Record<string, unknown>,
@@ -24,43 +18,40 @@ export function parseEditorView(
   const normalizedNodes = rawNodes.map((node) => {
     if (!isRecord(node)) return node;
     const conditionExpressions = node.conditionExpressions;
-    const conditionPart =
-      Array.isArray(conditionExpressions)
-        ? {
-            conditionExpressions: conditionExpressions.map((expr) =>
-              normalizeConditionExpressionFromView(
-                isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
-              )
+    const conditionPart = Array.isArray(conditionExpressions)
+      ? {
+          conditionExpressions: conditionExpressions.map((expr) =>
+            normalizeConditionExpressionFromView(
+              isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
             )
-          }
-        : {};
+          )
+        }
+      : {};
     const rawRows = (node as { variableRows?: unknown }).variableRows;
-    const variableRowsPart =
-      Array.isArray(rawRows)
-        ? {
-            variableRows: rawRows
-              .map(normalizeVariableRowFromView)
-              .filter((row): row is VariableRow => row !== null)
-          }
-        : {};
+    const variableRowsPart = Array.isArray(rawRows)
+      ? {
+          variableRows: rawRows
+            .map(normalizeVariableRowFromView)
+            .filter((row): row is VariableRow => row !== null)
+        }
+      : {};
     return {
       ...node,
       ...conditionPart,
       ...variableRowsPart
     };
   });
-  if (!normalizedNodes.every((node) => isValidEditorNode(node, nodeTypes)) || !rawEdges.every(isValidEditorEdge)) {
+  if (
+    !normalizedNodes.every((node) => isValidEditorNode(node, nodeTypes)) ||
+    !rawEdges.every(isValidEditorEdge)
+  ) {
     return null;
   }
   const rawCanvas = isRecord(viewJson.canvas) ? viewJson.canvas : null;
   const canvas = rawCanvas
     ? {
-        width:
-          typeof rawCanvas.width === "number" ? rawCanvas.width : CANVAS_DEFAULT.width,
-        height:
-          typeof rawCanvas.height === "number"
-            ? rawCanvas.height
-            : CANVAS_DEFAULT.height,
+        width: typeof rawCanvas.width === "number" ? rawCanvas.width : CANVAS_DEFAULT.width,
+        height: typeof rawCanvas.height === "number" ? rawCanvas.height : CANVAS_DEFAULT.height,
         zoom: typeof rawCanvas.zoom === "number" ? rawCanvas.zoom : 1
       }
     : undefined;
@@ -73,38 +64,30 @@ export function parseEditorView(
   let failure: EditorViewJson["failure"] | undefined;
   if (rawFailure) {
     const entryNodeId =
-      typeof rawFailure.entryNodeId === "string"
-        ? rawFailure.entryNodeId
-        : "failure-entry-1";
-    const rawFailureNodes = Array.isArray(rawFailure.nodes)
-      ? rawFailure.nodes
-      : [];
-    const rawFailureEdges = Array.isArray(rawFailure.edges)
-      ? rawFailure.edges
-      : [];
+      typeof rawFailure.entryNodeId === "string" ? rawFailure.entryNodeId : "failure-entry-1";
+    const rawFailureNodes = Array.isArray(rawFailure.nodes) ? rawFailure.nodes : [];
+    const rawFailureEdges = Array.isArray(rawFailure.edges) ? rawFailure.edges : [];
 
     const normalizedFailureNodes = rawFailureNodes.map((node) => {
       if (!isRecord(node)) return node;
       const conditionExpressions = node.conditionExpressions;
-      const conditionPart =
-        Array.isArray(conditionExpressions)
-          ? {
-              conditionExpressions: conditionExpressions.map((expr) =>
-                normalizeConditionExpressionFromView(
-                  isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
-                )
+      const conditionPart = Array.isArray(conditionExpressions)
+        ? {
+            conditionExpressions: conditionExpressions.map((expr) =>
+              normalizeConditionExpressionFromView(
+                isRecord(expr) ? expr : { id: "", operator: null, expression: "" }
               )
-            }
-          : {};
+            )
+          }
+        : {};
       const rawRows = (node as { variableRows?: unknown }).variableRows;
-      const variableRowsPart =
-        Array.isArray(rawRows)
-          ? {
-              variableRows: rawRows
-                .map(normalizeVariableRowFromView)
-                .filter((row): row is VariableRow => row !== null)
-            }
-          : {};
+      const variableRowsPart = Array.isArray(rawRows)
+        ? {
+            variableRows: rawRows
+              .map(normalizeVariableRowFromView)
+              .filter((row): row is VariableRow => row !== null)
+          }
+        : {};
       return {
         ...node,
         ...conditionPart,

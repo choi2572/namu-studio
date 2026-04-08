@@ -99,8 +99,7 @@ function collectNodesAndEdges(
     const rawType = type ?? "Task";
     const typeLc = rawType.toLowerCase();
     const dslType = typeLc === "skill" ? "Skill" : rawType;
-    const skillName =
-      typeLc === "skill" && typeof state.Skill === "string" ? state.Skill : null;
+    const skillName = typeLc === "skill" && typeof state.Skill === "string" ? state.Skill : null;
 
     nodes.push({
       pathId,
@@ -154,7 +153,10 @@ function collectNodesAndEdges(
 
     if ((type === "Choice" || type === "Condition") && Array.isArray(state.Choices)) {
       state.Choices.forEach((choice) => {
-        const target = choice && typeof choice === "object" && "Next" in choice ? (choice as { Next?: string }).Next : undefined;
+        const target =
+          choice && typeof choice === "object" && "Next" in choice
+            ? (choice as { Next?: string }).Next
+            : undefined;
         if (typeof target === "string" && states[target]) {
           const toPathId = nodePathId([...pathPrefix, target]);
           edges.push({
@@ -337,7 +339,9 @@ function buildContainers(nodes: MonitorNode[]): MonitorContainer[] {
  * - Repeat body states get root/repeatName/body/stateName.
  * - Parallel branch states get root/parallelName/branch:i/stateName.
  */
-export function buildMonitorGraph(dslJson: Record<string, unknown> | null | undefined): MonitorGraph | null {
+export function buildMonitorGraph(
+  dslJson: Record<string, unknown> | null | undefined
+): MonitorGraph | null {
   if (!dslJson || !isRecord(dslJson)) return null;
   const states = (dslJson as { States?: Record<string, DslState> }).States;
   if (!states || !isRecord(states)) return null;
@@ -346,16 +350,7 @@ export function buildMonitorGraph(dslJson: Record<string, unknown> | null | unde
   const edges: MonitorEdge[] = [];
   const edgeIdCounter = { current: 0 };
 
-  collectNodesAndEdges(
-    states,
-    [NODE_PATH.ROOT],
-    null,
-    null,
-    null,
-    nodes,
-    edges,
-    edgeIdCounter
-  );
+  collectNodesAndEdges(states, [NODE_PATH.ROOT], null, null, null, nodes, edges, edgeIdCounter);
 
   const containers = buildContainers(nodes);
   const stateNameToPathId = new Map<string, string>();
@@ -488,25 +483,19 @@ export function applyGraphPatches(
     // Replanning: remove nodes (and incident edges) before applying additions
     const toRemove = payload.nodes_removed ?? [];
     if (toRemove.length > 0) {
-      const pathIdsToRemove = new Set(
-        toRemove.map((name) => `${containerPath}/${name}`)
-      );
+      const pathIdsToRemove = new Set(toRemove.map((name) => `${containerPath}/${name}`));
       const filteredNodes = nodes.filter((n) => !pathIdsToRemove.has(n.pathId));
       nodes.length = 0;
       nodes.push(...filteredNodes);
       edges.splice(
         0,
         edges.length,
-        ...edges.filter(
-          (e) =>
-            !pathIdsToRemove.has(e.from) && !pathIdsToRemove.has(e.to)
-        )
+        ...edges.filter((e) => !pathIdsToRemove.has(e.from) && !pathIdsToRemove.has(e.to))
       );
       pathIdsByStateName.clear();
       nodes.forEach((n) => {
         pathIdsByStateName.set(n.apiStateName, n.pathId);
-        if (n.containerPathId === null)
-          pathIdsByStateName.set(n.stateName, n.pathId);
+        if (n.containerPathId === null) pathIdsByStateName.set(n.stateName, n.pathId);
       });
     }
 
@@ -553,7 +542,8 @@ export function applyGraphPatches(
     for (const ea of payload.edges_added ?? []) {
       const fromPathId = resolvePathId(ea.from, containerPath);
       const toPathId = resolvePathId(ea.to, containerPath);
-      if (!nodes.some((n) => n.pathId === fromPathId) || !nodes.some((n) => n.pathId === toPathId)) continue;
+      if (!nodes.some((n) => n.pathId === fromPathId) || !nodes.some((n) => n.pathId === toPathId))
+        continue;
       if (edges.some((e) => e.from === fromPathId && e.to === toPathId)) continue;
       edges.push({
         id: `edge-${++edgeIdCounter}`,
@@ -573,9 +563,4 @@ export function applyGraphPatches(
   return { nodes, edges, containers, stateNameToPathId };
 }
 
-export {
-  rootPathId,
-  repeatBodyPathId,
-  parallelBranchPathId,
-  pathIdToApiStateName
-};
+export { rootPathId, repeatBodyPathId, parallelBranchPathId, pathIdToApiStateName };

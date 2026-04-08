@@ -7,7 +7,12 @@ import { cn } from "@/lib/cn";
 import { formatDuration } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ContainerFrame, type ContainerFrameRegion } from "@/components/ContainerFrame";
-import type { MonitorGraph, MonitorNode, MonitorEdge, MonitorContainer } from "@/features/monitor/monitorGraph";
+import type {
+  MonitorGraph,
+  MonitorNode,
+  MonitorEdge,
+  MonitorContainer
+} from "@/features/monitor/monitorGraph";
 import { nodePathId, NODE_PATH } from "@/lib/ids";
 import { computeStartEndForScope } from "@/lib/startEndDetection";
 
@@ -80,7 +85,8 @@ type DagViewProps = {
 
 // Node status color mapping - 더 명확한 구분 (top-level + nested 동일)
 const NODE_STATUS_STYLE_MAP: Record<NodeStatus | "NOT_RUN", string> = {
-  [NodeStatus.RUNNING]: "border-blue-600 bg-blue-50 shadow-lg ring-4 ring-blue-400 ring-opacity-50 animate-pulse",
+  [NodeStatus.RUNNING]:
+    "border-blue-600 bg-blue-50 shadow-lg ring-4 ring-blue-400 ring-opacity-50 animate-pulse",
   [NodeStatus.WAITING]: "border-amber-500 bg-amber-50 border-dashed",
   [NodeStatus.SUCCEEDED]: "border-green-600 bg-green-100",
   [NodeStatus.FAILED]: "border-red-600 bg-red-50",
@@ -206,9 +212,10 @@ function computeMonitorStartEnd(graph: MonitorGraph): {
   const topEdges = graph.edges.filter(
     (e) => topPathIds.includes(e.from) && topPathIds.includes(e.to)
   );
-  const rootResult = computeStartEndForScope(
-    { nodeIds: topPathIds, edges: topEdges.map((e) => ({ from: e.from, to: e.to })) }
-  );
+  const rootResult = computeStartEndForScope({
+    nodeIds: topPathIds,
+    edges: topEdges.map((e) => ({ from: e.from, to: e.to }))
+  });
   if (rootResult.startNodeId) startPathIds.add(rootResult.startNodeId);
   rootResult.endNodeIds.forEach((id) => endPathIds.add(id));
 
@@ -302,10 +309,7 @@ function computeMonitorLayout(
       const nodeRibbonHeight =
         startPathIds.has(node.pathId) || endPathIds.has(node.pathId) ? RIBBON_HEIGHT : 0;
       const frameY =
-        pos.y +
-        NODE_METRICS.collapsedHeight +
-        nodeRibbonHeight +
-        CONTAINER_NODE_OFFSET_Y;
+        pos.y + NODE_METRICS.collapsedHeight + nodeRibbonHeight + CONTAINER_NODE_OFFSET_Y;
       const bodyX = frameX + CONTAINER_PADDING;
       const bodyY = frameY + CONTAINER_HEADER_HEIGHT + CONTAINER_PADDING;
 
@@ -397,7 +401,8 @@ function computeMonitorLayout(
           CONTAINER_PADDING;
 
         children.forEach((child) => {
-          const cStatus = statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
+          const cStatus =
+            statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
           const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
           const local = positions.get(child.pathId);
           if (!local) {
@@ -488,8 +493,8 @@ function computeMonitorLayout(
         const bodyWidth = Math.max(
           CONTAINER_BRANCH_MIN_WIDTH,
           NODE_METRICS.width + CONTAINER_PADDING * 2,
-          ...branchLayouts.map((layout) =>
-            layout.maxX - layout.minX + NODE_METRICS.width + CONTAINER_PADDING * 2
+          ...branchLayouts.map(
+            (layout) => layout.maxX - layout.minX + NODE_METRICS.width + CONTAINER_PADDING * 2
           )
         );
 
@@ -503,8 +508,7 @@ function computeMonitorLayout(
             const local = layout.positions.get(pathId);
             if (!local) return;
             const hasRibbon = startPathIds.has(pathId) || endPathIds.has(pathId);
-            const effectiveHeight =
-              NODE_METRICS.collapsedHeight + (hasRibbon ? RIBBON_HEIGHT : 0);
+            const effectiveHeight = NODE_METRICS.collapsedHeight + (hasRibbon ? RIBBON_HEIGHT : 0);
             maxBottom = Math.max(maxBottom, local.y + effectiveHeight);
           });
           const contentHeight = maxBottom - layout.minY;
@@ -553,8 +557,7 @@ function computeMonitorLayout(
           const layout = branchLayouts[idx];
 
           // 이 브랜치 내 전체 DAG 콘텐츠 폭 (auto layout 기준, padding 제외)
-          const contentWidth =
-            layout.maxX - layout.minX + NODE_METRICS.width;
+          const contentWidth = layout.maxX - layout.minX + NODE_METRICS.width;
           const regionCenterX = regionX + bodyWidth / 2;
           const contentBaseX = regionCenterX - contentWidth / 2;
 
@@ -563,19 +566,14 @@ function computeMonitorLayout(
             if (!child) return;
             const cStatus =
               statusByApiStateName.get(child.apiStateName)?.status ?? NodeStatus.WAITING;
-            const cDuration =
-              statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
+            const cDuration = statusByApiStateName.get(child.apiStateName)?.durationMs ?? null;
             const local = layout.positions.get(pathId);
 
             // layout 정보가 없으면 브랜치 중앙에 단순 스택 정렬
             if (!local) {
               const fallbackPos = {
                 x: regionCenterX - NODE_METRICS.width / 2,
-                y:
-                  regionY +
-                  PARALLEL_REGION_LABEL_HEIGHT +
-                  CONTAINER_PADDING +
-                  CONTAINER_ROW_GAP
+                y: regionY + PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING + CONTAINER_ROW_GAP
               };
               positionedNodes.push({
                 ...child,
@@ -590,10 +588,7 @@ function computeMonitorLayout(
             const childPos = {
               x: contentBaseX + (local.x - layout.minX),
               y:
-                regionY +
-                PARALLEL_REGION_LABEL_HEIGHT +
-                CONTAINER_PADDING +
-                (local.y - layout.minY)
+                regionY + PARALLEL_REGION_LABEL_HEIGHT + CONTAINER_PADDING + (local.y - layout.minY)
             };
             positionedNodes.push({
               ...child,
@@ -719,9 +714,7 @@ function computeAutoLayout(
   Array.from(grouped.entries())
     .sort(([a], [b]) => a - b)
     .forEach(([layer, group]) => {
-      const sortedGroup = [...group].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      );
+      const sortedGroup = [...group].sort((a, b) => a.name.localeCompare(b.name));
       let yCursor = PADDING;
       sortedGroup.forEach((node) => {
         const nodeHeight = NODE_METRICS.collapsedHeight;
@@ -749,7 +742,10 @@ function getPortOffsets(nodeHeight: number, count: number) {
 }
 
 // Node type별 색상 - 왼쪽 인디케이터용
-const NODE_TYPE_COLORS: Record<string, { border: string; bg: string; text: string; indicator: string }> = {
+const NODE_TYPE_COLORS: Record<
+  string,
+  { border: string; bg: string; text: string; indicator: string }
+> = {
   skill: {
     border: "border-blue-200",
     bg: "bg-blue-50",
@@ -794,7 +790,10 @@ function getNodeTypeInfoFromDsl(
 }
 
 /** Flat 모드용: nodeName 기반 추론 (DSL 없을 때) */
-function getNodeTypeInfo(nodeName: string, stateName: string): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
+function getNodeTypeInfo(
+  nodeName: string,
+  stateName: string
+): { type: string; colors: { border: string; bg: string; text: string; indicator: string } } {
   const name = nodeName.toLowerCase();
   if (name.includes("condition") || name.includes("if")) {
     return { type: "Condition", colors: NODE_TYPE_COLORS.condition };
@@ -942,7 +941,9 @@ export function DagView({
 
   useEffect(() => {
     if (!runningNode || !shouldAutoFocusRunningNode) return;
-    const id = useGraphMode ? (runningNode as PositionedMonitorNode).pathId : (runningNode as DagNode).id;
+    const id = useGraphMode
+      ? (runningNode as PositionedMonitorNode).pathId
+      : (runningNode as DagNode).id;
     onSelectNode(id);
     scrollToNode(id);
   }, [runningNode, shouldAutoFocusRunningNode, onSelectNode, useGraphMode, scrollToNode]);
@@ -969,10 +970,8 @@ export function DagView({
       return fromExists && toExists;
     });
 
-    const showStartRibbon = (pathId: string) =>
-      startPathIds.has(pathId) && !endPathIds.has(pathId);
-    const showEndRibbon = (pathId: string) =>
-      endPathIds.has(pathId) && !startPathIds.has(pathId);
+    const showStartRibbon = (pathId: string) => startPathIds.has(pathId) && !endPathIds.has(pathId);
+    const showEndRibbon = (pathId: string) => endPathIds.has(pathId) && !startPathIds.has(pathId);
     const showStartEndRibbon = (pathId: string) =>
       startPathIds.has(pathId) && endPathIds.has(pathId);
 
@@ -989,271 +988,333 @@ export function DagView({
             height: canvasSize.height
           }}
         >
-        <svg
-          className="absolute pointer-events-none"
-          width={canvasSize.width}
-          height={canvasSize.height}
-          style={{ top: 0, left: 0, zIndex: 5 }}
-        >
-          <defs>
-            <marker id="arrow-monitor" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
-            </marker>
-            <marker id="arrow-monitor-then" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M0,0 L0,6 L9,3 z" fill="#059669" />
-            </marker>
-            <marker id="arrow-monitor-else" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-              <path d="M0,0 L0,6 L9,3 z" fill="#d97706" />
-            </marker>
-          </defs>
-          {edgesToRenderGraph.map((edge) => {
-            const fromNode = positionedNodes.find((n) => n.pathId === edge.from);
-            const toNode = positionedNodes.find((n) => n.pathId === edge.to);
-            if (!fromNode || !toNode) return null;
+          <svg
+            className="absolute pointer-events-none"
+            width={canvasSize.width}
+            height={canvasSize.height}
+            style={{ top: 0, left: 0, zIndex: 5 }}
+          >
+            <defs>
+              <marker
+                id="arrow-monitor"
+                markerWidth="10"
+                markerHeight="10"
+                refX="9"
+                refY="3"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
+              </marker>
+              <marker
+                id="arrow-monitor-then"
+                markerWidth="10"
+                markerHeight="10"
+                refX="9"
+                refY="3"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M0,0 L0,6 L9,3 z" fill="#059669" />
+              </marker>
+              <marker
+                id="arrow-monitor-else"
+                markerWidth="10"
+                markerHeight="10"
+                refX="9"
+                refY="3"
+                orient="auto"
+                markerUnits="strokeWidth"
+              >
+                <path d="M0,0 L0,6 L9,3 z" fill="#d97706" />
+              </marker>
+            </defs>
+            {edgesToRenderGraph.map((edge) => {
+              const fromNode = positionedNodes.find((n) => n.pathId === edge.from);
+              const toNode = positionedNodes.find((n) => n.pathId === edge.to);
+              if (!fromNode || !toNode) return null;
 
-            const fromIsCondition = fromNode.dslType === "Condition";
-            const isThen = fromIsCondition && edge.conditionBranch === "then";
-            const isElse = fromIsCondition && edge.conditionBranch === "else";
-            const takenBranch = fromIsCondition && edge.conditionBranch != null ? takenBranchByConditionPathId?.get(fromNode.pathId) : undefined;
-            const edgeDisabled = fromIsCondition && edge.conditionBranch != null && takenBranch != null && takenBranch !== edge.conditionBranch;
+              const fromIsCondition = fromNode.dslType === "Condition";
+              const isThen = fromIsCondition && edge.conditionBranch === "then";
+              const isElse = fromIsCondition && edge.conditionBranch === "else";
+              const takenBranch =
+                fromIsCondition && edge.conditionBranch != null
+                  ? takenBranchByConditionPathId?.get(fromNode.pathId)
+                  : undefined;
+              const edgeDisabled =
+                fromIsCondition &&
+                edge.conditionBranch != null &&
+                takenBranch != null &&
+                takenBranch !== edge.conditionBranch;
 
-            // Condition 노드일 때는 항상 true/false 두 개의 포트를 사용 (에디터와 동일)
-            let startY = fromNode.position.y + NODE_METRICS.collapsedHeight / 2;
-            if (fromIsCondition) {
-              const offsets = getPortOffsets(NODE_METRICS.collapsedHeight, 2);
-              const trueOffset = offsets[0];
-              const falseOffset = offsets[1] ?? offsets[0];
-              const portOffset =
-                edge.conditionBranch === "then"
-                  ? trueOffset
-                  : edge.conditionBranch === "else"
-                    ? falseOffset
-                    : NODE_METRICS.collapsedHeight / 2;
-              startY = fromNode.position.y + portOffset;
-            }
+              // Condition 노드일 때는 항상 true/false 두 개의 포트를 사용 (에디터와 동일)
+              let startY = fromNode.position.y + NODE_METRICS.collapsedHeight / 2;
+              if (fromIsCondition) {
+                const offsets = getPortOffsets(NODE_METRICS.collapsedHeight, 2);
+                const trueOffset = offsets[0];
+                const falseOffset = offsets[1] ?? offsets[0];
+                const portOffset =
+                  edge.conditionBranch === "then"
+                    ? trueOffset
+                    : edge.conditionBranch === "else"
+                      ? falseOffset
+                      : NODE_METRICS.collapsedHeight / 2;
+                startY = fromNode.position.y + portOffset;
+              }
 
-            const start = {
-              x: fromNode.position.x + NODE_METRICS.width,
-              y: startY
-            };
-            const end = {
-              x: toNode.position.x,
-              y: toNode.position.y + NODE_METRICS.collapsedHeight / 2
-            };
-            const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
-            const c1x = start.x + (end.x >= start.x ? curve : -curve);
-            const c2x = end.x + (end.x >= start.x ? -curve : curve);
-            const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
+              const start = {
+                x: fromNode.position.x + NODE_METRICS.width,
+                y: startY
+              };
+              const end = {
+                x: toNode.position.x,
+                y: toNode.position.y + NODE_METRICS.collapsedHeight / 2
+              };
+              const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
+              const c1x = start.x + (end.x >= start.x ? curve : -curve);
+              const c2x = end.x + (end.x >= start.x ? -curve : curve);
+              const d = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
 
-            const stroke = edgeDisabled ? "#cbd5e1" : isThen ? "#059669" : isElse ? "#d97706" : "#64748b";
-            const marker = edgeDisabled ? "url(#arrow-monitor)" : isThen ? "url(#arrow-monitor-then)" : isElse ? "url(#arrow-monitor-else)" : "url(#arrow-monitor)";
-            return (
-              <path
-                key={edge.id}
-                d={d}
-                stroke={stroke}
-                strokeWidth={edgeDisabled ? 1.5 : 2.25}
-                strokeDasharray={edgeDisabled ? "4 4" : undefined}
-                fill="none"
-                markerEnd={marker}
+              const stroke = edgeDisabled
+                ? "#cbd5e1"
+                : isThen
+                  ? "#059669"
+                  : isElse
+                    ? "#d97706"
+                    : "#64748b";
+              const marker = edgeDisabled
+                ? "url(#arrow-monitor)"
+                : isThen
+                  ? "url(#arrow-monitor-then)"
+                  : isElse
+                    ? "url(#arrow-monitor-else)"
+                    : "url(#arrow-monitor)";
+              return (
+                <path
+                  key={edge.id}
+                  d={d}
+                  stroke={stroke}
+                  strokeWidth={edgeDisabled ? 1.5 : 2.25}
+                  strokeDasharray={edgeDisabled ? "4 4" : undefined}
+                  fill="none"
+                  markerEnd={marker}
+                />
+              );
+            })}
+          </svg>
+
+          <div className="absolute" style={{ zIndex: 1 }}>
+            {containerFrames.map((frame) => (
+              <ContainerFrame
+                key={frame.container.pathId}
+                id={frame.container.pathId}
+                label={frame.container.label}
+                position={frame.position}
+                size={frame.size}
+                headerHeight={frame.headerHeight}
+                regions={frame.regions}
+                readOnly
+                badgeLabel={containerBadge(frame.container, positionedNodes, runEnded)}
               />
-            );
-          })}
-        </svg>
+            ))}
+          </div>
 
-        <div className="absolute" style={{ zIndex: 1 }}>
-          {containerFrames.map((frame) => (
-            <ContainerFrame
-              key={frame.container.pathId}
-            id={frame.container.pathId}
-            label={frame.container.label}
-            position={frame.position}
-            size={frame.size}
-            headerHeight={frame.headerHeight}
-            regions={frame.regions}
-            readOnly
-            badgeLabel={containerBadge(frame.container, positionedNodes, runEnded)}
-          />
-        ))}
-        </div>
+          {positionedNodes.map((node) => {
+            const displayStaleRunning = runEnded && node.status === NodeStatus.RUNNING;
+            const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
+            const displayStatus = displayStaleRunning || displayNotRun ? "NOT_RUN" : node.status;
+            const nodeTypeInfo = getNodeTypeInfoFromDsl(node.dslType, node.containerType);
+            // VLM Planner 컨테이너는 DSL 타입 Repeat 대신 이름으로 표시
+            const typeLabel =
+              node.nodeName === "VLM Planner" ? "VLM Planner" : (node.skillName ?? node.dslType);
+            const isRunning = node.status === NodeStatus.RUNNING && !displayStaleRunning;
+            const isCompleted = node.status === NodeStatus.SUCCEEDED;
+            const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
+            const isSelected = selectedNode === node.pathId;
+            const hasStart = showStartRibbon(node.pathId);
+            const hasEnd = showEndRibbon(node.pathId);
+            const hasStartEnd = showStartEndRibbon(node.pathId);
+            const hasRibbon = hasStart || hasEnd || hasStartEnd;
+            const isConditionNode = node.dslType === "Condition";
+            const outputOffsets = isConditionNode
+              ? getPortOffsets(NODE_METRICS.collapsedHeight, 2)
+              : getPortOffsets(NODE_METRICS.collapsedHeight, 1);
+            const inputOffset = NODE_METRICS.collapsedHeight / 2;
 
-        {positionedNodes.map((node) => {
-          const displayStaleRunning = runEnded && node.status === NodeStatus.RUNNING;
-          const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
-          const displayStatus =
-            displayStaleRunning || displayNotRun ? "NOT_RUN" : node.status;
-          const nodeTypeInfo = getNodeTypeInfoFromDsl(node.dslType, node.containerType);
-          // VLM Planner 컨테이너는 DSL 타입 Repeat 대신 이름으로 표시
-          const typeLabel =
-            node.nodeName === "VLM Planner"
-              ? "VLM Planner"
-              : node.skillName ?? node.dslType;
-          const isRunning = node.status === NodeStatus.RUNNING && !displayStaleRunning;
-          const isCompleted = node.status === NodeStatus.SUCCEEDED;
-          const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
-          const isSelected = selectedNode === node.pathId;
-          const hasStart = showStartRibbon(node.pathId);
-          const hasEnd = showEndRibbon(node.pathId);
-          const hasStartEnd = showStartEndRibbon(node.pathId);
-          const hasRibbon = hasStart || hasEnd || hasStartEnd;
-          const isConditionNode = node.dslType === "Condition";
-          const outputOffsets = isConditionNode
-            ? getPortOffsets(NODE_METRICS.collapsedHeight, 2)
-            : getPortOffsets(NODE_METRICS.collapsedHeight, 1);
-          const inputOffset = NODE_METRICS.collapsedHeight / 2;
-
-          return (
-            <div
-              key={node.pathId}
-              data-node-id={node.pathId}
-              className="absolute overflow-visible"
-              style={{
-                left: node.position.x,
-                top: node.position.y,
-                width: NODE_METRICS.width,
-                minHeight: NODE_METRICS.collapsedHeight,
-                zIndex: 10
-              }}
-            >
-              {/* 입력 포트 (좌측) — 노드 밖으로 반원 보이도록 wrapper 기준 배치 */}
+            return (
               <div
-                className="pointer-events-none absolute left-0 flex items-center justify-center z-10"
+                key={node.pathId}
+                data-node-id={node.pathId}
+                className="absolute overflow-visible"
                 style={{
-                  top: inputOffset,
-                  transform: "translate(-50%, -50%)"
+                  left: node.position.x,
+                  top: node.position.y,
+                  width: NODE_METRICS.width,
+                  minHeight: NODE_METRICS.collapsedHeight,
+                  zIndex: 10
                 }}
               >
-                <div className="h-4 w-4 rounded-full border-2 border-slate-600 bg-white shadow-sm" />
-              </div>
-
-              {/* 출력 포트(우측) — Condition은 true/false 두 개, 그 외 하나 */}
-              {outputOffsets.map((offset, index) => (
+                {/* 입력 포트 (좌측) — 노드 밖으로 반원 보이도록 wrapper 기준 배치 */}
                 <div
-                  key={index}
-                  className="pointer-events-none absolute right-0 flex items-center justify-center z-10"
+                  className="pointer-events-none absolute left-0 flex items-center justify-center z-10"
                   style={{
-                    top: offset,
-                    transform: "translate(50%, -50%)"
+                    top: inputOffset,
+                    transform: "translate(-50%, -50%)"
                   }}
                 >
                   <div className="h-4 w-4 rounded-full border-2 border-slate-600 bg-white shadow-sm" />
                 </div>
-              ))}
 
-              <button
-                type="button"
-                onClick={() => onSelectNode(node.pathId)}
-                className={cn(
-                  "cursor-pointer relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
-                  NODE_STATUS_STYLE_MAP[displayStatus],
-                  isSelected ? "ring-4 ring-slate-400 ring-offset-2" : "hover:shadow-lg"
-                )}
-              >
-                <div
+                {/* 출력 포트(우측) — Condition은 true/false 두 개, 그 외 하나 */}
+                {outputOffsets.map((offset, index) => (
+                  <div
+                    key={index}
+                    className="pointer-events-none absolute right-0 flex items-center justify-center z-10"
+                    style={{
+                      top: offset,
+                      transform: "translate(50%, -50%)"
+                    }}
+                  >
+                    <div className="h-4 w-4 rounded-full border-2 border-slate-600 bg-white shadow-sm" />
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => onSelectNode(node.pathId)}
                   className={cn(
-                    "relative z-0 flex items-start justify-between pl-3",
-                    hasRibbon && "pt-6"
+                    "cursor-pointer relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
+                    NODE_STATUS_STYLE_MAP[displayStatus],
+                    isSelected ? "ring-4 ring-slate-400 ring-offset-2" : "hover:shadow-lg"
                   )}
                 >
-                  <div className={cn("absolute left-0 top-0 bottom-0 w-1 rounded-l", nodeTypeInfo.colors.indicator)} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <p
-                        className={cn(
-                          "font-semibold truncate",
-                          isRunning
-                            ? "text-blue-900"
-                            : isCompleted
-                              ? "text-green-900"
-                              : isWaiting
-                                ? "text-amber-900"
-                                : displayNotRun || displayStaleRunning
-                                  ? "text-slate-600"
-                                  : "text-slate-800"
-                        )}
-                      >
-                        {node.nodeName}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                          nodeTypeInfo.colors.bg,
-                          nodeTypeInfo.colors.text,
-                          "border border-current"
-                        )}
-                      >
-                        {nodeTypeInfo.type}
-                      </span>
-                      {isRunning && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-700">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600" />
+                  <div
+                    className={cn(
+                      "relative z-0 flex items-start justify-between pl-3",
+                      hasRibbon && "pt-6"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "absolute left-0 top-0 bottom-0 w-1 rounded-l",
+                        nodeTypeInfo.colors.indicator
+                      )}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p
+                          className={cn(
+                            "font-semibold truncate",
+                            isRunning
+                              ? "text-blue-900"
+                              : isCompleted
+                                ? "text-green-900"
+                                : isWaiting
+                                  ? "text-amber-900"
+                                  : displayNotRun || displayStaleRunning
+                                    ? "text-slate-600"
+                                    : "text-slate-800"
+                          )}
+                        >
+                          {node.nodeName}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                            nodeTypeInfo.colors.bg,
+                            nodeTypeInfo.colors.text,
+                            "border border-current"
+                          )}
+                        >
+                          {nodeTypeInfo.type}
+                        </span>
+                        {isRunning && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-700">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600" />
+                            </span>
+                            Running
                           </span>
-                          Running
-                        </span>
-                      )}
-                      {isWaiting && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">Waiting</span>}
-                      {displayStaleRunning && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
-                          Not completed
-                        </span>
-                      )}
-                      {displayNotRun && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">Not run</span>}
-                      {isCompleted && <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">✓ Completed</span>}
-                    </div>
-                    {typeLabel && typeLabel !== "Pass" && (
-                      <p className={cn("text-xs truncate text-slate-500")}>
-                        {typeLabel}
-                      </p>
-                    )}
-                    {node.durationMs !== null && (
-                      <p className="mt-1 text-xs font-medium text-slate-700">⏱ {formatDuration(node.durationMs)}</p>
-                    )}
-                  </div>
-                  <div className="ml-2 flex-shrink-0">
-                    <StatusBadge status={displayStatus} />
-                  </div>
-                </div>
-                {/* Start/End 리본 — editor와 동일: start+end 동시면 사선 구획, 아니면 단일 색 */}
-                {hasRibbon && (
-                  <div className="pointer-events-none absolute left-0 right-0 top-0 z-20" aria-hidden>
-                    {hasStartEnd ? (
-                      <div className="absolute left-0 right-0 top-0 z-10 h-6 overflow-hidden rounded-t-[6px] shadow-sm">
-                        <div
-                          className="absolute inset-0 bg-emerald-600"
-                          style={{ clipPath: "polygon(0 0, 57.14% 0, 42.86% 100%, 0 100%)" }}
-                        />
-                        <div
-                          className="absolute inset-0 bg-slate-500"
-                          style={{ clipPath: "polygon(57.14% 0, 100% 0, 100% 100%, 42.86% 100%)" }}
-                        />
-                        <span className="absolute left-1 top-0.5 text-[9px] font-bold text-white drop-shadow-sm">
-                          ▶ START
-                        </span>
-                        <span className="absolute right-1 bottom-0.5 text-[9px] font-bold text-white drop-shadow-sm">
-                          END ⏹
-                        </span>
-                      </div>
-                    ) : (
-                      <div
-                        className={cn(
-                          "flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
-                          hasStart && "bg-emerald-600",
-                          hasEnd && "bg-slate-500"
                         )}
-                      >
-                        {hasStart ? "▶ START" : "⏹ END"}
+                        {isWaiting && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">
+                            Waiting
+                          </span>
+                        )}
+                        {displayStaleRunning && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                            Not completed
+                          </span>
+                        )}
+                        {displayNotRun && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                            Not run
+                          </span>
+                        )}
+                        {isCompleted && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">
+                            ✓ Completed
+                          </span>
+                        )}
                       </div>
-                    )}
+                      {typeLabel && typeLabel !== "Pass" && (
+                        <p className={cn("text-xs truncate text-slate-500")}>{typeLabel}</p>
+                      )}
+                      {node.durationMs !== null && (
+                        <p className="mt-1 text-xs font-medium text-slate-700">
+                          ⏱ {formatDuration(node.durationMs)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="ml-2 flex-shrink-0">
+                      <StatusBadge status={displayStatus} />
+                    </div>
                   </div>
-                )}
-              </button>
-            </div>
-          );
-        })}
+                  {/* Start/End 리본 — editor와 동일: start+end 동시면 사선 구획, 아니면 단일 색 */}
+                  {hasRibbon && (
+                    <div
+                      className="pointer-events-none absolute left-0 right-0 top-0 z-20"
+                      aria-hidden
+                    >
+                      {hasStartEnd ? (
+                        <div className="absolute left-0 right-0 top-0 z-10 h-6 overflow-hidden rounded-t-[6px] shadow-sm">
+                          <div
+                            className="absolute inset-0 bg-emerald-600"
+                            style={{ clipPath: "polygon(0 0, 57.14% 0, 42.86% 100%, 0 100%)" }}
+                          />
+                          <div
+                            className="absolute inset-0 bg-slate-500"
+                            style={{
+                              clipPath: "polygon(57.14% 0, 100% 0, 100% 100%, 42.86% 100%)"
+                            }}
+                          />
+                          <span className="absolute left-1 top-0.5 text-[9px] font-bold text-white drop-shadow-sm">
+                            ▶ START
+                          </span>
+                          <span className="absolute right-1 bottom-0.5 text-[9px] font-bold text-white drop-shadow-sm">
+                            END ⏹
+                          </span>
+                        </div>
+                      ) : (
+                        <div
+                          className={cn(
+                            "flex h-6 items-center justify-center rounded-t-[6px] text-[10px] font-bold text-white shadow-sm",
+                            hasStart && "bg-emerald-600",
+                            hasEnd && "bg-slate-500"
+                          )}
+                        >
+                          {hasStart ? "▶ START" : "⏹ END"}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -1276,203 +1337,206 @@ export function DagView({
           height: canvasSize.height
         }}
       >
-      {/* SVG for edges - behind nodes */}
-      <svg
-        className="absolute pointer-events-none"
-        width={canvasSize.width}
-        height={canvasSize.height}
-        style={{
-          top: 0,
-          left: 0,
-          zIndex: 0
-        }}
-      >
-        <defs>
-          <marker
-            id="arrow"
-            markerWidth="10"
-            markerHeight="10"
-            refX="9"
-            refY="3"
-            orient="auto"
-            markerUnits="strokeWidth"
-          >
-            <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" />
-          </marker>
-        </defs>
-        {edgesToRender.length > 0 ? (
-          edgesToRender.map((edge) => {
-            const fromNode = positionedNodes.find((n) => n.id === edge.from);
-            const toNode = positionedNodes.find((n) => n.id === edge.to);
-            if (!fromNode || !toNode) {
-              return null;
-            }
-
-            const fromNodeHeight = NODE_METRICS.collapsedHeight;
-            const toNodeHeight = NODE_METRICS.collapsedHeight;
-            const outputOffsets = getPortOffsets(fromNodeHeight, 1);
-            const start = {
-              x: fromNode.position.x + NODE_METRICS.width,
-              y: fromNode.position.y + outputOffsets[0]
-            };
-            const end = {
-              x: toNode.position.x,
-              y: toNode.position.y + toNodeHeight / 2
-            };
-            const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
-            const controlX1 = start.x + (end.x >= start.x ? curve : -curve);
-            const controlX2 = end.x + (end.x >= start.x ? -curve : curve);
-            const path = `M ${start.x} ${start.y} C ${controlX1} ${start.y}, ${controlX2} ${end.y}, ${end.x} ${end.y}`;
-
-            return (
-              <path
-                key={edge.id}
-                d={path}
-                stroke="#94a3b8"
-                strokeWidth="2"
-                fill="none"
-                markerEnd="url(#arrow)"
-              />
-            );
-          })
-        ) : null}
-      </svg>
-
-      {/* Nodes - in front of edges */}
-      {positionedNodes.map((node) => {
-        const displayStaleRunning = runEnded && node.status === NodeStatus.RUNNING;
-        const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
-        const displayStatus =
-          displayStaleRunning || displayNotRun ? "NOT_RUN" : node.status;
-        const nodeTypeInfo = getNodeTypeInfo(node.name, node.stateName);
-        const isRunning = node.status === NodeStatus.RUNNING && !displayStaleRunning;
-        const isCompleted = node.status === NodeStatus.SUCCEEDED;
-        const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
-
-        return (
-          <div
-            key={node.id}
-            data-node-id={node.id}
-            className="absolute"
-            style={{
-              left: node.position.x,
-              top: node.position.y,
-              width: NODE_METRICS.width,
-              zIndex: 10
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => onSelectNode(node.stateName)}
-              className={cn(
-                "cursor-pointer relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
-                NODE_STATUS_STYLE_MAP[displayStatus],
-                selectedNode === node.stateName
-                  ? "ring-4 ring-slate-400 ring-offset-2"
-                  : "hover:shadow-lg"
-              )}
+        {/* SVG for edges - behind nodes */}
+        <svg
+          className="absolute pointer-events-none"
+          width={canvasSize.width}
+          height={canvasSize.height}
+          style={{
+            top: 0,
+            left: 0,
+            zIndex: 0
+          }}
+        >
+          <defs>
+            <marker
+              id="arrow"
+              markerWidth="10"
+              markerHeight="10"
+              refX="9"
+              refY="3"
+              orient="auto"
+              markerUnits="strokeWidth"
             >
-              {/* 왼쪽 타입 인디케이터 바 */}
-              <div
-                className={cn(
-                  "absolute left-0 top-0 bottom-0 w-1",
-                  nodeTypeInfo.colors.indicator
-                )}
-              />
+              <path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" />
+            </marker>
+          </defs>
+          {edgesToRender.length > 0
+            ? edgesToRender.map((edge) => {
+                const fromNode = positionedNodes.find((n) => n.id === edge.from);
+                const toNode = positionedNodes.find((n) => n.id === edge.to);
+                if (!fromNode || !toNode) {
+                  return null;
+                }
 
-              <div className="flex items-start justify-between pl-1">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <p className={cn(
-                      "font-semibold truncate",
-                      isRunning
-                        ? "text-blue-900"
-                        : isCompleted
-                          ? "text-green-900"
-                          : isWaiting
-                            ? "text-amber-900"
-                            : displayNotRun || displayStaleRunning
-                              ? "text-slate-600"
-                              : "text-slate-800"
-                    )}>
-                      {node.name}
-                    </p>
-                  </div>
-                  
-                  {/* 노드 타입 배지 */}
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
+                const fromNodeHeight = NODE_METRICS.collapsedHeight;
+                const toNodeHeight = NODE_METRICS.collapsedHeight;
+                const outputOffsets = getPortOffsets(fromNodeHeight, 1);
+                const start = {
+                  x: fromNode.position.x + NODE_METRICS.width,
+                  y: fromNode.position.y + outputOffsets[0]
+                };
+                const end = {
+                  x: toNode.position.x,
+                  y: toNode.position.y + toNodeHeight / 2
+                };
+                const curve = Math.max(60, Math.abs(end.x - start.x) / 2);
+                const controlX1 = start.x + (end.x >= start.x ? curve : -curve);
+                const controlX2 = end.x + (end.x >= start.x ? -curve : curve);
+                const path = `M ${start.x} ${start.y} C ${controlX1} ${start.y}, ${controlX2} ${end.y}, ${end.x} ${end.y}`;
+
+                return (
+                  <path
+                    key={edge.id}
+                    d={path}
+                    stroke="#94a3b8"
+                    strokeWidth="2"
+                    fill="none"
+                    markerEnd="url(#arrow)"
+                  />
+                );
+              })
+            : null}
+        </svg>
+
+        {/* Nodes - in front of edges */}
+        {positionedNodes.map((node) => {
+          const displayStaleRunning = runEnded && node.status === NodeStatus.RUNNING;
+          const displayNotRun = runEnded && node.status === NodeStatus.WAITING;
+          const displayStatus = displayStaleRunning || displayNotRun ? "NOT_RUN" : node.status;
+          const nodeTypeInfo = getNodeTypeInfo(node.name, node.stateName);
+          const isRunning = node.status === NodeStatus.RUNNING && !displayStaleRunning;
+          const isCompleted = node.status === NodeStatus.SUCCEEDED;
+          const isWaiting = node.status === NodeStatus.WAITING && !displayNotRun;
+
+          return (
+            <div
+              key={node.id}
+              data-node-id={node.id}
+              className="absolute"
+              style={{
+                left: node.position.x,
+                top: node.position.y,
+                width: NODE_METRICS.width,
+                zIndex: 10
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => onSelectNode(node.stateName)}
+                className={cn(
+                  "cursor-pointer relative w-full rounded-lg border-2 p-3 text-left text-sm font-medium transition-all overflow-hidden",
+                  NODE_STATUS_STYLE_MAP[displayStatus],
+                  selectedNode === node.stateName
+                    ? "ring-4 ring-slate-400 ring-offset-2"
+                    : "hover:shadow-lg"
+                )}
+              >
+                {/* 왼쪽 타입 인디케이터 바 */}
+                <div
+                  className={cn(
+                    "absolute left-0 top-0 bottom-0 w-1",
+                    nodeTypeInfo.colors.indicator
+                  )}
+                />
+
+                <div className="flex items-start justify-between pl-1">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p
+                        className={cn(
+                          "font-semibold truncate",
+                          isRunning
+                            ? "text-blue-900"
+                            : isCompleted
+                              ? "text-green-900"
+                              : isWaiting
+                                ? "text-amber-900"
+                                : displayNotRun || displayStaleRunning
+                                  ? "text-slate-600"
+                                  : "text-slate-800"
+                        )}
+                      >
+                        {node.name}
+                      </p>
+                    </div>
+
+                    {/* 노드 타입 배지 */}
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                          nodeTypeInfo.colors.bg,
+                          nodeTypeInfo.colors.text,
+                          "border border-current"
+                        )}
+                      >
+                        {nodeTypeInfo.type}
+                      </span>
+                      {isRunning && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-700">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
+                          </span>
+                          Running
+                        </span>
+                      )}
+                      {isWaiting && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">
+                          Waiting
+                        </span>
+                      )}
+                      {displayStaleRunning && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                          Not completed
+                        </span>
+                      )}
+                      {displayNotRun && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+                          Not run
+                        </span>
+                      )}
+                      {isCompleted && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">
+                          ✓ Completed
+                        </span>
+                      )}
+                    </div>
+
+                    <p
                       className={cn(
-                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                        nodeTypeInfo.colors.bg,
-                        nodeTypeInfo.colors.text,
-                        "border border-current"
+                        "text-xs truncate",
+                        isRunning
+                          ? "text-blue-700"
+                          : isCompleted
+                            ? "text-green-700"
+                            : isWaiting
+                              ? "text-amber-700"
+                              : displayNotRun || displayStaleRunning
+                                ? "text-slate-500"
+                                : "text-slate-600"
                       )}
                     >
-                      {nodeTypeInfo.type}
-                    </span>
-                    {isRunning && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-700">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
-                        </span>
-                        Running
-                      </span>
-                    )}
-                    {isWaiting && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700">
-                        Waiting
-                      </span>
-                    )}
-                    {displayStaleRunning && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
-                        Not completed
-                      </span>
-                    )}
-                    {displayNotRun && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
-                        Not run
-                      </span>
-                    )}
-                    {isCompleted && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700">
-                        ✓ Completed
-                      </span>
+                      {node.stateName}
+                    </p>
+
+                    {node.durationMs !== null && (
+                      <p className="mt-1 text-xs font-medium text-slate-700">
+                        ⏱ {formatDuration(node.durationMs)}
+                      </p>
                     )}
                   </div>
 
-                  <p className={cn(
-                    "text-xs truncate",
-                    isRunning
-                      ? "text-blue-700"
-                      : isCompleted
-                        ? "text-green-700"
-                        : isWaiting
-                          ? "text-amber-700"
-                          : displayNotRun || displayStaleRunning
-                            ? "text-slate-500"
-                            : "text-slate-600"
-                  )}>
-                    {node.stateName}
-                  </p>
-                  
-                  {node.durationMs !== null && (
-                    <p className="mt-1 text-xs font-medium text-slate-700">
-                      ⏱ {formatDuration(node.durationMs)}
-                    </p>
-                  )}
+                  {/* 상태 배지 */}
+                  <div className="ml-2 flex-shrink-0">
+                    <StatusBadge status={displayStatus} />
+                  </div>
                 </div>
-                
-                {/* 상태 배지 */}
-                <div className="ml-2 flex-shrink-0">
-                  <StatusBadge status={displayStatus} />
-                </div>
-              </div>
-            </button>
-          </div>
-        );
-      })}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

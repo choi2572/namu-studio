@@ -30,11 +30,13 @@ test.describe("Smoke: Monitor (live runner)", () => {
     const live = new LiveMonitorPage(page);
     await live.goto();
     const root = live.root();
+    await expect(root.getByText(/Connecting…|Connected|Disconnected/)).toBeVisible({
+      timeout: 25_000
+    });
     await expect(
-      root.getByText(/Connecting…|Connected|Disconnected/)
-    ).toBeVisible({ timeout: 25_000 });
-    await expect(
-      root.getByText(/Waiting for monitor connection|No workflow is currently running|Loading…|DAG View/)
+      root.getByText(
+        /Waiting for monitor connection|No workflow is currently running|Loading…|DAG View/
+      )
     ).toBeVisible({ timeout: 25_000 });
     await expect
       .poll(async () => {
@@ -54,9 +56,7 @@ test.describe("Smoke: Monitor (live runner)", () => {
 });
 
 test.describe("Smoke: Monitor (run detail & replay)", () => {
-  test("시드 성공 런 모니터가 로드되고 워크플로 이름·SUCCESS가 보인다", async ({
-    page
-  }) => {
+  test("시드 성공 런 모니터가 로드되고 워크플로 이름·SUCCESS가 보인다", async ({ page }) => {
     const run = new MonitorRunPage(page);
     await run.goto(SEED_RUN_SUCCESS_ID);
     await expect(run.root()).toBeVisible({ timeout: 15_000 });
@@ -78,9 +78,7 @@ test.describe("Smoke: Monitor (run detail & replay)", () => {
       run.root().getByText("Replay mode: viewing historical execution state")
     ).toBeVisible();
     await expect(run.root().getByRole("heading", { name: "Timeline" })).toBeVisible();
-    await expect(
-      run.root().getByText("Replay-only timeline of events.")
-    ).toBeVisible();
+    await expect(run.root().getByText("Replay-only timeline of events.")).toBeVisible();
     await expect(run.root().getByRole("button", { name: /Play|Pause/ })).toBeVisible();
     await expect(run.root().getByRole("link", { name: "Open Workflow" })).toBeVisible();
   });
@@ -107,9 +105,7 @@ test.describe("Smoke: Monitor (workflow prep)", () => {
     const wf = new MonitorWorkflowPage(page);
     await wf.goto(SEED_DRAFT_WORKFLOW_ID);
     await expect(wf.root()).toBeVisible({ timeout: 15_000 });
-    await expect(
-      wf.root().getByRole("heading", { name: SEED_DRAFT_WORKFLOW_NAME })
-    ).toBeVisible();
+    await expect(wf.root().getByRole("heading", { name: SEED_DRAFT_WORKFLOW_NAME })).toBeVisible();
     await expect(wf.root().getByRole("button", { name: "Run", exact: true })).toBeDisabled();
     await expect(
       wf.root().getByText("This workflow is in Draft. Publish from the editor to run.")

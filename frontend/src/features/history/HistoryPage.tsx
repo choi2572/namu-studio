@@ -19,9 +19,7 @@ export function HistoryPage() {
   const router = useRouter();
   const [statusFilter, setStatusFilter] = useState<"all" | RunStatus>("all");
   const [workflowFilter, setWorkflowFilter] = useState("all");
-  const [timeRange, setTimeRange] = useState<"24h" | "7d" | "30d" | "all">(
-    "all"
-  );
+  const [timeRange, setTimeRange] = useState<"24h" | "7d" | "30d" | "all">("all");
   const [runsPage, setRunsPage] = useState(1);
 
   useEffect(() => {
@@ -44,10 +42,13 @@ export function HistoryPage() {
   });
 
   const workflowOptions = useMemo(
-    () => [{ id: "all", name: "All Workflows" }, ...workflows.map((wf) => ({
-      id: wf.workflowId,
-      name: wf.name
-    }))],
+    () => [
+      { id: "all", name: "All Workflows" },
+      ...workflows.map((wf) => ({
+        id: wf.workflowId,
+        name: wf.name
+      }))
+    ],
     [workflows]
   );
 
@@ -68,9 +69,7 @@ export function HistoryPage() {
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <select
             value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as "all" | RunStatus)
-            }
+            onChange={(event) => setStatusFilter(event.target.value as "all" | RunStatus)}
             className="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
           >
             <option value="all">All Status</option>
@@ -92,9 +91,7 @@ export function HistoryPage() {
           </select>
           <select
             value={timeRange}
-            onChange={(event) =>
-              setTimeRange(event.target.value as "24h" | "7d" | "30d" | "all")
-            }
+            onChange={(event) => setTimeRange(event.target.value as "24h" | "7d" | "30d" | "all")}
             className="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
           >
             <option value="all">All Time</option>
@@ -120,21 +117,15 @@ export function HistoryPage() {
         <Table>
           <TableHead>
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
-                Run ID
-              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Run ID</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
                 Workflow Name
               </th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
                 Start Time
               </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
-                Duration
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">
-                Result
-              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Duration</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Result</th>
             </tr>
           </TableHead>
           <tbody>
@@ -150,14 +141,9 @@ export function HistoryPage() {
                 <TableCell>
                   {run.status === RunStatus.FAILED ? (
                     <div onClick={(event) => event.stopPropagation()}>
-                      <Popover
-                        trigger={<StatusBadge status={run.status} />}
-                        align="right"
-                      >
+                      <Popover trigger={<StatusBadge status={run.status} />} align="right">
                         <p className="font-semibold text-slate-900">Failure</p>
-                        <p className="mt-1 text-slate-600">
-                          Code: {run.failureCode ?? "UNKNOWN"}
-                        </p>
+                        <p className="mt-1 text-slate-600">Code: {run.failureCode ?? "UNKNOWN"}</p>
                         <p className="mt-1 text-slate-600">
                           {run.failureMessage ?? "No message provided."}
                         </p>

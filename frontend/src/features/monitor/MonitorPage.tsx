@@ -58,9 +58,7 @@ function getNextSeq(events: RunEvent[]) {
 /** Keeps middleware WS tail rows across run-events polling. */
 function mergeServerRunEventsWithLive(server: RunEvent[], prev: RunEvent[]): RunEvent[] {
   const live = prev.filter(
-    (e) =>
-      e.eventId.startsWith("mw-live-") ||
-      e.eventId.startsWith("mw-onfailure-entry-")
+    (e) => e.eventId.startsWith("mw-live-") || e.eventId.startsWith("mw-onfailure-entry-")
   );
   const byId = new Map<string, RunEvent>();
   for (const e of server) byId.set(e.eventId, e);
@@ -72,14 +70,12 @@ const MONITOR_PAGE_WS_PING_MS = 25_000;
 const MONITOR_PAGE_WS_RECONNECT_MS = 3000;
 
 /** DSL 기준 노드 대분류 (Timeline 뱃지용) */
-function getNodeTypeCategory(
-  dslType: string,
-  containerType: "repeat" | "parallel" | null
-): string {
+function getNodeTypeCategory(dslType: string, containerType: "repeat" | "parallel" | null): string {
   if (containerType === "repeat" || containerType === "parallel") return "Flow Control";
   const t = dslType ?? "";
   if (t === "Skill") return "Skill";
-  if (t === "Condition" || t === "Choice" || t === "Repeat" || t === "Parallel") return "Flow Control";
+  if (t === "Condition" || t === "Choice" || t === "Repeat" || t === "Parallel")
+    return "Flow Control";
   if (t === "Wait" || t === "Event") return "Event";
   return "Flow Control";
 }
@@ -158,7 +154,8 @@ function computeTakenBranches(
   const conditionNodes = monitorGraph.nodes.filter((n) => n.dslType === "Condition");
   for (const cond of conditionNodes) {
     const outgoing = monitorGraph.edges.filter(
-      (e) => e.from === cond.pathId && (e.conditionBranch === "then" || e.conditionBranch === "else")
+      (e) =>
+        e.from === cond.pathId && (e.conditionBranch === "then" || e.conditionBranch === "else")
     );
     if (outgoing.length === 0) continue;
     const thenEdge = outgoing.find((e) => e.conditionBranch === "then");
@@ -220,9 +217,9 @@ export function MonitorPage({ runId }: MonitorPageProps) {
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
   const [monitorWsReconnect, setMonitorWsReconnect] = useState(0);
-  const [actionStatusInFlight, setActionStatusInFlight] = useState<
-    null | "success" | "failure"
-  >(null);
+  const [actionStatusInFlight, setActionStatusInFlight] = useState<null | "success" | "failure">(
+    null
+  );
   const [actionStatusToast, setActionStatusToast] = useState<ActionStatusToastState | null>(null);
   const [cancelInFlight, setCancelInFlight] = useState(false);
   const actionStatusSubmittingRef = useRef(false);
@@ -273,7 +270,13 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     return events
       .filter((e) => e.eventType === "GRAPH_PATCH" && e.payload)
       .map((e) => e.payload as GraphPatchPayload)
-      .filter((p) => p && (p.nodes_added != null || p.edges_added != null || (p.nodes_removed != null && p.nodes_removed.length > 0)));
+      .filter(
+        (p) =>
+          p &&
+          (p.nodes_added != null ||
+            p.edges_added != null ||
+            (p.nodes_removed != null && p.nodes_removed.length > 0))
+      );
   }, [events, ENABLE_DYNAMIC_GRAPH_PATCH]);
 
   const monitorGraph = useMemo(
@@ -434,13 +437,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       window.clearInterval(pingTimer);
       ws.close();
     };
-  }, [
-    isReplayMode,
-    snapshot?.run?.workflowId,
-    runStatus,
-    runId,
-    monitorWsReconnect
-  ]);
+  }, [isReplayMode, snapshot?.run?.workflowId, runStatus, runId, monitorWsReconnect]);
 
   useEffect(() => {
     if (!snapshot || runStatus !== RunStatus.RUNNING || isReplayMode) return;
@@ -604,19 +601,26 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       }
       setRunStatus(RunStatus.CANCELED);
       // 즉시 캐시를 terminal로 갱신해서 refetchInterval이 폴링을 멈추도록 함
-      queryClient.setQueryData(["run-snapshot", runId], (old: { run: RunSummary; workflowName: string; nodeStates: NodeStateSnapshot[] } | undefined) => {
-        if (!old) return old;
-        const updatedNodes = old.nodeStates.map((n) =>
-          n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
-            ? { ...n, status: NodeStatus.CANCELED }
-            : n
-        );
-        return {
-          ...old,
-          run: { ...old.run, status: RunStatus.CANCELED },
-          nodeStates: updatedNodes
-        };
-      });
+      queryClient.setQueryData(
+        ["run-snapshot", runId],
+        (
+          old:
+            | { run: RunSummary; workflowName: string; nodeStates: NodeStateSnapshot[] }
+            | undefined
+        ) => {
+          if (!old) return old;
+          const updatedNodes = old.nodeStates.map((n) =>
+            n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
+              ? { ...n, status: NodeStatus.CANCELED }
+              : n
+          );
+          return {
+            ...old,
+            run: { ...old.run, status: RunStatus.CANCELED },
+            nodeStates: updatedNodes
+          };
+        }
+      );
       setNodeStates((prev) =>
         prev.map((n) =>
           n.status === NodeStatus.RUNNING || n.status === NodeStatus.WAITING
@@ -715,7 +719,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
           }
         });
       }
-      
+
       // Condition 노드가 Next를 직접 가지는 경우도 처리 (mock data의 경우)
       if (state.Type === "Condition" && state.Next && typeof state.Next === "string") {
         const edgeKey = `${stateName}-${state.Next}`;
@@ -842,12 +846,14 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     if (monitorGraph) {
       const node = selectedMonitorNode;
       if (!node) return null;
-      const snap = statesToUse.find((n) => n.stateName === node.apiStateName) ?? statesToUse.find((n) => n.stateName === node.stateName);
+      const snap =
+        statesToUse.find((n) => n.stateName === node.apiStateName) ??
+        statesToUse.find((n) => n.stateName === node.stateName);
       // VLM Planner 컨테이너는 DSL 타입 Repeat 대신 이름으로 표시
       const typeDisplay =
         node.nodeName === "VLM Planner"
           ? "VLM Planner"
-          : node.skillName ?? node.dslType ?? "Task";
+          : (node.skillName ?? node.dslType ?? "Task");
       return {
         stateName: node.apiStateName,
         nodeName: node.nodeName,
@@ -895,7 +901,8 @@ export function MonitorPage({ runId }: MonitorPageProps) {
     !actionStatusPending &&
     (selectedNodeState?.status === NodeStatus.RUNNING ||
       (selectedNodeState?.status === NodeStatus.WAITING && isInRunningContainer));
-  const actionStatusTargetId = selectedMonitorNode?.stateName ?? selectedNodeState?.stateName ?? null;
+  const actionStatusTargetId =
+    selectedMonitorNode?.stateName ?? selectedNodeState?.stateName ?? null;
 
   const submitActionStatus = async (status: "success" | "failure") => {
     if (!actionStatusTargetId || !selectedNodeState) return;
@@ -966,10 +973,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             )}
             {showReplay && workflowId && (
               <Link href={`/monitor/workflow/${workflowId}`}>
-                <Button
-                  variant="secondary"
-                  className="inline-flex items-center gap-2"
-                >
+                <Button variant="secondary" className="inline-flex items-center gap-2">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     fill="none"
@@ -998,8 +1002,19 @@ export function MonitorPage({ runId }: MonitorPageProps) {
                 }}
                 className="inline-flex items-center gap-2"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.5}
+                  stroke="currentColor"
+                  className="h-4 w-4"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z"
+                  />
                 </svg>
                 {replayPlaying ? "Pause" : "Play"}
               </Button>
@@ -1010,8 +1025,19 @@ export function MonitorPage({ runId }: MonitorPageProps) {
                 disabled={rerunMutation.isPending}
                 className="inline-flex items-center gap-2"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-4 w-4">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.5}
+                  stroke="currentColor"
+                  className="h-4 w-4"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 0 1 0 1.971l-11.54 6.347a1.125 1.125 0 0 1-1.667-.985V5.653Z"
+                  />
                 </svg>
                 {rerunMutation.isPending ? "Starting..." : "Run"}
               </Button>
@@ -1023,149 +1049,145 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       {/* Center: DAG view, Right Panel: Debug Panel */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
         <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[2fr_1fr]">
-        {/* DAG View - Center: min-h-0 so grid item can shrink and vertical scroll works */}
-        <div className="min-h-0 flex flex-col overflow-hidden">
-        <Card
-          title="DAG View"
-          description={
-            isReplayMode
-              ? "Replay mode: viewing historical execution state"
-              : "Live monitoring: node statuses update in real-time"
-          }
-          className="flex min-h-0 flex-1 flex-col overflow-hidden"
-        >
-          <div className="flex min-h-0 flex-1 flex-col p-6">
-            <DagView
-              nodeStates={displayNodeStates}
-              selectedNode={selectedNode}
-              onSelectNode={setSelectedNode}
-              edges={edges}
-              runStatus={runStatus}
-              viewJson={workflowDraft?.view_json}
-              monitorGraph={monitorGraph ?? undefined}
-              shouldAutoFocusRunningNode={runStatus === RunStatus.RUNNING || (showReplay && replayPlaying)}
-              takenBranchByConditionPathId={takenBranchByConditionPathId}
-            />
+          {/* DAG View - Center: min-h-0 so grid item can shrink and vertical scroll works */}
+          <div className="min-h-0 flex flex-col overflow-hidden">
+            <Card
+              title="DAG View"
+              description={
+                isReplayMode
+                  ? "Replay mode: viewing historical execution state"
+                  : "Live monitoring: node statuses update in real-time"
+              }
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
+              <div className="flex min-h-0 flex-1 flex-col p-6">
+                <DagView
+                  nodeStates={displayNodeStates}
+                  selectedNode={selectedNode}
+                  onSelectNode={setSelectedNode}
+                  edges={edges}
+                  runStatus={runStatus}
+                  viewJson={workflowDraft?.view_json}
+                  monitorGraph={monitorGraph ?? undefined}
+                  shouldAutoFocusRunningNode={
+                    runStatus === RunStatus.RUNNING || (showReplay && replayPlaying)
+                  }
+                  takenBranchByConditionPathId={takenBranchByConditionPathId}
+                />
+              </div>
+            </Card>
           </div>
-        </Card>
-        </div>
 
-        {/* Debug Panel - Right (appears when node is selected) */}
-        {selectedNodeState ? (
-          <Card
-            title="Debug Panel"
-            description="Node execution details"
-          >
-            <div className="space-y-4 text-xs">
-              <div>
-                <p className="font-semibold text-slate-900">
-                  {selectedNodeState.nodeName}
-                </p>
-                {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string }).typeDisplay && (
-                  <p className="mt-0.5 text-slate-500">
-                    {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string }).typeDisplay}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <StatusBadge status={selectedNodeState.status} />
-                {selectedNodeState.durationMs !== null && (
-                  <span className="text-slate-500">
-                    {formatDuration(selectedNodeState.durationMs)}
-                  </span>
-                )}
-              </div>
-              <div className="space-y-3">
-                <div className="rounded-md bg-slate-50 p-3">
-                  <p className="mb-1 font-semibold text-slate-900">Input</p>
-                  <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
-                    {JSON.stringify(nodeDebug?.input ?? {}, null, 2)}
-                  </pre>
-                </div>
-                <div className="rounded-md bg-slate-50 p-3">
-                  <p className="mb-1 font-semibold text-slate-900">Output</p>
-                  <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
-                    {JSON.stringify(nodeDebug?.output ?? {}, null, 2)}
-                  </pre>
-                </div>
-                <div className="rounded-md bg-slate-50 p-3">
-                  <p className="mb-1 font-semibold text-slate-900">Feedback</p>
-                  <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
-                    {JSON.stringify(nodeDebug?.feedback ?? {}, null, 2)}
-                  </pre>
-                </div>
-                {nodeDebug?.decision && (
-                  <div className="rounded-md bg-slate-50 p-3">
-                    <p className="mb-1 font-semibold text-slate-900">
-                      Decision
+          {/* Debug Panel - Right (appears when node is selected) */}
+          {selectedNodeState ? (
+            <Card title="Debug Panel" description="Node execution details">
+              <div className="space-y-4 text-xs">
+                <div>
+                  <p className="font-semibold text-slate-900">{selectedNodeState.nodeName}</p>
+                  {(selectedNodeState as NodeStateSnapshot & { typeDisplay?: string })
+                    .typeDisplay && (
+                    <p className="mt-0.5 text-slate-500">
+                      {
+                        (selectedNodeState as NodeStateSnapshot & { typeDisplay?: string })
+                          .typeDisplay
+                      }
                     </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={selectedNodeState.status} />
+                  {selectedNodeState.durationMs !== null && (
+                    <span className="text-slate-500">
+                      {formatDuration(selectedNodeState.durationMs)}
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="mb-1 font-semibold text-slate-900">Input</p>
                     <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
-                      {JSON.stringify(nodeDebug.decision, null, 2)}
+                      {JSON.stringify(nodeDebug?.input ?? {}, null, 2)}
                     </pre>
                   </div>
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="mb-1 font-semibold text-slate-900">Output</p>
+                    <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
+                      {JSON.stringify(nodeDebug?.output ?? {}, null, 2)}
+                    </pre>
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="mb-1 font-semibold text-slate-900">Feedback</p>
+                    <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
+                      {JSON.stringify(nodeDebug?.feedback ?? {}, null, 2)}
+                    </pre>
+                  </div>
+                  {nodeDebug?.decision && (
+                    <div className="rounded-md bg-slate-50 p-3">
+                      <p className="mb-1 font-semibold text-slate-900">Decision</p>
+                      <pre className="whitespace-pre-wrap break-all text-[11px] text-slate-600">
+                        {JSON.stringify(nodeDebug.decision, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+                {showExternalStatusActions && (
+                  <div className="rounded-md bg-slate-50 p-3">
+                    <p className="mb-1 font-semibold text-slate-900">Change status</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        className="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                        disabled={!actionStatusEnabled}
+                        onClick={() => void submitActionStatus("success")}
+                      >
+                        {actionStatusInFlight === "success" ? (
+                          <>
+                            <span
+                              className="inline-block size-3.5 shrink-0 rounded-full border-2 border-white/35 border-t-white motion-safe:animate-spin"
+                              aria-hidden
+                            />
+                            Sending…
+                          </>
+                        ) : (
+                          "Success"
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        className="inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700"
+                        disabled={!actionStatusEnabled}
+                        onClick={() => void submitActionStatus("failure")}
+                      >
+                        {actionStatusInFlight === "failure" ? (
+                          <>
+                            <span
+                              className="inline-block size-3.5 shrink-0 rounded-full border-2 border-white/35 border-t-white motion-safe:animate-spin"
+                              aria-hidden
+                            />
+                            Sending…
+                          </>
+                        ) : (
+                          "Failure"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </div>
-              {showExternalStatusActions && (
-                <div className="rounded-md bg-slate-50 p-3">
-                  <p className="mb-1 font-semibold text-slate-900">Change status</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="primary"
-                      size="sm"
-                      className="inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-                      disabled={!actionStatusEnabled}
-                      onClick={() => void submitActionStatus("success")}
-                    >
-                      {actionStatusInFlight === "success" ? (
-                        <>
-                          <span
-                            className="inline-block size-3.5 shrink-0 rounded-full border-2 border-white/35 border-t-white motion-safe:animate-spin"
-                            aria-hidden
-                          />
-                          Sending…
-                        </>
-                      ) : (
-                        "Success"
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="primary"
-                      size="sm"
-                      className="inline-flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700"
-                      disabled={!actionStatusEnabled}
-                      onClick={() => void submitActionStatus("failure")}
-                    >
-                      {actionStatusInFlight === "failure" ? (
-                        <>
-                          <span
-                            className="inline-block size-3.5 shrink-0 rounded-full border-2 border-white/35 border-t-white motion-safe:animate-spin"
-                            aria-hidden
-                          />
-                          Sending…
-                        </>
-                      ) : (
-                        "Failure"
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
-        ) : (
-          <Card
-            title="Debug Panel"
-            description="Select a node to inspect its debug bundle"
-          >
-            <div className="flex h-[400px] items-center justify-center">
-              <p className="text-sm text-slate-500">
-                Click a node in the DAG view to inspect debug details.
-              </p>
-            </div>
-          </Card>
-        )}
+            </Card>
+          ) : (
+            <Card title="Debug Panel" description="Select a node to inspect its debug bundle">
+              <div className="flex h-[400px] items-center justify-center">
+                <p className="text-sm text-slate-500">
+                  Click a node in the DAG view to inspect debug details.
+                </p>
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 
@@ -1173,11 +1195,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
       <div className="flex-shrink-0 border-t border-slate-200 bg-white p-6">
         <Card
           title="Timeline"
-          description={
-            isReplayMode
-              ? "Replay-only timeline of events."
-              : "Live timeline."
-          }
+          description={isReplayMode ? "Replay-only timeline of events." : "Live timeline."}
           actions={
             !isReplayMode && (
               <button
@@ -1202,8 +1220,7 @@ export function MonitorPage({ runId }: MonitorPageProps) {
             onScroll={() => {
               if (!isReplayMode && autoScroll && timelineRef.current) {
                 const el = timelineRef.current;
-                const isAtBottom =
-                  el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+                const isAtBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
                 if (!isAtBottom) {
                   setAutoScroll(false);
                 }
