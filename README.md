@@ -19,6 +19,7 @@ namu-studio/
 - **Node.js** (for frontend)
 - **Python 3.x** (for backend)
 - **pip** (Python package manager)
+- **pre-commit** (optional; see [Pre-commit](#pre-commit) below)
 
 ### 1. Backend
 
@@ -51,6 +52,52 @@ python -m mock_middleware
 ```
 
 Mock middleware runs at **http://localhost:8000**. See [backend/mock_middleware/README.md](backend/mock_middleware/README.md) for full setup (backend + frontend with middleware mode).
+
+## Pre-commit
+
+[pre-commit](https://pre-commit.com/) runs [ESLint](https://eslint.org/) and [Prettier](https://prettier.io/) on the frontend, [Ruff](https://docs.astral.sh/ruff/) format on the backend, and [Pylint](https://pylint.pycqa.org/) on the backend before each commit. Config lives in [`.pre-commit-config.yaml`](.pre-commit-config.yaml) at the repo root.
+
+### Install
+
+1. Install the **pre-commit** CLI (pick one):
+
+   ```bash
+   pip install pre-commit
+   # or: pipx install pre-commit
+   ```
+
+2. From the **repository root**, install the Git hook so commits run the hooks automatically:
+
+   ```bash
+   pre-commit install
+   ```
+
+### What you need on your machine
+
+Hooks assume you already have a normal dev setup:
+
+- **Frontend:** In `frontend/`, run `npm install` so `npm run lint` and `npm run format:check` work (used by the hooks).
+- **Backend:** Install dev tools so **pylint** is on your `PATH`, e.g. from `backend/`:
+
+  ```bash
+  pip install -e ".[dev]"
+  ```
+
+  Ruff format is provided by the pre-commit hook; you do not need a global `ruff` install for that hook.
+
+### Run manually
+
+- Run all hooks on every file:
+
+  ```bash
+  pre-commit run --all-files
+  ```
+
+- Run a single hook by id from [`.pre-commit-config.yaml`](.pre-commit-config.yaml) (example):
+
+  ```bash
+  pre-commit run frontend-eslint --all-files
+  ```
 
 ## Docker (Compose + nginx)
 

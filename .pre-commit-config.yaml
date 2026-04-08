@@ -1,0 +1,39 @@
+# https://pre-commit.com
+# 설치: pip install pre-commit && pre-commit install
+# 훅만 실행: pre-commit run --all-files
+#
+# eslint / prettier: frontend에서 `npm ci` 후 동작합니다.
+# pylint: backend에서 `pip install -e ".[dev]"` 등으로 pylint가 PATH에 있어야 합니다.
+
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.9
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        files: ^backend/
+
+  - repo: local
+    hooks:
+      - id: frontend-prettier
+        name: prettier (frontend)
+        language: system
+        entry: bash -c 'cd frontend && npm run format:check'
+        pass_filenames: false
+        files: ^frontend/
+
+      - id: frontend-eslint
+        name: eslint (frontend)
+        language: system
+        entry: bash -c 'cd frontend && npm run lint'
+        pass_filenames: false
+        files: ^frontend/
+
+      - id: backend-pylint
+        name: pylint (backend)
+        language: system
+        entry: bash -c 'cd backend && pylint app mock_middleware scripts tests run.py run_mock_middleware.py'
+        pass_filenames: false
+        files: ^backend/.*\.py$
