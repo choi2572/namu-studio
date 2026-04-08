@@ -10,7 +10,14 @@ from app.services.workflow_service import WorkflowService
 def test_events_pagination(workflow_repo, version_repo, view_repo, run_repo, node_run_repo, run_event_repo):
     """Test events pagination with after_seq."""
     # Setup
-    workflow_service = WorkflowService(workflow_repo, version_repo, view_repo)
+    workflow_service = WorkflowService(
+        workflow_repo,
+        version_repo,
+        view_repo,
+        run_repo,
+        node_run_repo,
+        run_event_repo,
+    )
     execution_adapter = DummyExecutionEngineAdapter(
         run_repo, node_run_repo, run_event_repo, workflow_repo, version_repo
     )
@@ -29,7 +36,7 @@ def test_events_pagination(workflow_repo, version_repo, view_repo, run_repo, nod
         "StartAt": "State1",
         "States": {
             "State1": {"Type": "Task", "Next": "State2"},
-            "State2": {"Type": "Task"},
+            "State2": {"Type": "Task", "End": True},
         },
     }
     workflow_service.save_draft(workflow.workflow_id, dsl, {})

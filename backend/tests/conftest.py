@@ -73,9 +73,23 @@ def run_event_repo():
 
 
 @pytest.fixture
-def workflow_service(workflow_repo, version_repo, view_repo):
+def workflow_service(
+    workflow_repo,
+    version_repo,
+    view_repo,
+    run_repo,
+    node_run_repo,
+    run_event_repo,
+):
     """Create workflow service."""
-    return WorkflowService(workflow_repo, version_repo, view_repo)
+    return WorkflowService(
+        workflow_repo,
+        version_repo,
+        view_repo,
+        run_repo,
+        node_run_repo,
+        run_event_repo,
+    )
 
 
 @pytest.fixture

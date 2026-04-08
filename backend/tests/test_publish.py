@@ -6,9 +6,18 @@ from app.domain.models import VersionState, WorkflowState
 from app.services.workflow_service import WorkflowService
 
 
-def test_publish_workflow_success(workflow_repo, version_repo, view_repo):
+def test_publish_workflow_success(
+    workflow_repo, version_repo, view_repo, run_repo, node_run_repo, run_event_repo
+):
     """Test successful publish flow."""
-    service = WorkflowService(workflow_repo, version_repo, view_repo)
+    service = WorkflowService(
+        workflow_repo,
+        version_repo,
+        view_repo,
+        run_repo,
+        node_run_repo,
+        run_event_repo,
+    )
 
     # Create workflow
     workflow = service.create_workflow("Test Workflow")
@@ -18,7 +27,7 @@ def test_publish_workflow_success(workflow_repo, version_repo, view_repo):
         "StartAt": "State1",
         "States": {
             "State1": {"Type": "Task", "Next": "State2"},
-            "State2": {"Type": "Task"},
+            "State2": {"Type": "Task", "End": True},
         },
     }
     view = {"nodes": []}
@@ -41,9 +50,18 @@ def test_publish_workflow_success(workflow_repo, version_repo, view_repo):
     assert updated_workflow.current_published_version_id == version.version_id
 
 
-def test_publish_with_validation_error(workflow_repo, version_repo, view_repo):
+def test_publish_with_validation_error(
+    workflow_repo, version_repo, view_repo, run_repo, node_run_repo, run_event_repo
+):
     """Test that publish fails when validation errors exist."""
-    service = WorkflowService(workflow_repo, version_repo, view_repo)
+    service = WorkflowService(
+        workflow_repo,
+        version_repo,
+        view_repo,
+        run_repo,
+        node_run_repo,
+        run_event_repo,
+    )
 
     # Create workflow
     workflow = service.create_workflow("Test Workflow")
