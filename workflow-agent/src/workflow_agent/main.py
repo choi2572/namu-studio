@@ -10,6 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from workflow_agent.api.routes import draft, models, skills, status
 from workflow_agent.logging_setup import build_uvicorn_log_config, configure_application_logging
@@ -102,11 +103,18 @@ def create_app(
     state_store: ApplicationStateStore | None = None,
     model_runtime_backend: ModelRuntimeBackend | None = None,
 ) -> FastAPI:
-    # TODO: Add middleware (request id, logging), CORS if needed for Namu Studio.
     configure_application_logging()
     store = state_store or InMemoryApplicationStateStore()
     backend = model_runtime_backend if model_runtime_backend is not None else build_model_runtime_backend()
     app = FastAPI(title="Workflow Agent", version="0.1.0", lifespan=_lifespan)
+    # 개발 편의: 브라우저에서 임의 오리진(Studio 등) 허용. 운영 배포 시 출처 제한으로 교체.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.state_store = store
     app.state.model_runtime_backend = backend
     app.include_router(status.router)

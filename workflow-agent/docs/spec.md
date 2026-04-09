@@ -84,7 +84,8 @@ Response:
   "active_model": "qwen",
   "model_loaded": true,
   "skills_ready": true,
-  "skills_hash": "abc123"
+  "skills_hash": "abc123",
+  "supported_models": ["gemma", "qwen"]
 }
 
 
@@ -248,6 +249,8 @@ Failure
 Enable 조건
 
 alive && model_loaded && skills_ready
+
+브라우저 연동: 앱은 개발 단계에서 **CORS `Access-Control-Allow-Origin: *`** 를 사용한다. 운영 시 Studio 고정 오리진 등으로 제한할 것.
 
 
 ⸻

@@ -17,3 +17,7 @@ class StatusResponse(BaseModel):
     )
     skills_ready: bool = Field(..., description="Whether skill sync completed successfully.")
     skills_hash: str = Field(..., description="Hash of the current skill registry payload.")
+    supported_models: list[str] = Field(
+        ...,
+        description="Model ids from the configured runtime backend (sorted, unique).",
+    )

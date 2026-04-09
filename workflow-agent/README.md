@@ -64,6 +64,8 @@ uvicorn workflow_agent.main:app --host 0.0.0.0 --port 8000
 
 OpenAPI 문서: 서버 기동 후 **http://127.0.0.1:8000/docs**
 
+**CORS:** 개발 편의를 위해 `allow_origins=["*"]` 로 열려 있습니다. Namu Studio 등 브라우저에서 바로 호출 가능하며, 운영 배포 시 허용 출처로 제한하세요.
+
 로그: Uvicorn **접속 로그**는 stdout, 앱(`workflow_agent.*`) 로그는 stderr로 나가는 경우가 많습니다. 터미널에 아무것도 안 보이면 `2>&1`으로 합치거나, 요청을 한 번 보내 보세요 (`GET /workflow-agent/status` 등). 기동 직후 stderr에 `Workflow Agent ready` 한 줄이 찍힙니다.
 
 ## API 개요
@@ -72,7 +74,7 @@ OpenAPI 문서: 서버 기동 후 **http://127.0.0.1:8000/docs**
 
 | 메서드 | 경로 | 설명 |
 |--------|------|------|
-| `GET` | `/workflow-agent/status` | 서비스 생존, 활성 모델 id, 모델 로드 여부, 스킬 동기화 준비 여부, 스킬 해시 |
+| `GET` | `/workflow-agent/status` | 서비스 생존, 활성 모델 id, 모델 로드 여부, 스킬 동기화 준비 여부, 스킬 해시, **지원 모델 id 목록** (`supported_models`) |
 | `POST` | `/workflow-agent/skills/sync` | 미들웨어 skill catalog와 맞춘 스킬 정의 검증 후 레지스트리·프롬프트 컨텍스트 갱신 (`namespace`·구조화된 `inputs`·`outputs` 등; [docs/json-schemas.md](docs/json-schemas.md) §1) |
 | `POST` | `/workflow-agent/models/activate` | 요청한 모델 id로 로컬 `llama-server` 전환(YAML 백엔드일 때 프로세스 재기동) |
 | `POST` | `/workflow-agent/draft` | 자연어 → LLM → 스펙 검증 → DSL 컴파일·검증까지 일괄 처리 |
