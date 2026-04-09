@@ -1,0 +1,21 @@
+# Example workflow-agent llama-server layout (copy and set WORKFLOW_AGENT_MODELS_CONFIG).
+# Paths can be relative to this YAML file.
+
+llama_server_executable: llama-server
+host: 127.0.0.1
+
+startup_timeout_seconds: 90
+shutdown_timeout_seconds: 15
+healthcheck_timeout_seconds: 5
+health_poll_interval_seconds: 0.5
+health_path: /health
+
+models:
+  qwen:
+    gguf_path: models/qwen2.5-q4_k_m.gguf
+    port: 8011
+    extra_args: []
+  gemma:
+    gguf_path: models/gemma-q4_k_m.gguf
+    port: 8012
+    extra_args: []
