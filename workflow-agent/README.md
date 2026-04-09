@@ -61,6 +61,8 @@ uvicorn workflow_agent.main:app --host 0.0.0.0 --port 8000
 
 OpenAPI 문서: 서버 기동 후 **http://127.0.0.1:8000/docs**
 
+로그: Uvicorn **접속 로그**는 stdout, 앱(`workflow_agent.*`) 로그는 stderr로 나가는 경우가 많습니다. 터미널에 아무것도 안 보이면 `2>&1`으로 합치거나, 요청을 한 번 보내 보세요 (`GET /workflow-agent/status` 등). 기동 직후 stderr에 `Workflow Agent ready` 한 줄이 찍힙니다.
+
 ## API 개요
 
 모든 엔드포인트는 경로 prefix **`/workflow-agent`** 를 사용합니다.
