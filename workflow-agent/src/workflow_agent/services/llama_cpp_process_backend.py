@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -21,35 +22,63 @@ from workflow_agent.settings.llama_models_config import LlamaModelsConfig, Model
 LOG = logging.getLogger(__name__)
 
 
-def _http_health_probe(
+def _wait_until_health_ok(
     host: str,
     port: int,
     health_path: str,
-    timeout: float,
+    per_request_timeout: float,
+    total_timeout: float,
+    interval: float,
     log: logging.Logger,
 ) -> None:
+    """Poll HTTP until llama-server returns 2xx (503 while loading weights is retried)."""
     paths = [health_path]
     if health_path != "/":
         paths.append("/")
-    last_detail = "no valid HTTP response"
-    for path in paths:
-        url = f"http://{host}:{port}{path}"
-        log.info("llama-server: HTTP health probe %s", url)
-        try:
-            with urllib.request.urlopen(url, timeout=timeout) as resp:
-                code = resp.getcode()
-                if 200 <= code < 300:
-                    log.info("llama-server: health OK (HTTP %s via %s)", code, path)
-                    return
-                last_detail = f"HTTP {code} for {path}"
-        except urllib.error.HTTPError as exc:
-            last_detail = f"HTTPError {exc.code} for {path}"
-            log.warning("llama-server: %s", last_detail)
-        except urllib.error.URLError as exc:
-            last_detail = f"URLError for {path}: {exc.reason!r}"
-            log.warning("llama-server: %s", last_detail)
+    deadline = time.monotonic() + total_timeout
+    last_detail = "no response yet"
+    last_periodic_warn = 0.0
+    attempt = 0
+    log.info(
+        "llama-server: polling HTTP health until 2xx (deadline %.0fs, interval %ss); "
+        "503 while the model loads/fits is normal",
+        total_timeout,
+        interval,
+    )
+    while time.monotonic() < deadline:
+        attempt += 1
+        for path in paths:
+            url = f"http://{host}:{port}{path}"
+            try:
+                with urllib.request.urlopen(url, timeout=per_request_timeout) as resp:
+                    code = resp.getcode()
+                    if 200 <= code < 300:
+                        log.info(
+                            "llama-server: health OK (HTTP %s via %s, attempt %s)",
+                            code,
+                            path,
+                            attempt,
+                        )
+                        return
+                    last_detail = f"HTTP {code} for {path}"
+            except urllib.error.HTTPError as exc:
+                last_detail = f"HTTPError {exc.code} for {path}"
+            except urllib.error.URLError as exc:
+                last_detail = f"URLError for {path}: {exc.reason!r}"
+
+        now = time.monotonic()
+        if now - last_periodic_warn >= 15.0:
+            log.warning(
+                "llama-server: still waiting for ready health (attempt %s, last: %s)",
+                attempt,
+                last_detail,
+            )
+            last_periodic_warn = now
+
+        time.sleep(interval)
+
     raise ModelRuntimeError(
-        f"health check failed on {host}:{port} ({last_detail})",
+        f"health check timed out after {total_timeout}s on {host}:{port} (last: {last_detail})",
         errors=[last_detail],
     )
 
@@ -154,11 +183,13 @@ class LlamaCppProcessBackend:
                     interval=self._config.health_poll_interval_seconds,
                     log=log,
                 )
-                _http_health_probe(
+                _wait_until_health_ok(
                     self._config.host,
                     entry.port,
                     self._config.health_path,
                     self._config.healthcheck_timeout_seconds,
+                    self._config.health_ready_timeout_seconds,
+                    self._config.health_poll_interval_seconds,
                     log,
                 )
                 self._last_listen_port = entry.port

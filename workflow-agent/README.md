@@ -45,6 +45,7 @@ pip install -e ".[dev]"
 - `default_model`: (선택) 서버 기동 시 자동 activate할 모델 id — 생략 시 `qwen` 등 [spec §3.1](docs/spec.md) 우선순위 적용
 - `models`: 모델 id(예: `qwen`, `gemma`)마다 `gguf_path`, `port`, `extra_args`
 - `gguf_path`는 YAML 파일 기준 상대 경로 가능
+- `health_ready_timeout_seconds`: 포트가 열린 뒤 HTTP `/health`가 2xx가 될 때까지 폴링(기본 300s). 모델·GPU 적재 중 503이 나오면 **기다렸다가** 재시도합니다.
 
 ## 실행
 

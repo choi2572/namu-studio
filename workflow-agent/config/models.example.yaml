@@ -8,6 +8,8 @@ startup_timeout_seconds: 90
 shutdown_timeout_seconds: 15
 healthcheck_timeout_seconds: 5
 health_poll_interval_seconds: 0.5
+# After the TCP port is open, keep GET /health until 2xx (503 during GPU load is retried).
+health_ready_timeout_seconds: 300
 health_path: /health
 
 # First model activated automatically when the app starts (optional; see docs/spec.md §3.1).

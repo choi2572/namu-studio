@@ -21,6 +21,14 @@ class LlamaModelsConfig(BaseModel):
     shutdown_timeout_seconds: float = Field(15.0, gt=0)
     healthcheck_timeout_seconds: float = Field(5.0, gt=0)
     health_poll_interval_seconds: float = Field(0.5, gt=0, le=10.0)
+    health_ready_timeout_seconds: float = Field(
+        300.0,
+        gt=0,
+        description=(
+            "After the listen port accepts TCP, poll HTTP health until 2xx or this elapses. "
+            "Large GPU loads often return 503 until weights are ready."
+        ),
+    )
     health_path: str = "/health"
     default_model: str | None = Field(
         None,
