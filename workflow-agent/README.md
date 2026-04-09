@@ -26,11 +26,15 @@ pip install -e ".[dev]"
 
 ## 설정
 
+서버 기동 시 `python-dotenv` 규칙으로 **소스 트리를 위로 올라가며** 첫 번째 `.env`를 읽습니다(보통 `workflow-agent/.env` 또는 상위 모노레포 루트의 `.env`). 이미 셸에 설정된 변수는 덮어쓰지 않습니다. 비활성화하려면 `PYTHON_DOTENV_DISABLED=1`을 설정합니다.
+
 ### 환경 변수
 
 | 변수 | 설명 |
 |------|------|
 | `WORKFLOW_AGENT_MODELS_CONFIG` | **선택.** 이 경로의 YAML 파일로 `llama-server` 프로세스 기동·전환을 제어합니다. **미설정 시** `NoopModelRuntimeBackend`가 사용되며, 프로세스는 띄우지 않고 `model_loaded`는 `false`로 유지됩니다. |
+| `WORKFLOW_AGENT_LOG_FILE` | **선택.** 지정하면 FastAPI/에이전트 로그를 이 파일에도 기록합니다(콘솔은 그대로). 부모 디렉터리가 없으면 생성합니다. |
+| `WORKFLOW_AGENT_LLAMA_SERVER_LOG_DIR` | **선택.** 디렉터리를 지정하면 `llama-server` 프로세스 stdout/stderr를 `llama-server-<모델 id>.log`로 받습니다. 미설정 시 기존처럼 파이프만 사용합니다. |
 
 ### 모델 YAML
 

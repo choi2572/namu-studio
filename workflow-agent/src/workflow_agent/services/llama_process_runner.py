@@ -7,6 +7,9 @@ import socket
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TextIO
 
 from workflow_agent.services.model_runtime_backend import ModelRuntimeError
 
@@ -67,23 +70,37 @@ def wait_until_port_open(
 class LlamaServerProcessRunner:
     """Tracks one ``llama-server`` subprocess at a time (see ``ModelRuntimeBackend``)."""
 
-    __slots__ = ("_lock", "_proc", "_shutdown_timeout")
+    __slots__ = ("_lock", "_proc", "_shutdown_timeout", "_stdio_fh", "_stdio_log_path")
 
     def __init__(self, shutdown_timeout: float) -> None:
         self._shutdown_timeout = shutdown_timeout
         self._lock = threading.Lock()
         self._proc: subprocess.Popen[str] | None = None
+        self._stdio_fh: TextIO | None = None
+        self._stdio_log_path: Path | None = None
+
+    def _release_stdio_locked(self) -> None:
+        fh = self._stdio_fh
+        self._stdio_fh = None
+        self._stdio_log_path = None
+        if fh is not None:
+            try:
+                fh.close()
+            except OSError:
+                pass
 
     def stop_tracked_process(self, log: logging.Logger) -> None:
         with self._lock:
             proc = self._proc
             if proc is None:
+                self._release_stdio_locked()
                 log.info("llama-server: no tracked process")
                 return
 
             if proc.poll() is not None:
                 log.info("llama-server: tracked process already exited (code=%s)", proc.returncode)
                 self._proc = None
+                self._release_stdio_locked()
                 return
 
             pid = proc.pid
@@ -97,34 +114,85 @@ class LlamaServerProcessRunner:
                 proc.wait(timeout=10)
 
             self._proc = None
+            self._release_stdio_locked()
             log.info("llama-server: process for former pid=%s is stopped", pid)
 
-    def spawn(self, cmd: list[str], log: logging.Logger) -> None:
+    def spawn(
+        self,
+        cmd: list[str],
+        log: logging.Logger,
+        *,
+        stdio_log_path: Path | None = None,
+    ) -> None:
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 raise ModelRuntimeError("internal error: spawn requested while llama-server is still running")
             if self._proc is not None:
                 self._proc = None
+                self._release_stdio_locked()
 
             log.info("llama-server: spawning command: %s", " ".join(cmd))
             try:
-                self._proc = subprocess.Popen(  # pylint: disable=consider-using-with
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    start_new_session=True,
-                )
+                if stdio_log_path is not None:
+                    lp = stdio_log_path.expanduser().resolve()
+                    lp.parent.mkdir(parents=True, exist_ok=True)
+                    self._stdio_log_path = lp
+                    fh: TextIO = open(  # pylint: disable=consider-using-with
+                        lp,
+                        "a",
+                        encoding="utf-8",
+                    )
+                    self._stdio_fh = fh
+                    fh.write("\n" + "=" * 72 + "\n")
+                    fh.write(f"# workflow-agent llama-server session {datetime.now(timezone.utc).isoformat()}\n")
+                    fh.write(f"# command: {' '.join(cmd)}\n")
+                    fh.write("=" * 72 + "\n")
+                    fh.flush()
+                    self._proc = subprocess.Popen(  # pylint: disable=consider-using-with
+                        cmd,
+                        stdout=fh,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        start_new_session=True,
+                    )
+                else:
+                    self._stdio_fh = None
+                    self._stdio_log_path = None
+                    self._proc = subprocess.Popen(  # pylint: disable=consider-using-with
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        start_new_session=True,
+                    )
             except OSError as exc:
+                self._release_stdio_locked()
                 raise ModelRuntimeError(f"failed to spawn llama-server: {exc}") from exc
 
             log.info("llama-server: started pid=%s", self._proc.pid)
 
     def read_stderr_after_exit(self) -> str:
+        proc: subprocess.Popen[str] | None
+        log_path: Path | None
+        fh: TextIO | None
         with self._lock:
             proc = self._proc
-            if proc is None or proc.stderr is None:
+            log_path = self._stdio_log_path
+            fh = self._stdio_fh
+        if log_path is not None:
+            if fh is not None:
+                try:
+                    fh.flush()
+                except OSError:
+                    pass
+            try:
+                text = log_path.read_text(encoding="utf-8")
+            except OSError:
                 return ""
+            lines = text.splitlines()
+            return "\n".join(lines[-_STDERR_TAIL_LINES:]).strip()
+        if proc is None or proc.stderr is None:
+            return ""
         try:
             _, err = proc.communicate(timeout=5)
         except (OSError, ValueError, subprocess.SubprocessError):

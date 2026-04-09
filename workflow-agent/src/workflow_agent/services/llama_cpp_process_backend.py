@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import urllib.error
 import urllib.request
@@ -134,9 +135,15 @@ class LlamaCppProcessBackend:
 
             cmd = _build_llama_command(self._config, entry, gguf)
 
+            stdio_log: Path | None = None
+            raw_log_dir = os.environ.get("WORKFLOW_AGENT_LLAMA_SERVER_LOG_DIR", "").strip()
+            if raw_log_dir:
+                stdio_log = Path(raw_log_dir).expanduser().resolve() / f"llama-server-{model_id}.log"
+                log.info("llama-server: child stdout/stderr -> %s", stdio_log)
+
             try:
                 # 3) start
-                self._runner.spawn(cmd, log)
+                self._runner.spawn(cmd, log, stdio_log_path=stdio_log)
                 self._runner.poll_exit_early(log, grace_seconds=0.75)
 
                 # 4) wait for bind + health
