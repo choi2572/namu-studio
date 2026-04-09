@@ -18,17 +18,67 @@ from workflow_agent.services.application_state import (
     InMemoryApplicationStateStore,
 )
 from workflow_agent.services.llama_cpp_process_backend import LlamaCppProcessBackend
-from workflow_agent.services.model_runtime_backend import ModelRuntimeBackend, NoopModelRuntimeBackend
+from workflow_agent.services.model_activation import orchestrate_model_activation
+from workflow_agent.services.model_runtime_backend import (
+    ModelRuntimeBackend,
+    ModelRuntimeError,
+    NoopModelRuntimeBackend,
+)
 
 load_dotenv()
 
 _LOG = logging.getLogger(__name__)
 
 
+def _resolve_startup_model_id(backend: ModelRuntimeBackend) -> str | None:
+    """
+    Pick the model to activate when the local llama-server backend starts (spec §3.1).
+
+    Order: ``WORKFLOW_AGENT_DEFAULT_MODEL`` if valid, else YAML ``default_model``,
+    else ``qwen`` when supported, else lexicographically first configured id.
+    """
+    if not backend.updates_runtime_loaded_flag_after_switch():
+        return None
+    supported = backend.supported_models()
+    if not supported:
+        return None
+    env_raw = os.environ.get("WORKFLOW_AGENT_DEFAULT_MODEL", "").strip().lower()
+    if env_raw:
+        if env_raw in supported:
+            return env_raw
+        _LOG.warning(
+            "WORKFLOW_AGENT_DEFAULT_MODEL=%r is not a configured model id; ignoring",
+            env_raw,
+        )
+    if isinstance(backend, LlamaCppProcessBackend):
+        cfg_dm = backend.models_config.default_model
+        if cfg_dm is not None and cfg_dm in supported:
+            return cfg_dm
+    if "qwen" in supported:
+        return "qwen"
+    return min(supported)
+
+
 @asynccontextmanager
-async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_application_logging()
     _LOG.info("Workflow Agent ready — routes under /workflow-agent; OpenAPI at /docs")
+
+    backend: ModelRuntimeBackend = app.state.model_runtime_backend
+    store: ApplicationStateStore = app.state.state_store
+    if not store.get_snapshot().model_loaded:
+        mid = _resolve_startup_model_id(backend)
+        if mid is not None:
+            try:
+                orchestrate_model_activation(store, backend, mid, force_switch=True)
+                _LOG.info("Startup default model activated: %s", mid)
+            except ModelRuntimeError as exc:
+                _LOG.error(
+                    "Startup default model activation failed for %s: %s",
+                    mid,
+                    exc,
+                )
+
     yield
 
 

@@ -34,6 +34,8 @@ def orchestrate_model_activation(
     store: ApplicationStateStore,
     backend: ModelRuntimeBackend,
     raw_model_id: str,
+    *,
+    force_switch: bool = False,
 ) -> ModelActivationOutcome:
     """
     Validate id against the backend's configured models, noop if unchanged, else switch runtime.
@@ -51,7 +53,7 @@ def orchestrate_model_activation(
         )
 
     snap = store.get_snapshot()
-    if snap.active_model == normalized:
+    if snap.active_model == normalized and not force_switch:
         return ModelActivationOutcome(
             success=True,
             active_model=normalized,

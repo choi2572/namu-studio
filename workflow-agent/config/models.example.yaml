@@ -10,6 +10,9 @@ healthcheck_timeout_seconds: 5
 health_poll_interval_seconds: 0.5
 health_path: /health
 
+# First model activated automatically when the app starts (optional; see docs/spec.md §3.1).
+default_model: qwen
+
 models:
   qwen:
     gguf_path: models/qwen2.5-q4_k_m.gguf

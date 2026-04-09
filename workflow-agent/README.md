@@ -35,12 +35,14 @@ pip install -e ".[dev]"
 | `WORKFLOW_AGENT_MODELS_CONFIG` | **선택.** 이 경로의 YAML 파일로 `llama-server` 프로세스 기동·전환을 제어합니다. **미설정 시** `NoopModelRuntimeBackend`가 사용되며, 프로세스는 띄우지 않고 `model_loaded`는 `false`로 유지됩니다. |
 | `WORKFLOW_AGENT_LOG_FILE` | **선택.** 지정하면 FastAPI/에이전트 로그를 이 파일에도 기록합니다(콘솔은 그대로). 부모 디렉터리가 없으면 생성합니다. |
 | `WORKFLOW_AGENT_LLAMA_SERVER_LOG_DIR` | **선택.** 디렉터리를 지정하면 `llama-server` 프로세스 stdout/stderr를 `llama-server-<모델 id>.log`로 받습니다. 미설정 시 기존처럼 파이프만 사용합니다. |
+| `WORKFLOW_AGENT_DEFAULT_MODEL` | **선택.** 로컬 런타임 기동 시 자동 activate할 모델 id. YAML의 `default_model`·내장 우선순위보다 우선합니다(반드시 설정된 모델 목록에 있어야 함). |
 
 ### 모델 YAML
 
 `config/models.example.yaml`을 복사해 GGUF 경로·포트·실행 파일을 맞춘 뒤, `WORKFLOW_AGENT_MODELS_CONFIG`에 그 파일의 절대 또는 상대 경로를 지정합니다.
 
 - `llama_server_executable`: `llama-server` (PATH) 또는 전체 경로
+- `default_model`: (선택) 서버 기동 시 자동 activate할 모델 id — 생략 시 `qwen` 등 [spec §3.1](docs/spec.md) 우선순위 적용
 - `models`: 모델 id(예: `qwen`, `gemma`)마다 `gguf_path`, `port`, `extra_args`
 - `gguf_path`는 YAML 파일 기준 상대 경로 가능
 

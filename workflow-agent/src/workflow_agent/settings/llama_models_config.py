@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ModelServeEntry(BaseModel):
@@ -22,7 +22,21 @@ class LlamaModelsConfig(BaseModel):
     healthcheck_timeout_seconds: float = Field(5.0, gt=0)
     health_poll_interval_seconds: float = Field(0.5, gt=0, le=10.0)
     health_path: str = "/health"
+    default_model: str | None = Field(
+        None,
+        description="Startup activate target; must be a key in ``models`` when set.",
+    )
     models: dict[str, ModelServeEntry]
+
+    @field_validator("default_model", mode="before")
+    @classmethod
+    def _normalize_default_model(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            stripped = value.strip().lower()
+            return stripped if stripped else None
+        return value
 
     @model_validator(mode="after")
     def _ports_are_unique(self) -> LlamaModelsConfig:
@@ -32,6 +46,14 @@ class LlamaModelsConfig(BaseModel):
                 msg = f"duplicate listen port {entry.port} on models {seen[entry.port]!r} and {mid!r}"
                 raise ValueError(msg)
             seen[entry.port] = mid
+        return self
+
+    @model_validator(mode="after")
+    def _default_model_must_exist(self) -> LlamaModelsConfig:
+        if self.default_model is not None and self.default_model not in self.models:
+            allowed = ", ".join(sorted(self.models))
+            msg = f"default_model {self.default_model!r} missing from models keys: {allowed}"
+            raise ValueError(msg)
         return self
 
     @classmethod

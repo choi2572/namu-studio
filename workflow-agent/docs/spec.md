@@ -35,6 +35,7 @@ Optional	Gemma4
 
 	•	한 번에 하나의 모델만 active
 	•	모델 변경은 프로세스 재시작 기반
+	•	로컬 llama-server 런타임(`WORKFLOW_AGENT_MODELS_CONFIG` 사용)이 켜진 경우 **애플리케이션 기동 시** 기본 모델에 대해 `POST /workflow-agent/models/activate`와 동등한 activate(프로세스 기동·헬스 확인 포함)가 **한 번** 자동 수행된다. 기본 모델 id 결정 순서: 환경 변수 `WORKFLOW_AGENT_DEFAULT_MODEL`(값이 설정된 모델 id 목록에 있을 때만) → 모델 YAML 최상위 `default_model` → 그 외 `qwen`이 지원 목록에 있으면 `qwen` → 아니면 설정된 id 중 **문자열 오름차순** 첫 항목.
 
 ⸻
 
@@ -109,6 +110,7 @@ POST /workflow-agent/models/activate
 
 	•	기존 llama-server 종료
 	•	새 모델로 재기동
+	•	로컬 런타임 사용 시 앱 시작 시에도 위와 동일한 규칙으로 기본 모델이 한 번 activate된다(`model_loaded`가 true가 될 때까지 status에 반영).
 
 ⸻
 
