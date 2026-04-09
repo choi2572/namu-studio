@@ -107,6 +107,8 @@ import type {
 } from "./editorTypes";
 import { EditorNoticeToasts } from "./components/EditorNoticeToasts";
 import { EditorPalette } from "./components/EditorPalette";
+import { EditorWorkflowAgentBar } from "./components/EditorWorkflowAgentBar";
+import { EditorWorkflowAgentGeneratingOverlay } from "./components/EditorWorkflowAgentGeneratingOverlay";
 import { ImportOverwriteDialog } from "./components/dialogs/ImportOverwriteDialog";
 import { ImportValidationFailDialog } from "./components/dialogs/ImportValidationFailDialog";
 import { PublishConfirmDialog } from "./components/dialogs/PublishConfirmDialog";
@@ -129,6 +131,8 @@ import {
   reduceMainGraphNodesAfterDelete
 } from "./state/nodeMutations";
 import { useFailureGraphCanvasHandlers } from "./useFailureGraphCanvasHandlers";
+import { useEditorWorkflowAgent } from "./useEditorWorkflowAgent";
+import { shouldConfirmWorkflowAgentImport } from "./workflowAgentDraftUi";
 
 type EditorPageProps = {
   workflowId: string;
@@ -198,6 +202,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     dsl: Record<string, unknown>;
     fileBaseName: string;
   } | null>(null);
+  const clearAgentDraftUiRef = useRef<(() => void) | null>(null);
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -1483,23 +1488,81 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     pendingImportRef.current = null;
   };
 
-  const confirmImportOverwrite = useCallback(() => {
-    setImportOverwriteConfirmOpen(false);
-    const pending = pendingImportRef.current;
-    pendingImportRef.current = null;
-    if (!pending) return;
-    if (!skillsetsResponse) {
-      setImportFailMessages(["The skill catalog is still loading. Please try again in a moment."]);
-      setImportValidationFailOpen(true);
-      return;
-    }
-    const check = validateImportedDslForEditor(pending.dsl, nodeTypeConfig);
-    if (!check.ok) {
-      setImportFailMessages(check.errors);
-      setImportValidationFailOpen(true);
-      return;
-    }
-    const snapshot = buildEditorImportRollbackSnapshot({
+  const commitImportedDsl = useCallback(
+    (pending: { dsl: Record<string, unknown>; fileBaseName: string }) => {
+      if (!skillsetsResponse) {
+        setImportFailMessages([
+          "The skill catalog is still loading. Please try again in a moment."
+        ]);
+        setImportValidationFailOpen(true);
+        return;
+      }
+      const check = validateImportedDslForEditor(pending.dsl, nodeTypeConfig);
+      if (!check.ok) {
+        setImportFailMessages(check.errors);
+        setImportValidationFailOpen(true);
+        return;
+      }
+      const snapshot = buildEditorImportRollbackSnapshot({
+        nodes,
+        edges,
+        failureGraph,
+        canvasBase,
+        zoom,
+        workflowName,
+        originalWorkflowName,
+        draftOverride,
+        preservedOnFailureDsl: preservedOnFailureDslRef.current,
+        nextNodeIndex: nextNodeIndex.current,
+        nextEdgeIndex: nextEdgeIndex.current,
+        nextConditionIndex: nextConditionIndex.current,
+        nextVariableRowIndex: nextVariableRowIndex.current,
+        nextFailureNodeIndex: nextFailureNodeIndexRef.current,
+        hasUnsavedChanges,
+        selectedNode,
+        selectedEdgeId
+      });
+      try {
+        clearAgentDraftUiRef.current?.();
+        const nextDraft: WorkflowDraft = {
+          workflowId,
+          dsl_json: JSON.parse(JSON.stringify(pending.dsl)) as Record<string, unknown>,
+          view_json: {},
+          updatedAt: new Date().toISOString()
+        };
+        setDraftOverride(nextDraft);
+        applyDraftToEditor(nextDraft, { markUnsaved: true });
+        setWorkflowName(pending.fileBaseName);
+        setOriginalWorkflowName(pending.fileBaseName);
+      } catch (error) {
+        restoreEditorFromImportRollbackSnapshot(snapshot, {
+          setNodes,
+          setEdges,
+          setFailureGraph,
+          setCanvasBase,
+          setZoom,
+          setWorkflowName,
+          setOriginalWorkflowName,
+          setDraftOverride,
+          preservedOnFailureDslRef,
+          nextNodeIndex,
+          nextEdgeIndex,
+          nextConditionIndex,
+          nextVariableRowIndex,
+          nextFailureNodeIndexRef,
+          setHasUnsavedChanges,
+          setSelectedNode,
+          setSelectedEdgeId
+        });
+        const message =
+          error instanceof Error ? error.message : "An unexpected error occurred while importing.";
+        setImportFailMessages([message]);
+        setImportValidationFailOpen(true);
+      }
+    },
+    [
+      skillsetsResponse,
+      nodeTypeConfig,
       nodes,
       edges,
       failureGraph,
@@ -1508,69 +1571,57 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       workflowName,
       originalWorkflowName,
       draftOverride,
-      preservedOnFailureDsl: preservedOnFailureDslRef.current,
-      nextNodeIndex: nextNodeIndex.current,
-      nextEdgeIndex: nextEdgeIndex.current,
-      nextConditionIndex: nextConditionIndex.current,
-      nextVariableRowIndex: nextVariableRowIndex.current,
-      nextFailureNodeIndex: nextFailureNodeIndexRef.current,
       hasUnsavedChanges,
       selectedNode,
-      selectedEdgeId
-    });
-    try {
-      const nextDraft: WorkflowDraft = {
-        workflowId,
-        dsl_json: JSON.parse(JSON.stringify(pending.dsl)) as Record<string, unknown>,
-        view_json: {},
-        updatedAt: new Date().toISOString()
-      };
-      setDraftOverride(nextDraft);
-      applyDraftToEditor(nextDraft, { markUnsaved: true });
-      setWorkflowName(pending.fileBaseName);
-      setOriginalWorkflowName(pending.fileBaseName);
-    } catch (error) {
-      restoreEditorFromImportRollbackSnapshot(snapshot, {
-        setNodes,
-        setEdges,
-        setFailureGraph,
-        setCanvasBase,
-        setZoom,
-        setWorkflowName,
-        setOriginalWorkflowName,
-        setDraftOverride,
-        preservedOnFailureDslRef,
-        nextNodeIndex,
-        nextEdgeIndex,
-        nextConditionIndex,
-        nextVariableRowIndex,
-        nextFailureNodeIndexRef,
-        setHasUnsavedChanges,
-        setSelectedNode,
-        setSelectedEdgeId
-      });
-      const message =
-        error instanceof Error ? error.message : "An unexpected error occurred while importing.";
-      setImportFailMessages([message]);
-      setImportValidationFailOpen(true);
-    }
-  }, [
-    skillsetsResponse,
-    nodeTypeConfig,
-    nodes,
-    edges,
-    failureGraph,
-    canvasBase,
-    zoom,
-    workflowName,
-    originalWorkflowName,
-    draftOverride,
-    hasUnsavedChanges,
-    selectedNode,
-    selectedEdgeId,
+      selectedEdgeId,
+      workflowId,
+      applyDraftToEditor
+    ]
+  );
+
+  const confirmImportOverwrite = useCallback(() => {
+    setImportOverwriteConfirmOpen(false);
+    const pending = pendingImportRef.current;
+    pendingImportRef.current = null;
+    if (!pending) return;
+    commitImportedDsl(pending);
+  }, [commitImportedDsl]);
+
+  const applyGeneratedDslFromAgent = useCallback(
+    (pending: { dsl: Record<string, unknown>; fileBaseName: string }) => {
+      if (
+        shouldConfirmWorkflowAgentImport({
+          hasUnsavedChanges,
+          mainNodeCount: nodes.length,
+          mainEdgeCount: edges.length,
+          failureGraphEnabled: failureGraph.enabled,
+          failureNodeCount: failureGraph.nodes.length
+        })
+      ) {
+        pendingImportRef.current = pending;
+        setImportOverwriteConfirmOpen(true);
+      } else {
+        commitImportedDsl(pending);
+      }
+    },
+    [
+      hasUnsavedChanges,
+      nodes.length,
+      edges.length,
+      failureGraph.enabled,
+      failureGraph.nodes.length,
+      commitImportedDsl
+    ]
+  );
+
+  const editorWorkflowAgent = useEditorWorkflowAgent({
     workflowId,
-    applyDraftToEditor
-  ]);
+    skillsetsResponse: skillsetsResponse ?? undefined,
+    queryClient,
+    workflowNameForDraftFile: workflowName.trim() || "AI draft",
+    clearAgentDraftUiRef,
+    onApplyGeneratedDsl: applyGeneratedDslFromAgent
+  });
 
   const handleEditorExport = () => {
     setShowWorkflowMenu(false);
@@ -2331,6 +2382,7 @@ export function EditorPage({ workflowId }: EditorPageProps) {
       <EditorNoticeToasts
         publishToastVisible={publishToast}
         failureFlowToastMessage={failureFlowToastMessage}
+        workflowAgentSyncErrorMessage={editorWorkflowAgent.syncErrorMessage}
       />
 
       <div className="flex shrink-0 items-start justify-between gap-4">
@@ -3241,6 +3293,10 @@ export function EditorPage({ workflowId }: EditorPageProps) {
           </div>
         )}
       </div>
+      {editorWorkflowAgent.showWorkflowAgentBar ? (
+        <EditorWorkflowAgentBar {...editorWorkflowAgent.workflowAgentBarProps} />
+      ) : null}
+      <EditorWorkflowAgentGeneratingOverlay visible={editorWorkflowAgent.agentGenerating} />
     </div>
   );
 }

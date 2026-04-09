@@ -3,11 +3,14 @@
 export type EditorNoticeToastsProps = {
   publishToastVisible: boolean;
   failureFlowToastMessage: string | null;
+  /** Workflow Agent skills/sync 실패 등 */
+  workflowAgentSyncErrorMessage?: string | null;
 };
 
 export function EditorNoticeToasts({
   publishToastVisible,
-  failureFlowToastMessage
+  failureFlowToastMessage,
+  workflowAgentSyncErrorMessage = null
 }: EditorNoticeToastsProps) {
   return (
     <>
@@ -25,6 +28,14 @@ export function EditorNoticeToasts({
           role="status"
         >
           {failureFlowToastMessage}
+        </div>
+      )}
+      {workflowAgentSyncErrorMessage && (
+        <div
+          className="fixed bottom-36 right-6 z-50 max-w-sm rounded-lg bg-amber-900 px-4 py-3 text-sm font-medium text-amber-50 shadow-lg"
+          role="alert"
+        >
+          Workflow Agent sync failed: {workflowAgentSyncErrorMessage}
         </div>
       )}
     </>
