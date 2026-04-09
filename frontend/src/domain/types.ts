@@ -88,9 +88,12 @@ export function isRunActive(status: RunStatus) {
   return status === RunStatus.RUNNING || status === RunStatus.WAITING;
 }
 
+/** 미들웨어 스킬 파라미터 스펙 (`range` / `candidates`는 선택) */
 export type SkillParameter = {
   type: string;
   description: string;
+  range?: { min?: number; max?: number };
+  candidates?: string[];
 };
 
 export type SkillOutput = {

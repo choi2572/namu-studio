@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +20,13 @@ const reuseExistingServer =
   process.env.CI !== "true" && process.env.PLAYWRIGHT_REUSE_SERVER === "true";
 
 /**
+ * 로컬은 `backend/.venv`가 있으면 우선 사용, 없으면 `python3`.
+ * CI/특수 환경은 `PYTHON`로 지정.
+ */
+const venvPython = path.join(backendRoot, ".venv", "bin", "python3");
+const pythonCmd = process.env.PYTHON ?? (fs.existsSync(venvPython) ? venvPython : "python3");
+
+/**
  * E2E 기본 스택: mock_middleware(8000) + Flask 백엔드(SQLite, middleware 엔진) + Next.js(3000)
  * 사전 준비: `cd backend && pip install -r requirements.txt` (mock_middleware WebSocket은 flask-sock 필요)
  * 전략 문서: tests/spec_driven_e2e_testing_strategy.md
@@ -38,7 +46,7 @@ export default defineConfig({
   webServer: [
     {
       name: "mock-middleware",
-      command: "python -m mock_middleware",
+      command: `${pythonCmd} -m mock_middleware`,
       cwd: backendRoot,
       url: "http://127.0.0.1:8000/api/v1/runner/status",
       reuseExistingServer,
@@ -48,7 +56,7 @@ export default defineConfig({
     },
     {
       name: "backend",
-      command: "python run.py",
+      command: `${pythonCmd} run.py`,
       cwd: backendRoot,
       url: "http://127.0.0.1:5000/api/capabilities/health",
       reuseExistingServer,

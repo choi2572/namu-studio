@@ -11,7 +11,11 @@ bp = Blueprint("capabilities", __name__)
 
 @bp.route("/skill-set", methods=["GET"])
 def get_skill_set():
-    """GET skill-set from middleware (GET /api/v1/skill-sets). Frontend uses this."""
+    """미들웨어 `GET /api/v1/skill-sets` 응답을 **변환 없이** 그대로 반환한다.
+
+    스킬 `parameters`의 각 스펙에 `range`, `candidates` 등이 있어도 백엔드에서 제거·재작성하지 않으며,
+    프론트는 이 페이로드를 그대로 소비한다.
+    """
     base_url = current_app.config.get("MIDDLEWARE_BASE_URL") or os.environ.get(
         "MIDDLEWARE_BASE_URL", "http://localhost:8000"
     )

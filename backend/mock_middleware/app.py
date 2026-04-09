@@ -952,6 +952,26 @@ def _run_workflow(workflow_id: str, dsl: dict[str, Any]) -> None:
         )
 
 
+def _mock_param(
+    param_type: str,
+    description: str,
+    *,
+    range_spec: dict[str, float | int] | None = None,
+    candidates: list[str] | None = None,
+) -> dict[str, Any]:
+    """스킬 파라미터 스펙. type/description은 필수, range·candidates는 선택.
+
+    range_spec → JSON의 "range": {"min": number} / {"max": number} / 둘 다.
+    candidates → JSON의 "candidates": string[].
+    """
+    spec: dict[str, Any] = {"type": param_type, "description": description}
+    if range_spec is not None:
+        spec["range"] = range_spec
+    if candidates is not None:
+        spec["candidates"] = candidates
+    return spec
+
+
 def _mock_skill_entry(
     namespace: str,
     name: str,
@@ -961,6 +981,7 @@ def _mock_skill_entry(
     *,
     allow_status_external_change: bool = False,
 ) -> dict[str, Any]:
+    """parameters 값은 _mock_param() 또는 동일한 키(type, description, range?, candidates?)를 가진 dict."""
     return {
         "namespace": namespace,
         "name": name,
@@ -994,7 +1015,13 @@ MOCK_SKILL_SET = {
             "qa",
             "ValidateFrame",
             "Validate frame quality",
-            {"threshold": {"type": "double", "description": "Quality threshold"}},
+            {
+                "threshold": _mock_param(
+                    "double",
+                    "Quality threshold",
+                    range_spec={"min": 0.0, "max": 1.0},
+                )
+            },
             {"valid": {"type": "bool", "description": "Whether frame passed"}},
             allow_status_external_change=True,
         ),
@@ -1010,7 +1037,13 @@ MOCK_SKILL_SET = {
             "tracking",
             "TrackTargets",
             "Track targets in scene",
-            {"maxTargets": {"type": "int", "description": "Max concurrent targets"}},
+            {
+                "maxTargets": _mock_param(
+                    "int",
+                    "Max concurrent targets",
+                    range_spec={"min": 1, "max": 32},
+                )
+            },
             {"tracks": {"type": "object", "description": "Active tracks"}},
             allow_status_external_change=True,
         ),
@@ -1047,7 +1080,11 @@ MOCK_SKILL_SET = {
             "Notify operations channel",
             {
                 "channel": {"type": "string", "description": "Notification channel"},
-                "severity": {"type": "string", "description": "Severity"},
+                "severity": _mock_param(
+                    "string",
+                    "Severity",
+                    candidates=["info", "warn", "error", "critical"],
+                ),
                 "message": {"type": "string", "description": "Message body"},
             },
             {"notified": {"type": "bool", "description": "Notification sent"}},
@@ -1116,10 +1153,11 @@ MOCK_SKILL_SET = {
                     "type": "string",
                     "description": "The destination location identifier",
                 },
-                "orientation": {
-                    "type": "string",
-                    "description": "The orientation of the object (north, south, east, west)",
-                },
+                "orientation": _mock_param(
+                    "string",
+                    "The orientation of the object (north, south, east, west)",
+                    candidates=["north", "south", "east", "west"],
+                ),
             },
             {
                 "placement_success": {

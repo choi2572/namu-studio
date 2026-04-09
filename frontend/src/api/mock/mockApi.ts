@@ -651,7 +651,8 @@ export const mockSkillsetsApi: SkillsetsApi = {
             },
             orientation: {
               type: "string",
-              description: "The orientation of the object (north, south, east, west)"
+              description: "The orientation of the object (north, south, east, west)",
+              candidates: ["north", "south", "east", "west"]
             }
           },
           outputs: {

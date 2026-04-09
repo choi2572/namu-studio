@@ -6,7 +6,7 @@ import type { DragEvent, PointerEvent as ReactPointerEvent } from "react";
 import { VariableInput } from "@/components/VariableInput";
 import type { Skillset } from "@/domain/types";
 import { cn } from "@/lib/cn";
-import { getAvailableVariables } from "@/lib/variableReferences";
+import { getAvailableVariables, type VariableSuggestion } from "@/lib/variableReferences";
 
 import {
   CONDITION_COMPARISON_OPERATORS,
@@ -16,6 +16,7 @@ import {
 } from "../editorConstants";
 import { getNodeHeight, getPortOffsets } from "../editorNodeLayout";
 import { getRetryScopeStartNodeId } from "../editorRetryScope";
+import { skillParamRangeMessage } from "../editorSkillParamValidation";
 import { getSkillDisplayType } from "../editorSkillset";
 import { SearchableNodeDropdown } from "./SearchableNodeDropdown";
 import type {
@@ -24,9 +25,75 @@ import type {
   EditorNode,
   NodeCategory,
   NodeKind,
+  NodeParamField,
   NodeTypeConfig,
   VariableValueType
 } from "../editorTypes";
+
+function SkillCatalogParamFields({
+  paramFields,
+  params,
+  onParamChange,
+  availableVariables
+}: {
+  paramFields: NodeParamField[];
+  params: Record<string, string>;
+  onParamChange: (key: string, value: string) => void;
+  availableVariables: VariableSuggestion[];
+}) {
+  return (
+    <div className="mt-3 space-y-2 text-xs text-slate-600">
+      {paramFields.map((field) => {
+        const raw = params[field.key] ?? "";
+        const rangeMsg = skillParamRangeMessage(field, raw);
+        const useCatalogSelect = (field.candidates?.length ?? 0) > 0 && !raw.trim().startsWith("$");
+        return (
+          <label key={field.key} className="block">
+            <span className="text-[10px] text-slate-500">{field.label}</span>
+            <div className="mt-1" data-no-drag>
+              {useCatalogSelect ? (
+                <select
+                  data-testid={`editor-skill-param-select-${field.key}`}
+                  className={cn(
+                    "mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-800 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                  )}
+                  value={raw}
+                  onChange={(e) => onParamChange(field.key, e.target.value)}
+                >
+                  <option value="">—</option>
+                  {(field.candidates ?? []).map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                  {raw !== "" && !(field.candidates?.includes(raw) ?? false) ? (
+                    <option value={raw}>{raw}</option>
+                  ) : null}
+                </select>
+              ) : (
+                <VariableInput
+                  value={raw}
+                  onChange={(value) => onParamChange(field.key, value)}
+                  placeholder={field.placeholder ? `${field.placeholder} or $` : undefined}
+                  suggestions={availableVariables}
+                  className="mt-1"
+                />
+              )}
+            </div>
+            {rangeMsg ? (
+              <span
+                data-testid={`editor-skill-param-range-error-${field.key}`}
+                className="mt-1 block text-[10px] font-medium text-rose-600"
+              >
+                {rangeMsg}
+              </span>
+            ) : null}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
 
 export function NodeCard({
   node,
@@ -588,6 +655,7 @@ export function NodeCard({
         )}
         <button
           type="button"
+          data-testid="editor-node-expand-toggle"
           data-no-drag
           className="cursor-pointer flex-shrink-0 text-slate-500 hover:text-slate-900"
           onClick={(event) => {
@@ -813,22 +881,12 @@ export function NodeCard({
         node.kind !== "flow_control.input" &&
         node.kind !== "flow_control.output" &&
         config.paramFields.length > 0 && (
-          <div className="mt-3 space-y-2 text-xs text-slate-600">
-            {config.paramFields.map((field) => (
-              <label key={field.key} className="block">
-                <span className="text-[10px] text-slate-500">{field.label}</span>
-                <div className="mt-1" data-no-drag>
-                  <VariableInput
-                    value={node.params[field.key] ?? ""}
-                    onChange={(value) => onParamChange(field.key, value)}
-                    placeholder={field.placeholder ? `${field.placeholder} or $` : undefined}
-                    suggestions={availableVariables}
-                    className="mt-1"
-                  />
-                </div>
-              </label>
-            ))}
-          </div>
+          <SkillCatalogParamFields
+            paramFields={config.paramFields}
+            params={node.params}
+            onParamChange={onParamChange}
+            availableVariables={availableVariables}
+          />
         )}
       {node.isExpanded && node.kind === "flow_control.retry" && (
         <div className="mt-3 space-y-2 text-xs text-slate-600">

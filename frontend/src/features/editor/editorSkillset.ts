@@ -34,11 +34,22 @@ function createNodeTypeConfigFromSkillset(skillset: Skillset): NodeTypeConfig {
   ];
   const colorIndex = skillName.length % colorClasses.length;
 
-  const paramFields: NodeParamField[] = Object.entries(skillset.parameters).map(([key, param]) => ({
-    key,
-    label: key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
-    placeholder: param.type || key
-  }));
+  const paramFields: NodeParamField[] = Object.entries(skillset.parameters).map(([key, param]) => {
+    const candidates = param.candidates?.filter((c) => typeof c === "string" && c.length > 0);
+    const range = param.range;
+    const hasRange =
+      range != null &&
+      typeof range === "object" &&
+      (range.min !== undefined || range.max !== undefined);
+    return {
+      key,
+      label: key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+      placeholder: param.type || key,
+      valueType: param.type,
+      ...(hasRange ? { range: { min: range.min, max: range.max } } : {}),
+      ...(candidates && candidates.length > 0 ? { candidates } : {})
+    };
+  });
 
   // Skill 노드는 transition 표현이므로 next 포트 하나만 사용
   const outputs: NodeOutputPort[] = [{ key: "next", label: "Next" }];

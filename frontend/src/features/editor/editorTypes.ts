@@ -22,10 +22,16 @@ export type ContainerFrameData = {
   branchCount?: number;
 };
 
+export type SkillParamRangeSpec = { min?: number; max?: number };
+
 export type NodeParamField = {
   key: string;
   label: string;
   placeholder: string;
+  /** 카탈로그 `type` — 구간 검증에 사용 */
+  valueType?: string;
+  range?: SkillParamRangeSpec;
+  candidates?: string[];
 };
 
 export type NodeOutputPort = {
