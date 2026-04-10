@@ -6,11 +6,11 @@ import { useCallback, useLayoutEffect, useRef } from "react";
 import { Button } from "@/components/Button";
 import { cn } from "@/lib/cn";
 import { workflowAgentModelOptionLabel } from "@/features/editor/workflowAgentModelLabel";
+import { AGENT_DRAFT_PLACEHOLDER } from "@/features/editor/workflowAgentDraftConstants";
 
-const defaultPlaceholder = "대충 workflow를 생성해보세요…";
 const PROMPT_MAX_HEIGHT_PX = 192;
 
-/** 배경 없는 심플 라인 아이콘 */
+/** 배경 없음 · Heroicons 24 outline sparkles와 동일 */
 function DraftAssistIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -24,7 +24,12 @@ function DraftAssistIcon(props: SVGProps<SVGSVGElement>) {
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M12 3.5l1.2 4.6 4.7.4-3.6 2.8 1.1 4.6L12 14.8 8.6 16l1.1-4.6-3.6-2.8 4.7-.4L12 3.5z"
+        d="M9.813 15.904L9 18.75l-.813-2.846-2.846-.813 2.846-.813L9 11.25l.813 2.846 2.846.813-2.846.813z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M18.259 8.715L18 9.75l-.259-1.035-1.035-.259L18 7.75l.259-1.035 1.035-.259L18.75 6l.259 1.035 1.035.259L18.75 9l-.259-1.035-1.035-.259z"
       />
     </svg>
   );
@@ -66,7 +71,7 @@ export function EditorWorkflowAgentBar({
   onModelChange,
   prompt,
   onPromptChange,
-  placeholder = defaultPlaceholder,
+  placeholder = AGENT_DRAFT_PLACEHOLDER,
   onGenerate,
   disabled,
   disabledHint,
@@ -99,13 +104,13 @@ export function EditorWorkflowAgentBar({
       ) : null}
 
       {/* 순서: 아이콘 → 모델 → 입력 → Generate (모바일: 1행에 아이콘+모델, 이어서 입력·버튼) */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
         <div className="flex min-w-0 items-center gap-2 sm:contents">
           <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center text-slate-400 sm:h-auto sm:w-auto sm:self-end sm:pb-px"
+            className="flex h-10 w-10 shrink-0 items-center justify-center text-indigo-500/90"
             aria-hidden
           >
-            <DraftAssistIcon className="size-[22px] shrink-0" />
+            <DraftAssistIcon className="size-6 shrink-0" />
           </div>
 
           <label htmlFor="workflow-agent-model" className="sr-only">
@@ -129,7 +134,7 @@ export function EditorWorkflowAgentBar({
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2">
             <label htmlFor="workflow-agent-prompt" className="sr-only">
               Workflow 설명
             </label>
