@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from workflow_agent.api.middleware_private_network import PrivateNetworkAccessMiddleware
 from workflow_agent.api.routes import draft, models, skills, status
 from workflow_agent.logging_setup import build_uvicorn_log_config, configure_application_logging
 from workflow_agent.services.application_state import (
@@ -115,6 +116,8 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # localhost:3000 → 클러스터 사설 IP(10.x) 호출 시 Chrome PNA 프리플라이트 통과
+    app.add_middleware(PrivateNetworkAccessMiddleware)
     app.state.state_store = store
     app.state.model_runtime_backend = backend
     app.include_router(status.router)
