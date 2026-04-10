@@ -1,11 +1,12 @@
 "use client";
 
 import type { MutableRefObject } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { QueryClient } from "@tanstack/react-query";
 
 import { workflowAgentApi } from "@/api";
+import type { WorkflowAgentStatusResponse } from "@/api/workflowAgent";
 import type { SkillsetsResponse } from "@/domain/types";
 
 import { getWorkflowAgentBarHint } from "./workflowAgentBarHint";
@@ -61,6 +62,9 @@ export function useEditorWorkflowAgent({
   const [selectedAgentModel, setSelectedAgentModel] = useState("");
   const [agentGenerating, setAgentGenerating] = useState(false);
 
+  /** 모델 전환 요청을 FIFO로 직렬화 (연속 선택·선택 직후 Generate 등) */
+  const modelActivationChainRef = useRef<Promise<void>>(Promise.resolve());
+
   const resetAgentDraftUi = useCallback(() => {
     setAgentDraftHelperText(null);
     setAgentInputPlaceholder(AGENT_DRAFT_PLACEHOLDER);
@@ -91,12 +95,35 @@ export function useEditorWorkflowAgent({
 
   const showWorkflowAgentBar = Boolean(session.agentConfigured && skillsetsResponse);
 
-  const workflowAgentBarInteractive = Boolean(
-    session.status &&
-    session.agentReadyForDraftUi &&
+  const draftUiCoreReady = Boolean(
+    session.status?.alive &&
+    session.status.skills_ready &&
     !session.syncPending &&
-    !session.syncErrorMessage &&
-    !agentGenerating
+    !session.syncErrorMessage
+  );
+
+  const workflowAgentBarInteractive = Boolean(
+    session.status && draftUiCoreReady && !agentGenerating
+  );
+
+  const statusQueryKey = useMemo(
+    () => ["workflow-agent-status", workflowId] as const,
+    [workflowId]
+  );
+
+  const enqueueModelActivation = useCallback(
+    (modelId: string): Promise<void> => {
+      const run = async () => {
+        await workflowAgentApi.activateModel({ model: modelId });
+        await pollWorkflowAgentUntilModelReady(modelId, queryClient, workflowId);
+      };
+      const next = modelActivationChainRef.current.then(run);
+      modelActivationChainRef.current = next.catch(() => {
+        /* 다음 전환은 계속 진행 */
+      });
+      return next;
+    },
+    [queryClient, workflowId]
   );
 
   const workflowAgentBarHint = useMemo(
@@ -107,8 +134,7 @@ export function useEditorWorkflowAgent({
         syncErrorMessage: session.syncErrorMessage,
         statusError: session.statusError,
         status: session.status,
-        syncSucceeded: session.syncSucceeded,
-        agentReadyForDraftUi: session.agentReadyForDraftUi
+        syncSucceeded: session.syncSucceeded
       }),
     [
       session.agentConfigured,
@@ -116,32 +142,35 @@ export function useEditorWorkflowAgent({
       session.syncErrorMessage,
       session.statusError,
       session.status,
-      session.syncSucceeded,
-      session.agentReadyForDraftUi
+      session.syncSucceeded
     ]
   );
 
   const runGenerate = useCallback(async () => {
     const text = agentDraftPrompt.trim();
     if (!text || agentGenerating) return;
-    if (!skillsetsResponse || !session.agentReadyForDraftUi) return;
+    if (!skillsetsResponse || !draftUiCoreReady) return;
 
     setAgentDraftHelperText(null);
     setAgentGenerating(true);
     try {
-      const st = session.status ?? (await workflowAgentApi.getStatus());
-      queryClient.setQueryData(["workflow-agent-status", workflowId], st);
+      await modelActivationChainRef.current;
+
+      let st: WorkflowAgentStatusResponse = await workflowAgentApi.getStatus();
+      queryClient.setQueryData(statusQueryKey, st);
 
       const targetModel = (selectedAgentModel || st.active_model).trim();
       if (!targetModel) {
         throw new Error("모델을 선택해 주세요.");
       }
 
-      if (targetModel !== st.active_model) {
-        await workflowAgentApi.activateModel({ model: targetModel });
-        await pollWorkflowAgentUntilModelReady(targetModel, queryClient, workflowId);
-      } else if (!st.model_loaded) {
-        await pollWorkflowAgentUntilModelReady(targetModel, queryClient, workflowId);
+      if (targetModel !== st.active_model || !st.model_loaded) {
+        await enqueueModelActivation(targetModel);
+        st = await workflowAgentApi.getStatus();
+        queryClient.setQueryData(statusQueryKey, st);
+        if (targetModel !== st.active_model || !st.model_loaded) {
+          throw new Error("모델 전환이 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+        }
       }
 
       const res = await workflowAgentApi.postDraft({ request: text, model: targetModel });
@@ -167,13 +196,14 @@ export function useEditorWorkflowAgent({
     agentDraftPrompt,
     agentGenerating,
     skillsetsResponse,
-    session.agentReadyForDraftUi,
-    session.status,
+    draftUiCoreReady,
     selectedAgentModel,
     queryClient,
+    statusQueryKey,
     workflowId,
     workflowNameForDraftFile,
-    onApplyGeneratedDsl
+    onApplyGeneratedDsl,
+    enqueueModelActivation
   ]);
 
   const workflowAgentBarProps: UseEditorWorkflowAgentResult["workflowAgentBarProps"] = {
@@ -182,6 +212,14 @@ export function useEditorWorkflowAgent({
     onModelChange: (id) => {
       setSelectedAgentModel(id);
       setAgentDraftHelperText(null);
+      const cached = queryClient.getQueryData<WorkflowAgentStatusResponse>(statusQueryKey);
+      if (cached?.active_model === id && cached.model_loaded) {
+        return;
+      }
+      void enqueueModelActivation(id).catch((e) => {
+        const msg = e instanceof Error ? e.message : "모델 전환에 실패했습니다.";
+        setAgentDraftHelperText(msg);
+      });
     },
     prompt: agentDraftPrompt,
     onPromptChange: (value) => {

@@ -11,10 +11,29 @@ describe("getWorkflowAgentBarHint", () => {
         syncErrorMessage: null,
         statusError: null,
         status: undefined,
-        syncSucceeded: false,
-        agentReadyForDraftUi: false
+        syncSucceeded: false
       })
     ).toContain("동기화");
+  });
+
+  it("모델 전환 중(model_loaded false)이어도 막는 문구 없음", () => {
+    expect(
+      getWorkflowAgentBarHint({
+        agentConfigured: true,
+        syncPending: false,
+        syncErrorMessage: null,
+        statusError: null,
+        status: {
+          alive: true,
+          active_model: "qwen",
+          model_loaded: false,
+          skills_ready: true,
+          skills_hash: "x",
+          supported_models: ["qwen", "other"]
+        },
+        syncSucceeded: true
+      })
+    ).toBeNull();
   });
 
   it("에이전트 준비 완료면 null", () => {
@@ -32,8 +51,7 @@ describe("getWorkflowAgentBarHint", () => {
           skills_hash: "x",
           supported_models: ["qwen"]
         },
-        syncSucceeded: true,
-        agentReadyForDraftUi: true
+        syncSucceeded: true
       })
     ).toBeNull();
   });
