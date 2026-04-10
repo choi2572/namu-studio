@@ -68,20 +68,25 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     backend: ModelRuntimeBackend = app.state.model_runtime_backend
     store: ApplicationStateStore = app.state.state_store
-    if not store.get_snapshot().model_loaded:
-        mid = _resolve_startup_model_id(backend)
-        if mid is not None:
-            try:
-                orchestrate_model_activation(store, backend, mid, force_switch=True)
-                _LOG.info("Startup default model activated: %s", mid)
-            except ModelRuntimeError as exc:
-                _LOG.error(
-                    "Startup default model activation failed for %s: %s",
-                    mid,
-                    exc,
-                )
+    try:
+        if not store.get_snapshot().model_loaded:
+            mid = _resolve_startup_model_id(backend)
+            if mid is not None:
+                try:
+                    orchestrate_model_activation(store, backend, mid, force_switch=True)
+                    _LOG.info("Startup default model activated: %s", mid)
+                except ModelRuntimeError as exc:
+                    _LOG.error(
+                        "Startup default model activation failed for %s: %s",
+                        mid,
+                        exc,
+                    )
 
-    yield
+        yield
+    finally:
+        if isinstance(backend, LlamaCppProcessBackend):
+            _LOG.info("Stopping local llama-server subprocess (workflow agent shutdown)")
+            backend.shutdown()
 
 
 def build_model_runtime_backend() -> ModelRuntimeBackend:

@@ -53,7 +53,10 @@ def orchestrate_model_activation(
         )
 
     snap = store.get_snapshot()
-    if snap.active_model == normalized and not force_switch:
+    # Same model id alone is not enough: after a failed switch or agent restart,
+    # active_model may match while model_loaded is still False. In that case we
+    # must run switch_to_model again (POST /models/activate does not use force_switch).
+    if snap.active_model == normalized and not force_switch and snap.model_loaded:
         return ModelActivationOutcome(
             success=True,
             active_model=normalized,

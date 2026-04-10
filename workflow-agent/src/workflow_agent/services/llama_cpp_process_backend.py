@@ -125,6 +125,13 @@ class LlamaCppProcessBackend:
     def updates_runtime_loaded_flag_after_switch(self) -> bool:
         return True
 
+    def shutdown(self) -> None:
+        """Stop the tracked llama-server (best-effort). Call on app shutdown so the child does not outlive the agent."""
+        log = LOG
+        with self._switch_lock:
+            self._runner.stop_tracked_process(log)
+            self._last_listen_port = None
+
     def switch_to_model(self, model_id: str) -> None:
         log = LOG
         with self._switch_lock:
