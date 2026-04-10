@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from workflow_agent.spec.skill_resolution import canonical_dsl_skill_id
+
 
 def _constraints_suffix(spec: dict[str, Any]) -> str:
     bits: list[str] = []
@@ -42,11 +44,9 @@ def _format_output_line(key: str, spec: Any) -> str:
 
 
 def _format_one_skill(skill: dict[str, Any]) -> list[str]:
-    name = skill["name"]
     desc = skill["description"]
-    ns = skill.get("namespace")
-    header = f"- {name} [{ns}]" if isinstance(ns, str) and ns.strip() else f"- {name}"
-    lines: list[str] = [header, f"  description: {desc}"]
+    header_id = canonical_dsl_skill_id(skill) or str(skill.get("name", "?"))
+    lines: list[str] = [f"- {header_id}", f"  description: {desc}"]
     ver = skill.get("version")
     if isinstance(ver, str) and ver.strip():
         lines.append(f"  version: {ver.strip()}")

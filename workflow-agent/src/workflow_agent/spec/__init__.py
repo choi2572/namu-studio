@@ -8,12 +8,12 @@ from workflow_agent.spec.models import (
     SkillRetryPolicy,
     WorkflowSpec,
 )
+from workflow_agent.spec.skill_resolution import skill_names_from_registry_rows
 from workflow_agent.spec.validation import (
     BusinessValidationIssue,
     SpecParseError,
     SpecValidationReport,
     parse_and_validate_workflow_spec,
-    skill_names_from_registry_rows,
 )
 
 __all__ = [

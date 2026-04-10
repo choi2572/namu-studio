@@ -10,7 +10,11 @@ from workflow_agent.spec.models import BranchArm, BranchNode, EndNode, SkillNode
 DSL_COMMENT_PREFIX = "workflow-agent; workflow-dsl/editor-v1"
 
 
-def compile_workflow_spec(spec: WorkflowSpec) -> tuple[dict[str, Any], list[CompileWarning]]:
+def compile_workflow_spec(
+    spec: WorkflowSpec,
+    *,
+    skill_emit_map: dict[str, str] | None = None,
+) -> tuple[dict[str, Any], list[CompileWarning]]:
     """
     Map each spec node to ``States`` entries.
 
@@ -33,7 +37,8 @@ def compile_workflow_spec(spec: WorkflowSpec) -> tuple[dict[str, Any], list[Comp
     for nid in sorted(spec.nodes.keys()):
         node = spec.nodes[nid]
         if isinstance(node, SkillNode):
-            states[nid] = _emit_skill(nid, node)
+            emitted = skill_emit_map.get(node.skill, node.skill) if skill_emit_map else node.skill
+            states[nid] = _emit_skill(nid, node, emitted_skill=emitted)
         elif isinstance(node, BranchNode):
             states.update(_emit_branch_condition_chain(nid, node, warnings))
         elif isinstance(node, EndNode):
@@ -50,10 +55,10 @@ def compile_workflow_spec(spec: WorkflowSpec) -> tuple[dict[str, Any], list[Comp
     return dsl, warnings
 
 
-def _emit_skill(nid: str, node: SkillNode) -> dict[str, Any]:
+def _emit_skill(nid: str, node: SkillNode, *, emitted_skill: str) -> dict[str, Any]:
     out: dict[str, Any] = {
         "Type": "Skill",
-        "Skill": node.skill,
+        "Skill": emitted_skill,
         "Parameters": dict(node.inputs),
         "Next": node.next,
         "Label": nid,

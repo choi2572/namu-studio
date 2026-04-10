@@ -40,16 +40,6 @@ class SpecValidationReport(BaseModel):
 # --- Helpers ---------------------------------------------------------------------
 
 
-def skill_names_from_registry_rows(raw_registry: list[dict[str, Any]]) -> set[str]:
-    """``name`` fields from synced raw skill rows (spec §3.2)."""
-    names: set[str] = set()
-    for row in raw_registry:
-        n = row.get("name")
-        if isinstance(n, str) and n.strip():
-            names.add(n.strip())
-    return names
-
-
 def _pydantic_loc_to_path(loc: tuple[Any, ...]) -> str:
     if not loc:
         return "/"

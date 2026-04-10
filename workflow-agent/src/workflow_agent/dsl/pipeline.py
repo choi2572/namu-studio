@@ -8,8 +8,12 @@ from workflow_agent.dsl.types import CompilePipelineResult
 from workflow_agent.spec.models import WorkflowSpec
 
 
-def compile_validated_spec_pipeline(spec: WorkflowSpec) -> CompilePipelineResult:
+def compile_validated_spec_pipeline(
+    spec: WorkflowSpec,
+    *,
+    skill_emit_map: dict[str, str] | None = None,
+) -> CompilePipelineResult:
     """Emit DSL from a *spec-layer-validated* ``WorkflowSpec``, then validate the DSL."""
-    dsl, warnings = compile_workflow_spec(spec)
+    dsl, warnings = compile_workflow_spec(spec, skill_emit_map=skill_emit_map)
     report = validate_workflow_dsl(dsl)
     return CompilePipelineResult(dsl=dsl, warnings=warnings, dsl_validation=report)

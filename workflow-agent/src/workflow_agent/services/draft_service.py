@@ -47,7 +47,8 @@ from workflow_agent.services.llm_client import (
 from workflow_agent.services.model_activation import normalize_model_id
 from workflow_agent.services.model_runtime_backend import ModelRuntimeBackend
 from workflow_agent.services.skill_registry import get_prompt_skill_context, get_raw_registry
-from workflow_agent.spec.validation import parse_and_validate_workflow_spec, skill_names_from_registry_rows
+from workflow_agent.spec.skill_resolution import skill_emit_map_from_registry, skill_names_from_registry_rows
+from workflow_agent.spec.validation import parse_and_validate_workflow_spec
 
 # 1 initial generation + 2 repair attempts (spec §7).
 _MAX_GENERATION_ATTEMPTS = 3
@@ -133,7 +134,9 @@ def _run_draft_pipeline(
         )
 
     skill_block = get_prompt_skill_context()
-    known = skill_names_from_registry_rows(get_raw_registry())
+    raw_registry = get_raw_registry()
+    known = skill_names_from_registry_rows(raw_registry)
+    skill_emit_map = skill_emit_map_from_registry(raw_registry)
     client = LlamaChatCompletionClient(base_url, timeout=120.0, api_model_name="local")
 
     repair: _RepairContext | None = None
@@ -286,7 +289,7 @@ def _run_draft_pipeline(
 
         assert vr.spec is not None
         try:
-            compile_res = compile_validated_spec_pipeline(vr.spec)
+            compile_res = compile_validated_spec_pipeline(vr.spec, skill_emit_map=skill_emit_map)
         except (TypeError, ValueError, KeyError) as exc:
             errs = [
                 f"Compile error: {exc}",
