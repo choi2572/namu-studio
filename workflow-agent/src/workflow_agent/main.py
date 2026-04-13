@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from workflow_agent.api.middleware_private_network import PrivateNetworkAccessMiddleware
-from workflow_agent.api.routes import draft, models, skills, status
+from workflow_agent.api.routes import draft, models, replan, skills, status
 from workflow_agent.logging_setup import build_uvicorn_log_config, configure_application_logging
 from workflow_agent.services.application_state import (
     ApplicationStateStore,
@@ -129,6 +129,7 @@ def create_app(
     app.include_router(skills.router)
     app.include_router(models.router)
     app.include_router(draft.router)
+    app.include_router(replan.router)
     return app
 
 

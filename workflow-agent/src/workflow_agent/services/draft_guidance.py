@@ -65,3 +65,13 @@ def guidance_internal_error() -> DraftGuidance:
         basic="The draft pipeline stopped unexpectedly; this indicates a server bug.",
         suggestion="Retry once; if it persists, report using the correlation id in the errors list plus server logs.",
     )
+
+
+def guidance_replan_current_dsl_invalid() -> DraftGuidance:
+    return DraftGuidance(
+        basic="The workflow JSON sent for replan is not valid editor DSL.",
+        suggestion=(
+            "Export from the editor again (include OnFailure when used). "
+            "Compare shape with docs/dsl-example.json: StartAt, non-empty States, and consistent state references."
+        ),
+    )

@@ -132,6 +132,30 @@ def build_draft_user_prompt(user_request: str) -> str:
     return f"User request:\n{user_request.strip()}\n\nGenerate the intermediate workflow JSON now."
 
 
+def build_replan_user_prompt(
+    *,
+    instruction: str,
+    current_dsl: dict[str, Any],
+    focus_state_names: list[str] | None = None,
+    dsl_max_chars: int = 56_000,
+) -> str:
+    """First replan turn: current DSL + edit instruction; model emits full intermediate spec."""
+    dumped = json.dumps(current_dsl, indent=2, sort_keys=True, ensure_ascii=False)
+    dsl_block = truncate_for_prompt(dumped, max_chars=dsl_max_chars)
+    focus_block = ""
+    if focus_state_names:
+        joined = ", ".join(focus_state_names)
+        focus_block = f"User-focused DSL state names (States or OnFailure keys): {joined}\n\n"
+    return (
+        f"{focus_block}"
+        f"Current workflow DSL JSON (editor export; may include OnFailure):\n{dsl_block}\n\n"
+        f"Edit instruction:\n{instruction.strip()}\n\n"
+        "Emit one FULL intermediate workflow spec JSON that applies the instruction. "
+        "Preserve the behavior of parts the user did not ask to change. "
+        "Output JSON only — intermediate spec, not editor DSL."
+    )
+
+
 FailurePhase = Literal["spec_parse", "spec_validation", "dsl_validation", "compile"]
 
 
@@ -143,6 +167,7 @@ def build_repair_user_prompt(
     error_lines: list[str],
     previous_spec: dict[str, Any] | None,
     raw_assistant_excerpt: str | None,
+    anchor_context: str | None = None,
 ) -> str:
     """
     Repair prompt (spec §7): original request + invalid prior output + exact validator errors.
@@ -160,7 +185,15 @@ def build_repair_user_prompt(
         excerpt = truncate_for_prompt(raw_assistant_excerpt)
         prev_block = f"\nPrevious model output (excerpt, may be non-JSON or wrong shape):\n{excerpt}\n"
 
+    anchor_block = ""
+    if anchor_context and anchor_context.strip():
+        anchor_block = (
+            "Context: excerpt of the current editor DSL the user is editing (preserve intent of unchanged parts):\n"
+            f"{anchor_context.strip()}\n\n"
+        )
+
     return (
+        f"{anchor_block}"
         f"Original user request:\n{user_request.strip()}\n\n"
         f"Repair attempt {repair_number} of 2 after the initial generation.\n"
         f"Failure phase: {failure_phase}.\n\n"
