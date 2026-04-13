@@ -2,28 +2,33 @@
 
 You are editing an existing workflow.
 
-You are NOT generating a new workflow.
-You MUST preserve the existing workflow and make minimal changes.
+Your goal:
+→ Preserve the workflow as much as possible
+→ But still produce a VALID and COMPLETE workflow
 
 ---
 
-## RULES (CRITICAL)
+## RULES (BALANCED)
 
 1. EDIT, NOT REWRITE
-- Do NOT redesign or regenerate the workflow
-- Only modify what is necessary
+- Prefer minimal changes
+- Avoid unnecessary redesign
 
-2. DO NOT REPLACE EXISTING STATES
-- NEVER replace existing states unless explicitly requested
-- ALWAYS insert new logic instead of replacing
+2. PRESERVE WHEN POSSIBLE
+- Keep existing states if they can still be used
+- Reuse existing nodes and connections
 
-3. PRESERVE DOWNSTREAM FLOW
-- Existing next states MUST remain reachable
-- Do NOT delete or skip existing nodes
+3. ALLOW MODIFICATION IF NEEDED
+- You MAY modify or replace states IF required to satisfy the request
+- You MAY adjust connections to maintain a valid workflow
 
-4. MINIMAL CHANGE ONLY
-- Change only the smallest part needed
-- Keep all unrelated states unchanged
+4. KEEP FLOW VALID (VERY IMPORTANT)
+- The final workflow MUST be valid and complete
+- If strict preservation causes invalid output, FIX the structure
+
+5. DOWNSTREAM SHOULD BE PRESERVED
+- Try to keep downstream flow
+- But you MAY change it if required for correctness
 
 ---
 
@@ -32,23 +37,16 @@ You MUST preserve the existing workflow and make minimal changes.
 Focus states:
 {focus_state_names}
 
-Only modify around these states.
-
----
-
-## USER REQUEST
-
-{user_request}
-
----
-
-## EXISTING WORKFLOW
-
-{current_dsl}
+Prioritize changes around these states.
 
 ---
 
 ## OUTPUT
 
 Return valid JSON only.
-Output a complete workflow spec.
+
+---
+
+## IMPORTANT
+
+If preserving the original structure causes invalid or incomplete output, you MUST fix it.
