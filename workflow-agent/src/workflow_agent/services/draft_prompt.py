@@ -97,6 +97,156 @@ Constraints:
 - Output must be a single JSON object (no markdown code fences, no commentary).
 """
 
+# Replan-only system prefix (workflow-agent/docs/replan-prompt.md): rules through "---" before FOCUS REGION.
+_REPLAN_SYSTEM_STATIC_PREFIX = """# Replan Prompt (Workflow Editing)
+
+## SYSTEM ROLE
+
+You are an expert workflow editor.
+
+You are NOT generating a new workflow from scratch.
+You are EDITING an existing workflow.
+
+Your primary goal:
+→ Make the SMALLEST POSSIBLE CHANGE that satisfies the user request.
+
+You must preserve the existing workflow structure as much as possible.
+
+---
+
+## CRITICAL EDITING RULES
+
+### 1. PRESERVE EXISTING WORKFLOW
+- Keep all existing states unless explicitly instructed to remove them
+- Do NOT rename or replace existing states unless explicitly requested
+- Do NOT restructure unrelated parts of the workflow
+
+### 2. MINIMAL LOCAL CHANGE
+- Only modify the focus region (or inferred region)
+- Do not change nodes outside the affected region
+- Avoid large-scale rewrites
+
+### 3. INSERT, DO NOT REPLACE
+- When adding logic, INSERT it into the existing flow
+- Do NOT replace existing nodes with new ones unless explicitly requested
+
+### 4. PRESERVE DOWNSTREAM FLOW
+- Existing downstream states must remain connected
+- Do NOT delete or skip existing nodes
+- Continue using existing states whenever possible
+
+### 5. STRUCTURAL INTEGRITY (VERY IMPORTANT)
+- All control flow nodes MUST be complete and valid
+
+For example:
+- Condition MUST have:
+  - condition logic
+  - Then
+  - Else
+- Retry MUST have:
+  - MaxAttempts
+  - States
+  - StartAt
+- Parallel MUST have:
+  - valid branches
+
+❌ NEVER output incomplete or placeholder control-flow nodes
+
+### 6. NO FULL REWRITE
+- Do NOT redesign the workflow
+- Do NOT regenerate large portions unnecessarily
+- Do NOT simplify by removing nodes
+
+### 7. STATE NAME PRESERVATION
+- Reuse existing state names whenever possible
+- Do NOT introduce new names if existing ones can be reused
+
+---
+
+"""
+
+# Replan user template (same doc): sections after static system prefix; {current_dsl} is JSON text.
+_REPLAN_USER_TEMPLATE = """## FOCUS REGION
+
+Focus states (if provided):
+{focus_state_names}
+
+Rules:
+- Treat these states as the primary edit region
+- Changes should be centered around them
+- Avoid modifying unrelated states
+- Expand minimally from this region only if required
+
+---
+
+## USER REQUEST
+
+{user_request}
+
+---
+
+## EXISTING WORKFLOW (DSL)
+
+{current_dsl}
+
+---
+
+## EXPECTED BEHAVIOR
+
+You must:
+- Modify the workflow according to the user request
+- Preserve existing structure
+- Apply only minimal necessary changes
+- Keep all unrelated states intact
+
+---
+
+## EXAMPLE
+
+### Existing flow:
+1 → 2 → 3 → 4 → 5
+
+### User request:
+"After node 3, add a condition. If it fails, go to fallback node 4'. Otherwise continue to 4."
+
+### CORRECT behavior:
+- Keep 1, 2, 3, 4, 5 unchanged
+- Insert a condition after 3
+- Success path → existing 4
+- Failure path → new 4'
+- Continue flow to 5
+
+### INCORRECT behavior:
+- Replacing 4 with 4'
+- Deleting 4
+- Rewriting entire flow after 3
+- Dropping existing nodes
+
+---
+
+## OUTPUT REQUIREMENTS
+
+Return ONLY valid JSON.
+
+You must output:
+- a complete intermediate workflow spec
+- that can be compiled into a valid DSL
+
+---
+
+## SELF CHECK (DO NOT SKIP)
+
+Before producing output, verify:
+
+- Did I preserve all existing states unless explicitly told otherwise?
+- Did I avoid deleting or replacing nodes?
+- Did I make only minimal changes?
+- Did I keep downstream flow intact?
+- Are all control-flow nodes complete and valid?
+
+If any answer is "no", fix before output.
+"""
+
 _REPAIR_INSTRUCTION = """
 This round is a REPAIR attempt: you previously produced output that failed automated checks.
 You must emit one corrected FULL intermediate spec JSON object (same schema as above).
@@ -127,6 +277,29 @@ def build_draft_system_prompt(
     )
 
 
+def build_replan_system_prompt(
+    skill_context_block: str,
+    *,
+    repair_round: bool = False,
+    system_prompt_suffix: str | None = None,
+) -> str:
+    """System message for replan only: edit-in-place rules + same schema/skills tail as draft."""
+    extra = f"\n{_REPAIR_INSTRUCTION}\n" if repair_round else ""
+    tail = ""
+    if system_prompt_suffix and system_prompt_suffix.strip():
+        tail = "\n" + system_prompt_suffix.strip() + "\n"
+    return (
+        f"{_REPLAN_SYSTEM_STATIC_PREFIX}"
+        f"{_SCHEMA_PLACEHOLDER}\n"
+        f"{_FLOW_CONTROL_EDITOR_REFERENCE}\n"
+        f"{_CONSTRAINTS_PLACEHOLDER}\n"
+        f"{extra}"
+        "\n## Available skills\n"
+        f"{skill_context_block}\n"
+        f"{tail}"
+    )
+
+
 def build_draft_user_prompt(user_request: str) -> str:
     """User message: natural language intent only."""
     return f"User request:\n{user_request.strip()}\n\nGenerate the intermediate workflow JSON now."
@@ -139,21 +312,19 @@ def build_replan_user_prompt(
     focus_state_names: list[str] | None = None,
     dsl_max_chars: int = 56_000,
 ) -> str:
-    """First replan turn: current DSL + edit instruction; model emits full intermediate spec."""
+    """First replan turn: focus + request + current DSL (workflow-agent/docs/replan-prompt.md)."""
     dumped = json.dumps(current_dsl, indent=2, sort_keys=True, ensure_ascii=False)
     dsl_block = truncate_for_prompt(dumped, max_chars=dsl_max_chars)
-    focus_block = ""
     if focus_state_names:
-        joined = ", ".join(focus_state_names)
-        focus_block = f"User-focused DSL state names (States or OnFailure keys): {joined}\n\n"
-    return (
-        f"{focus_block}"
-        f"Current workflow DSL JSON (editor export; may include OnFailure):\n{dsl_block}\n\n"
-        f"Edit instruction:\n{instruction.strip()}\n\n"
-        "Emit one FULL intermediate workflow spec JSON that applies the instruction. "
-        "Preserve the behavior of parts the user did not ask to change. "
-        "Output JSON only — intermediate spec, not editor DSL."
-    )
+        focus_line = ", ".join(focus_state_names)
+    else:
+        focus_line = "(none)"
+    req = instruction.strip()
+    out = _REPLAN_USER_TEMPLATE
+    out = out.replace("{focus_state_names}", focus_line, 1)
+    out = out.replace("{user_request}", req, 1)
+    out = out.replace("{current_dsl}", dsl_block, 1)
+    return out
 
 
 FailurePhase = Literal["spec_parse", "spec_validation", "dsl_validation", "compile"]

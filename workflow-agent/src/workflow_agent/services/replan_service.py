@@ -31,8 +31,8 @@ from workflow_agent.services.draft_guidance import (
 from workflow_agent.services.draft_llm_url import resolve_llama_chat_base_url
 from workflow_agent.services.draft_prompt import (
     FailurePhase,
-    build_draft_system_prompt,
     build_repair_user_prompt,
+    build_replan_system_prompt,
     build_replan_user_prompt,
     truncate_for_prompt,
 )
@@ -162,7 +162,7 @@ def _run_replan_pipeline(
 
     for attempt in range(_MAX_GENERATION_ATTEMPTS):
         is_repair = attempt > 0
-        system_prompt = build_draft_system_prompt(
+        system_prompt = build_replan_system_prompt(
             skill_block,
             repair_round=is_repair,
             system_prompt_suffix=body.system_prompt_suffix,
