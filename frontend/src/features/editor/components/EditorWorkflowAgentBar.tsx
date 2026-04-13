@@ -58,6 +58,8 @@ export type EditorWorkflowAgentBarProps = {
   /** 비어 있으면 기본 placeholder 사용 */
   placeholder?: string;
   onGenerate: () => void;
+  onReplan: () => void;
+  replanExtraDisabled: boolean;
   /** true면 입력·Generate 비활성 (동기화 중, 에이전트 미준비 등) */
   disabled: boolean;
   disabledHint: string | null;
@@ -73,6 +75,8 @@ export function EditorWorkflowAgentBar({
   onPromptChange,
   placeholder = AGENT_DRAFT_PLACEHOLDER,
   onGenerate,
+  onReplan,
+  replanExtraDisabled,
   disabled,
   disabledHint,
   feedbackMessage = null
@@ -153,14 +157,28 @@ export function EditorWorkflowAgentBar({
               onChange={(event) => onPromptChange(event.target.value)}
               disabled={disabled}
             />
-            <Button
-              type="button"
-              className="h-10 w-full shrink-0 px-4 sm:w-auto"
-              onClick={onGenerate}
-              disabled={disabled || !prompt.trim()}
-            >
-              Generate
-            </Button>
+            <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+              <Button
+                type="button"
+                className="h-10 w-full px-4 sm:w-auto"
+                onClick={onGenerate}
+                disabled={disabled || !prompt.trim()}
+              >
+                Generate
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-10 w-full px-4 sm:w-auto"
+                onClick={onReplan}
+                disabled={disabled || !prompt.trim() || replanExtraDisabled}
+                title={
+                  replanExtraDisabled ? "Add nodes to the workflow before replanning." : undefined
+                }
+              >
+                Replan
+              </Button>
+            </div>
           </div>
           {feedbackMessage ? (
             <p className="text-xs text-red-700" role="alert">

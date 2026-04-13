@@ -1,6 +1,7 @@
 import type {
   WorkflowAgentDraftRequest,
   WorkflowAgentDraftResponse,
+  WorkflowAgentReplanRequest,
   WorkflowAgentModelActivateRequest,
   WorkflowAgentModelActivateResponse,
   WorkflowAgentSkillSyncRequest,
@@ -76,6 +77,7 @@ export type WorkflowAgentClient = {
     body: WorkflowAgentModelActivateRequest
   ): Promise<WorkflowAgentModelActivateResponse>;
   postDraft(body: WorkflowAgentDraftRequest): Promise<WorkflowAgentDraftResponse>;
+  postReplan(body: WorkflowAgentReplanRequest): Promise<WorkflowAgentDraftResponse>;
 };
 
 export type CreateWorkflowAgentClientOptions = {
@@ -173,6 +175,30 @@ export function createWorkflowAgentClient(
       const parsed = JSON.parse(text) as WorkflowAgentDraftResponse;
       if (typeof parsed !== "object" || parsed === null || typeof parsed.success !== "boolean") {
         throw new Error("Workflow Agent draft: invalid response shape");
+      }
+      return parsed;
+    },
+
+    async postReplan(body: WorkflowAgentReplanRequest): Promise<WorkflowAgentDraftResponse> {
+      const b = requireBase();
+      const url = joinBaseAndPath(b, agentPath("/replan"));
+      logDev("POST", url, {
+        model: body.model,
+        requestLength: body.request.length,
+        focusCount: body.focus_state_names?.length ?? 0
+      });
+      const response = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const text = await readBodyText(response);
+      if (!response.ok) {
+        throw new Error(formatHttpError(response.status, text));
+      }
+      const parsed = JSON.parse(text) as WorkflowAgentDraftResponse;
+      if (typeof parsed !== "object" || parsed === null || typeof parsed.success !== "boolean") {
+        throw new Error("Workflow Agent replan: invalid response shape");
       }
       return parsed;
     }

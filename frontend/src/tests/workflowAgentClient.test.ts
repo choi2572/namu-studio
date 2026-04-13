@@ -63,6 +63,42 @@ describe("createWorkflowAgentClient", () => {
     });
   });
 
+  it("postReplan calls /workflow-agent/replan with JSON body", async () => {
+    const body: WorkflowAgentDraftResponse = {
+      success: true,
+      model: "qwen",
+      spec: {},
+      dsl: { StartAt: "A", States: { A: { Type: "Succeed" } } },
+      warnings: [],
+      metadata: { request_id: "replan-x", skills_hash: "h" }
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify(body), { status: 200, statusText: "OK" }));
+    const client = createWorkflowAgentClient({
+      baseUrl: "https://wf.example",
+      fetchImpl: fetchMock as typeof fetch
+    });
+    const dsl = { StartAt: "A", States: { A: { Type: "Succeed" } } };
+    const out = await client.postReplan({
+      request: "add retry",
+      current_dsl: dsl,
+      focus_state_names: ["A"],
+      model: "qwen"
+    });
+    expect(out.success).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith("https://wf.example/workflow-agent/replan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request: "add retry",
+        current_dsl: dsl,
+        focus_state_names: ["A"],
+        model: "qwen"
+      })
+    });
+  });
+
   it("postDraft 는 HTTP 200 + success:false 본문을 예외 없이 반환한다", async () => {
     const body: WorkflowAgentDraftResponse = {
       success: false,

@@ -62,6 +62,15 @@ export type WorkflowAgentDraftRequest = {
   system_prompt_suffix?: string | null;
 };
 
+/** POST /workflow-agent/replan — response shape matches draft (WorkflowAgentDraftResponse). */
+export type WorkflowAgentReplanRequest = {
+  request: string;
+  current_dsl: Record<string, unknown>;
+  focus_state_names?: string[];
+  model?: string | null;
+  system_prompt_suffix?: string | null;
+};
+
 export type WorkflowAgentDraftGuidance = {
   basic?: string | null;
   suggestion?: string | null;

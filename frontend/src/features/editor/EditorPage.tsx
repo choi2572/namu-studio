@@ -131,7 +131,7 @@ import {
   reduceMainGraphNodesAfterDelete
 } from "./state/nodeMutations";
 import { useFailureGraphCanvasHandlers } from "./useFailureGraphCanvasHandlers";
-import { useEditorWorkflowAgent } from "./useEditorWorkflowAgent";
+import { useEditorWorkflowAgent, type WorkflowAgentReplanPayload } from "./useEditorWorkflowAgent";
 import { shouldConfirmWorkflowAgentImport } from "./workflowAgentDraftUi";
 
 type EditorPageProps = {
@@ -1614,13 +1614,27 @@ export function EditorPage({ workflowId }: EditorPageProps) {
     ]
   );
 
+  const getReplanPayload = useCallback((): WorkflowAgentReplanPayload => {
+    const { dsl_json } = buildCurrentDraftPayload();
+    const focus_state_names =
+      selectedNode != null
+        ? (() => {
+            const name = stateNameMap.get(selectedNode);
+            return name ? [name] : [];
+          })()
+        : [];
+    return { dsl: dsl_json as Record<string, unknown>, focus_state_names };
+  }, [nodes, validEdges, skillsetMap, failureGraph, canvasBase, zoom, selectedNode, stateNameMap]);
+
   const editorWorkflowAgent = useEditorWorkflowAgent({
     workflowId,
     skillsetsResponse: skillsetsResponse ?? undefined,
     queryClient,
     workflowNameForDraftFile: workflowName.trim() || "AI draft",
     clearAgentDraftUiRef,
-    onApplyGeneratedDsl: applyGeneratedDslFromAgent
+    onApplyGeneratedDsl: applyGeneratedDslFromAgent,
+    getReplanPayload,
+    replanEnabled: nodes.length > 0
   });
 
   const handleEditorExport = () => {

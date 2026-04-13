@@ -11,6 +11,7 @@ export type {
   WorkflowAgentDraftMetadata,
   WorkflowAgentDraftRequest,
   WorkflowAgentDraftResponse,
+  WorkflowAgentReplanRequest,
   WorkflowAgentDraftSuccessResponse,
   WorkflowAgentModelActivateRequest,
   WorkflowAgentModelActivateResponse,

@@ -15,6 +15,11 @@ import { getWorkflowAgentDraftFailureHints } from "./workflowAgentDraftUi";
 import { pollWorkflowAgentUntilModelReady } from "./workflowAgentModelPoll";
 import { useWorkflowAgentEditorSession } from "./useWorkflowAgentEditorSession";
 
+export type WorkflowAgentReplanPayload = {
+  dsl: Record<string, unknown>;
+  focus_state_names: string[];
+};
+
 export type UseEditorWorkflowAgentParams = {
   workflowId: string;
   skillsetsResponse: SkillsetsResponse | undefined;
@@ -23,6 +28,8 @@ export type UseEditorWorkflowAgentParams = {
   /** commitImportedDsl에서 피드백 UI 초기화 */
   clearAgentDraftUiRef: MutableRefObject<(() => void) | null>;
   onApplyGeneratedDsl: (pending: { dsl: Record<string, unknown>; fileBaseName: string }) => void;
+  getReplanPayload: () => WorkflowAgentReplanPayload;
+  replanEnabled: boolean;
 };
 
 export type UseEditorWorkflowAgentResult = {
@@ -36,6 +43,8 @@ export type UseEditorWorkflowAgentResult = {
     onPromptChange: (value: string) => void;
     placeholder: string;
     onGenerate: () => void;
+    onReplan: () => void;
+    replanExtraDisabled: boolean;
     disabled: boolean;
     disabledHint: string | null;
     feedbackMessage: string | null;
@@ -49,7 +58,9 @@ export function useEditorWorkflowAgent({
   queryClient,
   workflowNameForDraftFile,
   clearAgentDraftUiRef,
-  onApplyGeneratedDsl
+  onApplyGeneratedDsl,
+  getReplanPayload,
+  replanEnabled
 }: UseEditorWorkflowAgentParams): UseEditorWorkflowAgentResult {
   const session = useWorkflowAgentEditorSession({
     workflowId,
@@ -146,6 +157,73 @@ export function useEditorWorkflowAgent({
     ]
   );
 
+  const runReplan = useCallback(async () => {
+    const text = agentDraftPrompt.trim();
+    if (!text || agentGenerating) return;
+    if (!skillsetsResponse || !draftUiCoreReady || !replanEnabled) return;
+
+    setAgentDraftHelperText(null);
+    setAgentGenerating(true);
+    try {
+      await modelActivationChainRef.current;
+
+      let st: WorkflowAgentStatusResponse = await workflowAgentApi.getStatus();
+      queryClient.setQueryData(statusQueryKey, st);
+
+      const targetModel = (selectedAgentModel || st.active_model).trim();
+      if (!targetModel) {
+        throw new Error("모델을 선택해 주세요.");
+      }
+
+      if (targetModel !== st.active_model || !st.model_loaded) {
+        await enqueueModelActivation(targetModel);
+        st = await workflowAgentApi.getStatus();
+        queryClient.setQueryData(statusQueryKey, st);
+        if (targetModel !== st.active_model || !st.model_loaded) {
+          throw new Error("모델 전환이 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+        }
+      }
+
+      const { dsl, focus_state_names } = getReplanPayload();
+      const res = await workflowAgentApi.postReplan({
+        request: text,
+        current_dsl: dsl,
+        focus_state_names,
+        model: targetModel
+      });
+      if (!res.success) {
+        const hints = getWorkflowAgentDraftFailureHints(res);
+        setAgentDraftHelperText(hints.feedbackMessage);
+        setAgentInputPlaceholder(hints.placeholder);
+        return;
+      }
+
+      onApplyGeneratedDsl({
+        dsl: res.dsl as Record<string, unknown>,
+        fileBaseName: workflowNameForDraftFile
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "요청에 실패했습니다.";
+      setAgentDraftHelperText(msg);
+      setAgentInputPlaceholder(msg);
+    } finally {
+      setAgentGenerating(false);
+    }
+  }, [
+    agentDraftPrompt,
+    agentGenerating,
+    skillsetsResponse,
+    draftUiCoreReady,
+    replanEnabled,
+    selectedAgentModel,
+    queryClient,
+    statusQueryKey,
+    workflowNameForDraftFile,
+    onApplyGeneratedDsl,
+    enqueueModelActivation,
+    getReplanPayload
+  ]);
+
   const runGenerate = useCallback(async () => {
     const text = agentDraftPrompt.trim();
     if (!text || agentGenerating) return;
@@ -232,6 +310,12 @@ export function useEditorWorkflowAgent({
         /* 오류는 상태로 반영됨 */
       });
     },
+    onReplan: () => {
+      runReplan().catch(() => {
+        /* 오류는 상태로 반영됨 */
+      });
+    },
+    replanExtraDisabled: !replanEnabled,
     disabled: !workflowAgentBarInteractive,
     disabledHint: workflowAgentBarInteractive ? null : workflowAgentBarHint,
     feedbackMessage: agentDraftHelperText

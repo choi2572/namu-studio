@@ -21,6 +21,7 @@ export type {
   WorkflowAgentClient,
   WorkflowAgentDraftRequest,
   WorkflowAgentDraftResponse,
+  WorkflowAgentReplanRequest,
   WorkflowAgentSkillSyncRequest,
   WorkflowAgentStatusResponse
 } from "@/api/workflowAgent";
